@@ -1,0 +1,205 @@
+# Non-Functional Requirements for azure-fullstack pattern
+# Canonical source: https://github.com/hoopdad/standards/blob/main/nfr.yml
+#
+# These NFRs apply to all projects using the azure-fullstack pattern.
+# Override or extend in your project's init.yml if needed.
+# See also: external-user-pattern.md for detailed Entra External ID auth architecture.
+
+---
+security:
+  authentication:
+    - "All user-facing endpoints require Entra External ID (CIAM) authentication"
+    - "Use MSAL.js (@azure/msal-browser) in the SPA; validate JWT tokens server-side"
+    - "Token validation must check issuer, audience, expiry, not-before (nbf), and scopes on every API request"
+    - "Use managed identities for all service-to-service communication — no secrets in code"
+    - "API must reject requests with missing, expired, or malformed tokens with 401"
+
+  secrets:
+    - "Never commit secrets, connection strings, or keys to source control"
+    - "Store all secrets in Azure Key Vault; access via managed identity only"
+    - "Use RBAC (Key Vault Secrets User) not access policies"
+    - "Rotate secrets automatically where supported"
+
+  network:
+    - "All resources on private VNet with no public endpoints except designated ingress"
+    - "Use private endpoints for Cosmos DB, Key Vault, ACR, and Storage"
+    - "Container Apps Environment must be VNet-integrated (internal mode)"
+    - "Deploy an open-source WAF (e.g., ModSecurity + Caddy/Nginx) on the ingress subnet"
+    - "Configure WAF per OWASP Core Rule Set (CRS) — block OWASP Top 10 by default"
+    - "NSGs on every subnet; deny all inbound by default, allow only required flows"
+    - "DNS resolution via Azure Private DNS Zones for all private-endpoint resources"
+
+  scanning:
+    - "Run Semgrep (--config auto) on every commit via pre-commit for all languages"
+    - "Run Bandit on all Python code (severity medium+, confidence medium+)"
+    - "Run Checkov on all Terraform code (quiet mode, terraform framework)"
+    - "Run ESLint with eslint-plugin-security on all TypeScript/JavaScript"
+    - "Scan Docker images with Trivy before push — fail on HIGH and CRITICAL severity"
+    - "Dependabot enabled on all repos for security updates"
+
+  owasp:
+    - "Validate and sanitize all user inputs at API boundary"
+    - "Use parameterized queries (Cosmos DB SDK handles this) — no string concatenation"
+    - "Set security headers: Content-Security-Policy, X-Frame-Options, HSTS"
+    - "Rate limit all public-facing endpoints (slowapi or equivalent)"
+    - "Log authentication failures for monitoring and alerting"
+
+networking:
+  topology:
+    - "Single VNet with dedicated subnets: ingress, container-apps, private-endpoints, reserved"
+    - "Address space: /16 minimum for growth; subnet sizing per Azure recommendations"
+    - "Subnet delegation for Microsoft.App/environments on the container-apps subnet"
+
+  dns:
+    - "Private DNS zones for: documents.azure.com, vaultcore.azure.net, azurecr.io, blob.core.windows.net"
+    - "All private DNS zones linked to the VNet"
+
+  egress:
+    - "Container Apps use default Azure egress (no NAT gateway unless cost justified)"
+    - "Restrict outbound to known endpoints where feasible via NSG rules"
+
+cost:
+  general:
+    - "Prefer consumption/serverless pricing: Cosmos DB serverless, ACA consumption plan"
+    - "Use Basic SKU for ACR in dev (upgrade to Premium when private endpoints or content trust needed)"
+    - "Use Standard SKU for Key Vault"
+    - "Right-size Container App resources: start with 0.25 vCPU / 0.5 Gi memory"
+    - "Enable scale-to-zero on all Container Apps (min replicas: 0 for non-prod)"
+    - "No continuous backups on Cosmos unless explicitly required (periodic is default)"
+    - "Purge protection disabled in dev only (soft delete 7 days) — never disable on vaults with production or shared secrets"
+
+  dev_environments:
+    - "Use free tiers wherever available for dev/test"
+    - "Report estimated monthly cost before provisioning any paid resource"
+    - "Single region only — no geo-replication unless explicitly required"
+
+  monitoring:
+    - "Use Azure Monitor with Log Analytics workspace (pay-per-GB ingestion)"
+    - "Set daily cap on Log Analytics ingestion to prevent cost surprises"
+    - "Alerts only on actionable conditions — avoid alert fatigue"
+
+devops:
+  ci:
+    - "All CI runs on self-hosted GitHub Actions runners — never GitHub-hosted"
+    - "Self-hosted runners must be ephemeral (fresh VM/container per job) to prevent cross-job credential leakage"
+    - "CI triggers on push to main and all pull requests"
+    - "CI must pass before CD can execute (workflow_run dependency)"
+    - "CI jobs: lint, security scan, unit tests (all must pass)"
+    - "Fail fast: lint and format checks run before slower test suites"
+
+  cd:
+    - "CD triggers only after CI succeeds on main branch"
+    - "Use GitHub OIDC federation for Azure authentication — no stored credentials"
+    - "Build and push container images to ACR with both :sha and :latest tags"
+    - "Force-deploy latest image to all running Container App revisions"
+    - "Terraform changes applied via separate infra CD pipeline with plan + apply"
+
+  branching:
+    - "Trunk-based development: main is the only long-lived branch"
+    - "Feature branches merge via PR with required CI pass"
+    - "Submodule references updated in parent repo after each child push"
+
+  containers:
+    - "All services deploy as Docker containers"
+    - "Multi-stage Dockerfiles: builder stage + minimal runtime stage"
+    - "Run as non-root user in production containers"
+    - "Minimum 1 running instance per service in production"
+
+pre_commit:
+  python:
+    - "ruff (lint + format) with --fix and --unsafe-fixes"
+    - "bandit (security) excluding tests directory"
+    - "semgrep (SAST) with auto config"
+
+  typescript:
+    - "eslint with security plugin (--fix)"
+    - "prettier for formatting"
+    - "semgrep (SAST) excluding node_modules and dist"
+
+  terraform:
+    - "terraform_fmt (canonical formatting)"
+    - "terraform_validate (syntax and provider validation)"
+    - "checkov (security posture, quiet mode, soft-fail for advisory)"
+    - "semgrep (SAST) for HCL files"
+
+  all:
+    - "pre-commit must be installed and configured in every repo"
+    - "All hooks run automatically on git commit"
+    - "CI must also run the same checks (defense in depth)"
+
+formatting:
+  python:
+    - "Ruff formatter (replaces Black) — project default line length"
+    - "Ruff linter for import sorting (isort-compatible rules)"
+    - "Type hints required on all public functions"
+
+  typescript:
+    - "Prettier for all TS/JS/CSS/JSON/YAML files"
+    - "ESLint with typescript-eslint for static analysis"
+    - "Strict TypeScript (strict: true in tsconfig)"
+
+  terraform:
+    - "terraform fmt (canonical HCL formatting)"
+    - "One module per logical resource group"
+    - "Naming convention: {project}-{env}-{resource}"
+    - "Common tags on all resources: project, environment, managed_by, repository"
+
+  general:
+    - "No unformatted code reaches the repository"
+    - "Formatters run via pre-commit — formatting is automatic, not manual"
+
+testing:
+  unit:
+    - "Minimum 80% code coverage target for API and agent services"
+    - "pytest for all Python services"
+    - "vitest for React frontend"
+    - "Tests run in CI on every push and PR"
+
+  integration:
+    - "Playwright for end-to-end browser testing of the SPA"
+    - "Integration tests validate full request flow (auth → API → data)"
+    - "Use test containers or mocks for external service dependencies"
+
+  regression:
+    - "Every reported bug must have a regression test before fix is merged"
+    - "Regression tests live alongside unit tests in the relevant repo"
+
+  infrastructure:
+    - "terraform validate on every change"
+    - "Checkov for security policy compliance"
+    - "terraform plan in PR — no blind applies"
+
+architecture:
+  data:
+    - "Cosmos DB NoSQL (serverless) as primary data store"
+    - "Session consistency level (good balance of consistency vs performance)"
+    - "Partition key design must support query patterns without cross-partition queries"
+    - "Azure Blob Storage for file/document storage"
+
+  compute:
+    - "Azure Container Apps for all services (API, agent, web)"
+    - "ACR for container image registry"
+    - "AcrPull role assigned to Container App managed identity"
+    - "Ingress configured per service: external for web, internal for API/agent"
+
+  identity:
+    - "Entra External ID (CIAM) for end-user authentication — see external-user-pattern.md"
+    - "SPA registered as public client with redirect URIs"
+    - "API registered with custom scope for delegated access"
+    - "Self-service signup via Entra-hosted user flows (no custom email collection)"
+    - "MSAL.js with PKCE auth flow; tokens in sessionStorage (not localStorage)"
+    - "Profile creation on first authenticated visit (sub claim as user ID, not email)"
+    - "OIDC federation for GitHub Actions → Azure (no stored secrets)"
+    - "User-assigned managed identity for Container Apps"
+
+  observability:
+    - "Structured JSON logging on all services"
+    - "Correlation IDs propagated across service boundaries"
+    - "OpenTelemetry for distributed tracing where supported"
+    - "Health check endpoints on all services (/health or /healthz)"
+
+  resilience:
+    - "Retry with exponential backoff on transient failures (Cosmos, external APIs)"
+    - "Circuit breaker pattern for downstream service calls"
+    - "Graceful degradation: agent unavailability should not break core API"
+    - "Container App health probes (liveness + readiness)"

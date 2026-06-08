@@ -1,0 +1,119 @@
+# Maintaining the Lean Agent Framework
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Bump version manually | `scripts/bump-version.sh [major\|minor\|patch]` |
+| Test init on a new project | `cd ./scratch/test && ../enterprise-copilot-fleet-controller/scripts/init.sh --config init.yml` |
+| Test upgrade path | `scripts/upgrade.sh --dry-run` (from a project dir) |
+| Run integration tests | `bash tests/test-init.sh` |
+| Run usage metrics scenarios | `bash tests/test-usage-metrics-scenarios.sh` |
+| Syntax-check scripts | `bash -n scripts/init.sh && bash -n scripts/upgrade.sh` |
+| Verify tools import | `for f in tools/*/server.py; do python3 -c "import importlib.util; s=importlib.util.spec_from_file_location('m','$f'); m=importlib.util.module_from_spec(s)"; done` |
+
+## Commit Conventions
+
+Use **conventional commits** — the GitHub Action auto-bumps versions on merge to `main`:
+
+| Prefix | Version Bump | Example |
+|--------|-------------|---------|
+| `feat:` | minor (1.0→1.1) | `feat: add new MCP tool for X` |
+| `fix:` / `refactor:` / `perf:` | patch (1.0.0→1.0.1) | `fix: router prefix detection` |
+| `feat!:` or body has `BREAKING CHANGE:` | major (1→2) | `feat!: restructure to .github/agents/` |
+| `chore:` / `docs:` | none | `docs: update README examples` |
+
+## When You Change Generated Files
+
+If your change affects what `init.sh` generates into projects (.github/agents/*.agent.md, .copilot/instructions.md, mcp.json, directory structure):
+
+1. **Bump at least MINOR** version
+2. **Write a migration** in `migrations/v{OLD}_to_v{NEW}.sh`
+3. Migration rules:
+   - Must be idempotent (check before applying)
+   - Must be deterministic (bash only, no LLM calls)
+   - Must exit 0 on success
+   - Receives `$PROJECT_DIR` and `$FRAMEWORK_DIR` env vars
+4. **Test the upgrade path**: create a fake v(old) project, run `scripts/upgrade.sh`
+
+## When You Add/Change MCP Tools
+
+1. Update/create `tools/<name>/server.py`
+2. Update the `mcp.json` generation block in `scripts/init-core.sh`
+3. Update the `tools_for_role()` function in `scripts/init-core.sh` if the tool should be scoped
+4. Update `tools/README.md`
+5. If adding a new tool, this is a **MINOR** bump (existing projects need migration to get new mcp.json entry)
+
+## When You Add a New Template Section
+
+1. Edit the `generate_agent_md()` function or `instructions.md` heredoc in `scripts/init-core.sh`
+2. If it changes structure, write a migration
+3. Test with `bash tests/test-init.sh`
+
+## Release Checklist
+
+- [ ] All changes use conventional commit prefixes
+- [ ] Migrations written for any generated-file changes
+- [ ] `bash tests/test-init.sh` passes
+- [ ] Tools import cleanly
+- [ ] README updated if user-facing behavior changed
+- [ ] PR merged to main → Action auto-bumps + tags
+
+## Architecture Reminders (v2.9.0)
+
+- **Philosophy**: Parent orchestrator (.copilot/instructions.md) + child-repo specialists/critics (<child>/.github/agents/*.agent.md) with work queues (`work/todo → ready-for-review → done`)
+- **Agent generation**: Deterministic templates for empty repos, LLM + reasonableness check for existing code
+- **Tools principle**: Tools handle mechanics, LLM handles decisions. Scoped per role via `tools:` frontmatter.
+- **Version chain**: `VERSION` file → git tag → `.framework-version` in projects → stamps in generated files
+- **Upgrade path**: Always sequential (v1→v2→v3), never skip versions
+- **fresh_start**: Only deletes framework files, never project source. Previews + confirms.
+
+## File Map
+
+```
+enterprise-copilot-fleet-controller/
+├── VERSION                          ← semver source of truth
+├── README.md                        ← user-facing docs
+├── MAINTAINING.md                   ← this file
+├── .github/workflows/
+│   └── auto-version.yml             ← bumps version on merge to main
+├── scripts/
+│   ├── init.sh                      ← shell wrapper entrypoint
+│   ├── init.py                      ← Python entrypoint
+│   ├── init-core.sh                 ← core generator (deterministic templates + LLM for existing code)
+│   ├── upgrade.sh                   ← sequential migration runner
+│   └── bump-version.sh              ← manual version bump helper
+├── migrations/
+│   ├── README.md                    ← migration writing guide
+│   ├── v0.0.0_to_v1.0.0.sh
+│   ├── v1.0.0_to_v1.1.0.sh
+│   ├── v1.1.0_to_v1.2.0.sh
+│   ├── v1.2.0_to_v1.3.0.sh
+│   ├── v1.3.0_to_v2.0.0.sh         ← .agents/ → .github/agents/ migration
+│   ├── v2.0.0_to_v2.1.0.sh         ← MCP metadata/version refresh migration
+│   ├── v2.1.0_to_v2.2.0.sh         ← usage metrics schema guidance + metadata refresh
+│   ├── v2.5.0_to_v2.6.0.sh         ← optional feature guidance refresh
+│   ├── v2.6.0_to_v2.7.0.sh         ← repo-index migration + MCP tool refresh
+│   ├── v2.7.0_to_v2.8.0.sh         ← local-only guidance + MCP metadata refresh
+│   └── v2.8.0_to_v2.9.0.sh         ← child workflow queue/agent migration
+├── tools/
+│   ├── README.md                    ← tool documentation
+│   ├── requirements.txt             ← mcp, pyyaml, httpx
+│   ├── repo-index/server.py
+│   ├── contract-compliance/server.py
+│   ├── scaffold-generator/server.py
+│   ├── azure-inspector/server.py
+│   ├── ci-monitor/server.py
+│   ├── deploy-verifier/server.py
+│   ├── security-scanner/server.py
+│   └── usage-tracker/server.py
+├── patterns/
+│   └── azure-fullstack/             ← predefined pattern with children + stack + NFR
+├── tests/
+│   ├── test-init.sh                 ← integration tests for init.sh
+│   ├── test-mcp-tools.sh            ← MCP tool tests
+│   └── test-usage-metrics-scenarios.sh ← init + upgrade usage schema scenarios
+└── templates/
+    ├── init-example.yml             ← example config for new projects
+    └── init-pattern-example.yml     ← example config using patterns
+```

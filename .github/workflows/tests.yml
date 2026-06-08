@@ -1,0 +1,38 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  integration-tests:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check all bash scripts
+        run: |
+          find scripts/ -name "*.sh" -exec bash -n {} \;
+          find migrations/ -name "*.sh" -exec bash -n {} \;
+          find tests/ -name "*.sh" -exec bash -n {} \;
+
+      - name: Run init/upgrade integration tests
+        run: bash tests/test-init.sh
+
+  mcp-tool-tests:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r tools/requirements.txt
+
+      - name: Run MCP tool smoke tests
+        run: bash tests/test-mcp-tools.sh

@@ -1,0 +1,34 @@
+# Example init.yml using a pattern
+# Run: ../enterprise-copilot-fleet-controller/scripts/init.sh --config init.yml
+#
+# The "pattern" field replaces explicit "children" — it auto-generates
+# repos named {project}-web, {project}-api, {project}-agent, {project}-infra
+# with the correct roles, stacks, and NFRs for the chosen pattern.
+# Child local paths default to ../{child-name} and are written to .repo-index.yml.
+
+project:
+  name: "my-app"
+  pattern: "azure-fullstack"
+  github_owner: "your-org"
+  visibility: "private"
+  create_repos: true
+  # fresh_start: true  # Remove framework files (.agents, .copilot, etc.) and re-init
+  # Optional MCP tool setup (default: false/off)
+  # enable_mcp: true
+
+  # Application description — used as the initial Copilot prompt if
+  # initial_prompt is not set. Describe WHAT your app does, not HOW.
+  app_description: |
+    A platform that helps teams document and share solutions to common problems.
+    Users authenticate via Microsoft Entra, submit experiences as structured entries,
+    and can search or browse the knowledge base. An AI agent suggests relevant
+    past experiences when a new problem is submitted.
+
+  # Override the pattern's default NFRs (optional):
+  # nfr: "https://raw.githubusercontent.com/hoopdad/standards/main/nfr.yml"
+  # nfr: "./local-nfr.yml"
+  # nfr: |
+  #   - Custom inline requirement
+
+  # Or provide an explicit initial_prompt instead of app_description:
+  # initial_prompt: "Set up the project with a basic REST API..."

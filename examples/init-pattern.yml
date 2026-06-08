@@ -1,0 +1,55 @@
+# Example init.yml using a pattern
+# Run: ../enterprise-copilot-fleet-controller/scripts/init.sh --config init.yml
+#
+# The "pattern" field replaces explicit "children" — it auto-generates
+# repos named {project}-web, {project}-api, {project}-agent, {project}-infra
+# with the correct roles, stacks, and NFRs for the chosen pattern.
+# Child local paths default to ../{child-name} and are written to .repo-index.yml.
+
+project:
+  name: "laf-track"
+  pattern: "azure-fullstack"
+  github_owner: "hoopdad"
+  visibility: "local"
+  create_repos: true
+  # fresh_start: true  # Remove framework files (.agents, .copilot, etc.) and re-init
+  # Optional MCP tool setup (default: false/off)
+  enable_mcp: true
+
+  # Application description — used as the initial Copilot prompt if
+  # initial_prompt is not set. Describe WHAT your app does, not HOW.
+  app_description: |
+    A platform that helps teams document and share solutions to common problems.
+    Users authenticate via Microsoft Entra, submit experiences as structured entries,
+    and can search or browse the knowledge base. An interactive AI agent suggests relevant
+    past experiences when a new problem is submitted.
+
+  initial_prompt: |
+    Create the first end-to-end user flows for this system across Azure 
+    infrastructure, web application firewall, user interface, api, and agent,
+    following pattern guidelines, requirements, and best practices. The
+    first specific user stories are complete when all system components are
+    stored in the local git repos, functional and testable.
+    1. Microsoft Entra sign-in/sign-up and sign-out. Assume user is already 
+    in the tenant but needs a profile on first login.
+    2. User submits a new experience as a structured entry.
+    3. User searches and browses the knowledge base.
+    4. User initiates an innovation session, an AI chat that is used to correlate new 
+    problems with existing experiences using AI.
+    5. User asks the system to provide recommendations based on the user's input 
+    and the existing knowledge base.
+
+    Create the minimal contracts, requirements, and scaffolding needed to make those 
+    flows testable and repeatable across the child repos.
+    Spawn specialist agents to create their initial artifacts.
+    Specialist agents build using TDD, write files to disk, run linting, 
+    and perform other automated tasks.
+
+  # Override the pattern's default NFRs (optional):
+  # nfr: "https://raw.githubusercontent.com/hoopdad/standards/main/nfr.yml"
+  # nfr: "./local-nfr.yml"
+  # nfr: |
+  #   - Custom inline requirement
+
+  # Or provide an explicit initial_prompt instead of app_description:
+  # initial_prompt: "Set up the project with a basic REST API..."

@@ -1,0 +1,4 @@
+__pycache__/
+
+# Usage metrics (auto-generated, local only)
+.metrics/usage.jsonl

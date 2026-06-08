@@ -1,0 +1,44 @@
+# azure-fullstack pattern definition
+# Stack: Web (React/TS) + API (Python/FastAPI) + Agent (Python/MAF) + Infra (Terraform/Azure)
+# Platform: Azure Container Apps, Cosmos DB, Entra External ID, GitHub Actions
+
+name: "azure-fullstack"
+description: |
+  Full-stack Azure SaaS pattern with four repos: a React/TypeScript SPA frontend,
+  a Python/FastAPI REST API, a Python AI agent service, and Terraform infrastructure.
+  Deploys to Azure Container Apps with Cosmos DB for data, Entra External ID for
+  authentication, and GitHub Actions CI/CD pipelines on self-hosted runners.
+
+children:
+  - suffix: "waf"
+    role: "waf"
+    description: "Web Application Firewall. Public IP, filters with OWASP CRS and routes to web, api, and agent"
+    stack: "container / nginx"
+  
+  - suffix: "web"
+    role: "frontend"
+    description: "React/TypeScript SPA with MSAL auth"
+    stack: "TypeScript / React 18 / Vite / Vitest / Playwright"
+
+  - suffix: "api"
+    role: "backend"
+    description: "Python/FastAPI REST API with Azure SDK"
+    stack: "Python 3.12 / FastAPI / pytest / Cosmos DB SDK"
+
+  - suffix: "agent"
+    role: "agent"
+    description: "Python AI agent service using Microsoft Agent Framework that uses a Foundry Client for analytical or decision-making functions. See https://github.com/microsoft/agent-framework"
+    stack: "Python 3.11 / Microsoft Agent Framework with agent_framework.Agent and agent_framework.foundry.FoundryChatClient/ pytest"
+
+  - suffix: "infra"
+    role: "infra"
+    description: "Terraform IaC for Azure (ACA, Cosmos, Entra, Foundry, GPT-4.1-mini or higher equivalent, networking)"
+    stack: "Terraform / azurerm provider / Azure Verified Modules"
+
+nfr_url: "https://raw.githubusercontent.com/hoopdad/standards/main/nfr.yml"
+
+docs:
+  - name: "external-user-pattern"
+    description: "Architecture for self-service signup with Entra External ID (CIAM)"
+    url: "https://raw.githubusercontent.com/hoopdad/standards/main/external-user-pattern.md"
+    local_path: "standards/external-user-pattern.md"

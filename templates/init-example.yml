@@ -1,0 +1,61 @@
+# Example init.yml — copy and customize for your project
+# Run: ../enterprise-copilot-fleet-controller/scripts/init.sh --config init.yml
+
+project:
+  name: "my-app"
+  description: "Brief description of what this system does"
+  # Set true to create GitHub repos (parent + children) if they don't exist
+  create_repos: false
+  # "public" or "private" (default: private)
+  visibility: "private"
+  # If true and repos already have framework files, remove them and re-init
+  # Only removes .github/agents/, .copilot/, .contracts/, .requirements/, .decisions/, .repo-index.yml (and legacy work/)
+  # Project source code is NEVER deleted
+  # fresh_start: true
+  # Optional MCP tool setup (default: false/off)
+  # Set true to generate .copilot/mcp.json and enable MCP tool scoping in agent files
+  # enable_mcp: false
+  # GitHub org or username for new repos
+  github_owner: "your-org"
+  # Use a predefined pattern instead of listing children manually (optional)
+  # Available patterns: azure-fullstack
+  # pattern: "azure-fullstack"
+  # Where to create the parent project (optional — defaults to current directory)
+  # parent_dir: "/home/user/projects/my-app"
+  # Initial prompt to kick off the first build via Copilot CLI (optional)
+  initial_prompt: "Set up the project structure with a basic REST API in the backend and a React app in the frontend. Create initial CI/CD pipelines for both."
+  # Non-functional requirements — included with the initial prompt to Copilot CLI
+  # Can be: literal text, a local file path, or a URL
+  nfr: |
+    - Response time: < 200ms p95 for all API endpoints
+    - Availability: 99.9% uptime target
+    - Security: OWASP Top 10 compliance, no secrets in code
+    - Testing: minimum 80% code coverage
+    - Logging: structured JSON logs, correlation IDs on all requests
+
+# Optional generated artifacts (all default to false)
+optional_features:
+  mobile_ci_cd: false          # Generate mobile CI/CD templates in .copilot/workflow-templates/
+  runner_self_heal: false      # Add prerequisite self-healing blocks (requires mobile_ci_cd=true)
+  semantic_release: false      # Add semantic release job in CI template (requires mobile_ci_cd=true)
+  onboarding_docs: false       # Generate .copilot/docs/developer-onboarding.md
+  portability_blueprints: false # Generate .copilot/docs/portability-blueprint.md
+
+children:
+  - url: "https://github.com/your-org/my-app-api.git"
+    # Optional local path for this child repo; defaults to ../<name>
+    # local_path: "../my-app-api"
+    role: "backend"       # backend | frontend | infra | agent | worker
+    description: "REST API service"
+
+  - name: "web-client"    # optional: overrides name derived from URL
+    url: "https://github.com/your-org/my-app-web.git"
+    local_path: "../my-app-web"
+    role: "frontend"
+    description: "React frontend"
+    # visibility: "public"
+
+  - url: "https://github.com/your-org/my-app-infra.git"
+    local_path: "../my-app-infra"
+    role: "infra"
+    description: "Infrastructure as code"
