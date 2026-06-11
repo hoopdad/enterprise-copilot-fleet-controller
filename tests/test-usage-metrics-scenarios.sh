@@ -200,43 +200,47 @@ EOF
     echo "  FAIL: upgrade scenario did not move project to framework v$LATEST_VERSION"
     return 1
   fi
-  if ! grep -q "\"_framework_version\": \"$LATEST_VERSION\"" "$project_dir/.copilot/mcp.json"; then
+  if ! grep -q "\"_framework_version\": \"$LATEST_VERSION\"" "$project_dir/.github/mcp.json"; then
     echo "  FAIL: upgrade scenario did not refresh MCP framework metadata to v$LATEST_VERSION"
     return 1
   fi
-  if ! grep -q '"azure-resource-status"' "$project_dir/.copilot/mcp.json"; then
+  if ! grep -q '"azure-resource-status"' "$project_dir/.github/mcp.json"; then
     echo "  FAIL: upgrade scenario did not add azure-resource-status tool"
     return 1
   fi
-  if ! grep -q '"lint-local"' "$project_dir/.copilot/mcp.json"; then
+  if ! grep -q '"lint-local"' "$project_dir/.github/mcp.json"; then
     echo "  FAIL: upgrade scenario did not add lint-local tool"
     return 1
   fi
-  if ! grep -q '"terraform-local"' "$project_dir/.copilot/mcp.json"; then
+  if ! grep -q '"terraform-local"' "$project_dir/.github/mcp.json"; then
     echo "  FAIL: upgrade scenario did not add terraform-local tool"
     return 1
   fi
-  if ! grep -q 'usage quality/anomalies' "$project_dir/.copilot/mcp.json"; then
+  if ! grep -q 'usage quality/anomalies' "$project_dir/.github/mcp.json"; then
     echo "  FAIL: upgrade scenario did not refresh usage-tracker guidance"
     return 1
   fi
-  if ! grep -q '"repo-index"' "$project_dir/.copilot/mcp.json"; then
+  if ! grep -q '"repo-index"' "$project_dir/.github/mcp.json"; then
     echo "  FAIL: upgrade scenario did not add repo-index MCP tool"
+    return 1
+  fi
+  if ! grep -q '"child-agent-runner"' "$project_dir/.github/mcp.json"; then
+    echo "  FAIL: upgrade scenario did not add child-agent-runner MCP tool"
     return 1
   fi
   if [[ ! -f "$project_dir/.repo-index.yml" ]]; then
     echo "  FAIL: upgrade scenario did not create .repo-index.yml"
     return 1
   fi
-  if ! grep -q '## Usage Metrics Schema (v2.5.0+)' "$project_dir/.copilot/instructions.md"; then
+  if ! grep -q '## Usage Metrics Schema (v2.5.0+)' "$project_dir/.github/copilot-instructions.md"; then
     echo "  FAIL: upgrade scenario did not refresh usage schema guidance"
     return 1
   fi
-  if ! grep -q '## Usage Quality Reporting (v2.5.0+)' "$project_dir/.copilot/instructions.md"; then
+  if ! grep -q '## Usage Quality Reporting (v2.5.0+)' "$project_dir/.github/copilot-instructions.md"; then
     echo "  FAIL: upgrade scenario did not add usage quality reporting guidance"
     return 1
   fi
-  if ! grep -q 'terraform_fmt_check' "$project_dir/.copilot/instructions.md"; then
+  if ! grep -q 'terraform_fmt_check' "$project_dir/.github/copilot-instructions.md"; then
     echo "  FAIL: upgrade scenario did not refresh orchestrator terraform guidance"
     return 1
   fi

@@ -1,0 +1,17 @@
+# Portability Blueprint
+
+Use this as a translation guide when implementing equivalent functionality on another platform/runtime.
+
+## Portability map
+- Domain logic: keep platform-agnostic modules free from platform framework imports.
+- State model: map view-model state/events to target platform equivalents.
+- Networking/streaming: map transport clients and cancellation semantics explicitly.
+- Auth/session: map secure storage and sign-in providers per platform.
+- Navigation/UI: map route structure and screen ownership.
+
+## Porting checklist
+1. Extract and stabilize cross-platform domain helpers.
+2. Define API/result type equivalence.
+3. Mirror state machine behavior and edge cases.
+4. Validate error handling and retry semantics.
+5. Re-run acceptance scenarios from `.requirements/*.yml`.

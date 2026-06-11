@@ -50,6 +50,13 @@ def _load_repo_index(project_dir: str) -> tuple[dict | None, str | None]:
     return data, None
 
 
+def _queue_snapshot(queue_dir: Path, max_files: int) -> tuple[int, list[str]]:
+    if not queue_dir.is_dir():
+        return 0, []
+    files = sorted(path.name for path in queue_dir.iterdir() if path.is_file())
+    return len(files), files[:max_files]
+
+
 @mcp.tool()
 @track_usage("repo-index")
 def sync_repo_index(project_dir: str = ".") -> str:
@@ -158,6 +165,84 @@ def check_repo_index(project_dir: str = ".") -> str:
                 status["head"] = head[:12]
 
         results.append(status)
+
+    return json.dumps({"ok": True, "repos": results})
+
+
+@mcp.tool()
+@track_usage("repo-index")
+def check_repo_queues(
+    project_dir: str = ".",
+    repos: list[str] | None = None,
+    max_files_per_queue: int = 25,
+) -> str:
+    """Inspect child repo queue state without shell access to sibling repos."""
+    if max_files_per_queue < 1 or max_files_per_queue > 200:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": {
+                    "code": "INVALID_MAX_FILES_PER_QUEUE",
+                    "message": "max_files_per_queue must be between 1 and 200",
+                },
+            }
+        )
+
+    data, err = _load_repo_index(project_dir)
+    if err:
+        return json.dumps({"ok": False, "error": err})
+
+    requested = None
+    if repos is not None:
+        if not isinstance(repos, list) or any(not isinstance(item, str) or not item.strip() for item in repos):
+            return json.dumps({"ok": False, "error": "repos must be a list of non-empty repo names"})
+        requested = {item.strip() for item in repos}
+
+    results = []
+    for entry in data.get("repos", []):
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        local_path = str(entry.get("local_path", "")).strip()
+        if not name or not local_path:
+            continue
+        if requested is not None and name not in requested:
+            continue
+
+        resolved = Path(_resolve_path(project_dir, local_path))
+        todo_dir = resolved / "work" / "todo"
+        rfr_dir = resolved / "work" / "ready-for-review"
+        done_dir = resolved / "work" / "done"
+
+        todo_count, todo_files = _queue_snapshot(todo_dir, max_files_per_queue)
+        rfr_count, rfr_files = _queue_snapshot(rfr_dir, max_files_per_queue)
+        done_count, done_files = _queue_snapshot(done_dir, max_files_per_queue)
+
+        results.append(
+            {
+                "name": name,
+                "local_path": local_path,
+                "resolved_path": str(resolved),
+                "exists": resolved.is_dir(),
+                "queues": {
+                    "todo": {
+                        "exists": todo_dir.is_dir(),
+                        "count": todo_count,
+                        "files": todo_files,
+                    },
+                    "ready_for_review": {
+                        "exists": rfr_dir.is_dir(),
+                        "count": rfr_count,
+                        "files": rfr_files,
+                    },
+                    "done": {
+                        "exists": done_dir.is_dir(),
+                        "count": done_count,
+                        "files": done_files,
+                    },
+                },
+            }
+        )
 
     return json.dumps({"ok": True, "repos": results})
 

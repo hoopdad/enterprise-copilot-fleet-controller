@@ -1,0 +1,49 @@
+# CD for TypeScript Azure Container App.
+# Tip: if you deploy multiple apps from the same repo, consider extracting the
+# build+push steps into a reusable workflow at .github/workflows/reusable-docker-build.yml.
+
+name: TypeScript Container App CD
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.__AZURE_CREDENTIALS_SECRET__ }}
+
+      - uses: azure/docker-login@v2
+        with:
+          login-server: __REGISTRY__
+          username: ${{ secrets.__REGISTRY_USERNAME_SECRET__ }}
+          password: ${{ secrets.__REGISTRY_PASSWORD_SECRET__ }}
+
+      - name: Build and push image
+        run: |
+          docker build -t __REGISTRY__/__IMAGE_NAME__:${{ github.sha }} \
+                       -t __REGISTRY__/__IMAGE_NAME__:latest .
+          docker push __REGISTRY__/__IMAGE_NAME__:${{ github.sha }}
+          docker push __REGISTRY__/__IMAGE_NAME__:latest
+
+      - uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }}
+          acrName: __REGISTRY__
+          acrUsername: ${{ secrets.__REGISTRY_USERNAME_SECRET__ }}
+          acrPassword: ${{ secrets.__REGISTRY_PASSWORD_SECRET__ }}
+          containerAppName: __APP_NAME__
+          resourceGroup: __RESOURCE_GROUP__
+          imageToDeploy: __REGISTRY__/__IMAGE_NAME__:${{ github.sha }}

@@ -13,7 +13,7 @@ project:
   # Project source code is NEVER deleted
   # fresh_start: true
   # Optional MCP tool setup (default: false/off)
-  # Set true to generate .copilot/mcp.json and enable MCP tool scoping in agent files
+  # Set true to generate .github/mcp.json and enable MCP tool scoping in agent files
   # enable_mcp: false
   # GitHub org or username for new repos
   github_owner: "your-org"

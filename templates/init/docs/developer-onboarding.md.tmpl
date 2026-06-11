@@ -1,0 +1,19 @@
+# Developer Onboarding
+
+## Goal
+Get contributors productive quickly with consistent local setup, architecture orientation, and validation commands.
+
+## First-day setup
+1. Install repo prerequisites from each child repo README.
+2. Ensure each repo path in `.repo-index.yml` exists locally and is up to date.
+3. Run lint/test/build in each changed child repo before opening PRs.
+
+## Working model
+- Orchestrator plans in `.requirements/` and `.contracts/`.
+- Specialists implement in their assigned local repo path from `.repo-index.yml`.
+- Decisions are append-only in `.decisions/log.md`.
+
+## Ready-to-contribute checklist
+- Understand repo boundaries and contracts you touch.
+- Confirm local lint/test commands run successfully.
+- Document non-trivial tradeoffs in `.decisions/log.md`.

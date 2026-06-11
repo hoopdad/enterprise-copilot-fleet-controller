@@ -1,0 +1,41 @@
+Analyze only the child repositories listed in __TARGET_DIR__/.repo-index.yml and bootstrap the project's contracts and initial decisions.
+
+Project: __PROJECT_NAME__ — __PROJECT_DESC__
+Repos:
+__REPO_SUMMARY__
+
+Rules:
+1. Only inspect the exact local_path values listed in .repo-index.yml.
+2. Do not scan, list, or cd to the parent workspace directory.
+3. Do not inspect sibling directories that are not listed in .repo-index.yml.
+4. If a listed child repo path does not exist yet, skip it and continue with the repos that do exist.
+
+Tasks:
+1. Read the source code in each existing child repo (focus on API routes, models, shared interfaces)
+2. Generate .contracts/*.yml files for every API/interface you find between repos
+   Write to: __TARGET_DIR__/.contracts/<interface-name>.yml
+3. Add initial decisions to __TARGET_DIR__/.decisions/log.md based on patterns you observe
+   (e.g., 'auth: JWT via httpOnly cookie', 'api: all errors return 422 with {error, field}')
+4. If you find existing design docs in the listed repos (README.md, docs/), extract relevant
+   decisions and contracts from them
+
+Use the contract format:
+```yaml
+name: "interface-name"
+type: "REST"
+provider: "<repo>"
+consumers:
+  - "<repo>"
+endpoints:
+  - method: "POST"
+    path: "/api/..."
+    request: { field: { type: string, required: true } }
+    response:
+      200: { field: type }
+      422: { error: string }
+```
+
+For decisions, append lines like:
+`YYYY-MM-DD | category: what was decided`
+
+Write all files now. No explanation.

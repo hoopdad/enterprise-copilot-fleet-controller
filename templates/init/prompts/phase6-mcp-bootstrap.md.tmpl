@@ -1,0 +1,61 @@
+Use MCP tools to bootstrap automatic child-repo execution from the parent orchestrator.
+
+## CRITICAL: NO DISCOVERY ALLOWED
+
+You MUST NOT run ANY shell commands to discover sibling repos (e.g., `cd .. && ls`, `find ../`, `ls -d`). 
+The repo structure is completely defined below. Use ONLY the paths and repos provided here.
+Any attempt to verify or probe the filesystem is a violation of this protocol.
+
+Project: __PROJECT_NAME__
+Repos:
+__REPO_SUMMARY__
+
+Resolved dispatch paths (authoritative; use these directly, no verification needed):
+__REPO_DISPATCH_HINTS__
+
+Required MCP-first workflow:
+0. For each affected child repo, create one request file in `work/todo/` before dispatch so the child runner has queue items to pick up.
+   - If this is a clean/greenfield project, write each request so specialists can scaffold from scratch in their child repo instead of assuming existing implementation files or patterns.
+1. Run check_repo_index first to confirm .repo-index.yml is valid (do NOT run discovery beforehand).
+2. Run check_repo_queues to capture current queue states before dispatch (do NOT shell `ls` child queues from parent).
+3. Start async child work using start_child_agents_batch with `max_parallel=4` and `timeout_seconds=1800`; this must return quickly with job ids.
+4. Poll job completion with get_child_agent_job (or list_child_agent_jobs) until all started jobs reach terminal states.
+5. If async start/poll results show failed repos, capture each failure and log it via log_usage tool (from usage-tracker MCP server), then continue to next pass.
+6. After each pass, run check_repo_queues again. If any repo still has work/todo files, run another pass (max 3 passes).
+7. End with a concise status summary in .decisions/log.md with queue outcomes.
+8. If dispatch loops or repeated failures occur, call get_usage_quality_report.
+9. Do not use background sub-agents or task agents for child execution; MCP child-agent-runner tools are the only allowed dispatch path.
+10. Do not probe MCP availability with shell commands (`command -v`, `gh copilot mcp list`, etc.). Invoke MCP tools directly.
+11. Child repo root permission denials from direct parent shell/list attempts are expected with scoped access; ignore those and continue the MCP workflow.
+12. The parent `.github/` directory must be in scope so `.github/mcp.json` can load the MCP servers before dispatch.
+13. If a required MCP tool call fails, stop and report it as a blocking MCP error. Do not write fallback orchestration summaries to .decisions/log.md without executing MCP calls.
+14. Phase 6 bootstrap runs include the child repo root plus `work/` and `.github/agents/` in scope so child dispatch can inspect and hand off cleanly.
+
+MCP Tools Available (use ONLY these names):
+- `check_repo_index` (from repo-index) — validate .repo-index.yml structure
+- `check_repo_queues` (from repo-index) — inspect child `work/{todo,ready-for-review,done}` state without shell access
+- `start_child_agent` (from child-agent-runner) — start one async child run and return job id
+- `start_child_agents_batch` (from child-agent-runner) — start async child runs per repo and return job ids
+- `get_child_agent_job` / `list_child_agent_jobs` (from child-agent-runner) — poll async job states/results
+- `log_usage` (from usage-tracker) — record orchestration events
+- `get_usage_quality_report` (from usage-tracker) — detect patterns, anomalies, and duplicate activity bursts
+
+Visible output requirements (print these markers in your response):
+- First line: `MCP_MODE: enabled`
+- Print `MCP_CALL: check_repo_index` when you run it.
+- Print `MCP_CALL: check_repo_queues` before first dispatch and after each dispatch pass.
+- Print `MCP_CALL: start_child_agents_batch status=<status> started=<n> blocked=<n> deferred=<n>` for each pass.
+- Print `MCP_CALL: get_child_agent_job job_id=<id> status=<status>` for polling milestones.
+- Last line: `MCP_SUMMARY: passes=<n> dispatched=<n> completed=<n> failed=<n> blocked=<n> no_work=<n>`
+
+Hard constraints (FAIL IMMEDIATELY if violated):
+- ZERO shell discovery. Repos and paths are provided above.
+- Only use repos listed in .repo-index.yml.
+- Do not run broad discovery globs over child repos; use the exact repo_dir/work_dir/.github/agents paths listed above.
+- Do not directly implement child repo code from this parent repo.
+- Use MCP tools for dispatch/monitoring instead of manual shell orchestration.
+- Do not launch sub-agents/background agents for child execution from the parent session.
+- If a plan would create `agent_id` background child runs, stop and use child-agent-runner MCP tools instead.
+- Treat MCP tool invocation as mandatory, deterministic control flow: `check_repo_index` + `check_repo_queues` + `start_child_agents_batch` + job polling loop.
+
+Execute now. No explanation.

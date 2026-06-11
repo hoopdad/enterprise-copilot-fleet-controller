@@ -297,6 +297,7 @@ if [[ -f "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" ]]; then
   assert_file_contains "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" "work/todo"
   assert_file_contains "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" "ready-for-review"
   assert_file_contains "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" "pattern_constraints"
+  assert_file_contains "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" "insist on MCP-first orchestration"
   assert_file_contains "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" "Anti-Patterns"
 fi
 
@@ -323,22 +324,26 @@ if [[ -f "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" ]]; then
   fi
 fi
 
-# Verify orchestrator (.copilot/instructions.md)
-assert_file_exists "$PROJECT_DIR/.copilot/instructions.md"
-if [[ -f "$PROJECT_DIR/.copilot/instructions.md" ]]; then
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "Orchestrator"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "test-project"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "\\.github/agents/test-api-specialist.agent.md"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "\\.github/agents/test-api-critic.agent.md"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "work/todo"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "NEW Copilot CLI"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "Anti-Patterns"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "Critic Gate"
-  assert_file_contains "$PROJECT_DIR/.copilot/instructions.md" "Accept only PASS"
+# Verify orchestrator (.github/copilot-instructions.md)
+assert_file_exists "$PROJECT_DIR/.github/copilot-instructions.md"
+if [[ -f "$PROJECT_DIR/.github/copilot-instructions.md" ]]; then
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Orchestrator"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "test-project"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "\\.github/agents/test-api-specialist.agent.md"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "\\.github/agents/test-api-critic.agent.md"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "work/todo"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "NEW Copilot CLI"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "MCP-first orchestration is mandatory"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Do not use \`task\`, background sub-agents"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "First dispatch action must be a direct MCP tool call to \`check_repo_index\`"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Do not run shell checks like \`command -v check_repo_index\`"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Anti-Patterns"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Critic Gate"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Accept only PASS"
 fi
 
 # Verify MCP config is OFF by default
-assert_file_not_exists "$PROJECT_DIR/.copilot/mcp.json"
+assert_file_not_exists "$PROJECT_DIR/.github/mcp.json"
 # Verify optional features are OFF by default
 assert_file_not_exists "$PROJECT_DIR/.copilot/workflow-templates/mobile-ci.yml"
 assert_file_not_exists "$PROJECT_DIR/.copilot/workflow-templates/mobile-cd.yml"
@@ -413,6 +418,22 @@ else
   PASS=$((PASS + 1))
 fi
 
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ -f "$COPILOT_LOG" ]] && grep -Eq -- "--add-dir ${TEST_DIR}/test-api-metrics/work( |$)" "$COPILOT_LOG"; then
+  PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL: expected parent copilot invocation to scope child access to child work/ directory"
+fi
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ -f "$COPILOT_LOG" ]] && grep -Eq -- "--add-dir ${TEST_DIR}/test-api-metrics( |$)" "$COPILOT_LOG"; then
+  FAIL=$((FAIL + 1))
+  echo "  FAIL: parent copilot invocation should not get full child repo access"
+else
+  PASS=$((PASS + 1))
+fi
+
 unset COPILOT_LOG MOCK_REQUIRE_URL_ALLOWLIST MOCK_COPILOT_OUTPUT MOCK_COPILOT_EXIT_CODE
 
 # ─────────────────────────────────────────────────────────────
@@ -445,22 +466,34 @@ git commit --allow-empty -m "init" -q
 
 bash "$FRAMEWORK_DIR/scripts/init.sh" --config "$TEST_DIR/init-mcp.yml" --start-phase 1 > "$TEST_DIR/init-mcp-output.log" 2>&1 || true
 
-assert_file_exists "$PROJECT_DIR_MCP/.copilot/mcp.json"
-if [[ -f "$PROJECT_DIR_MCP/.copilot/mcp.json" ]]; then
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "mcpServers"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "scaffold-generator"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "security-scanner"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "repo-index"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "lint-local"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "terraform-local"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "azure-resource-status"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "git-pr-orchestrator"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/mcp.json" "usage quality/anomalies"
+assert_file_exists "$PROJECT_DIR_MCP/.github/mcp.json"
+if [[ -f "$PROJECT_DIR_MCP/.github/mcp.json" ]]; then
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "mcpServers"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "scaffold-generator"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "security-scanner"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "repo-index"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "child-agent-runner"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "lint-local"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "terraform-local"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "azure-resource-status"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "git-pr-orchestrator"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "usage quality/anomalies"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if python3 - <<PYEOF
+import json, pathlib
+json.loads(pathlib.Path("$PROJECT_DIR_MCP/.github/mcp.json").read_text(encoding="utf-8"))
+PYEOF
+  then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: generated .github/mcp.json must be valid JSON"
+  fi
 fi
 
-if [[ -f "$PROJECT_DIR_MCP/.copilot/instructions.md" ]]; then
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/instructions.md" "## Usage Metrics Schema (v2.5.0+)"
-  assert_file_contains "$PROJECT_DIR_MCP/.copilot/instructions.md" "## Usage Quality Reporting (v2.5.0+)"
+if [[ -f "$PROJECT_DIR_MCP/.github/copilot-instructions.md" ]]; then
+  assert_file_contains "$PROJECT_DIR_MCP/.github/copilot-instructions.md" "## Usage Metrics Schema (v2.5.0+)"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/copilot-instructions.md" "## Usage Quality Reporting (v2.5.0+)"
 fi
 
 if [[ -f "$TEST_DIR/test-api-mcp/.github/agents/test-api-mcp-specialist.agent.md" ]]; then
@@ -670,9 +703,9 @@ assert_file_contains "$TEST_DIR/init-tech-hard-fail-output.log" "UNMET_REQUIREME
 assert_file_contains "$TEST_DIR/init-tech-hard-fail-output.log" "Microsoft Agent Framework requirement is unmet"
 
 # ─────────────────────────────────────────────────────────────
-# Test 4h: Default metrics policy warns after retries
+# Test 4h: Default metrics policy accepts zero metrics without retrying
 # ─────────────────────────────────────────────────────────────
-echo "═══ Test 4h: Copilot default warn + retries policy ═══"
+echo "═══ Test 4h: Copilot zero metrics accepted without retry ═══"
 
 cat > "$TEST_DIR/init-zero-token-metrics.yml" << 'CONFIG'
 project:
@@ -709,15 +742,13 @@ DEFAULT_POLICY_CALLS=$(cat "$MOCK_COUNTER_DEFAULT" 2>/dev/null || echo "0")
 unset MOCK_COPILOT_COUNTER_FILE MOCK_COPILOT_ZERO_METRICS_UNTIL_CALL MOCK_COPILOT_OUTPUT MOCK_COPILOT_EXIT_CODE
 
 assert_exit_code "$RC_ZERO_TOKEN" 0
-assert_file_contains "$TEST_DIR/init-zero-token-metrics-output.log" "Copilot metrics anomaly on attempt 1/3; retrying"
-assert_file_contains "$TEST_DIR/init-zero-token-metrics-output.log" "Copilot metrics anomaly on attempt 2/3; retrying"
-assert_file_contains "$TEST_DIR/init-zero-token-metrics-output.log" "Copilot metrics anomaly tolerated (warn mode)"
+assert_file_contains "$TEST_DIR/init-zero-token-metrics-output.log" "Copilot metrics anomaly (warn mode, no retry)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$DEFAULT_POLICY_CALLS" -ge 3 ]]; then
+if [[ "$DEFAULT_POLICY_CALLS" -eq 2 ]]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  echo "  FAIL: expected at least 3 copilot invocations in default policy scenario"
+  echo "  FAIL: expected exactly 2 copilot invocations (no retries for zero metrics, but Phase 2 validation may trigger agent regeneration), but got $DEFAULT_POLICY_CALLS"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -758,13 +789,14 @@ set -e
 unset MOCK_COPILOT_OUTPUT MOCK_COPILOT_EXIT_CODE
 
 assert_exit_code "$RC_ZERO_TOKEN_WARN" 0
-assert_file_contains "$TEST_DIR/init-zero-token-warn-output.log" "Copilot metrics anomaly tolerated (warn mode)"
+assert_file_contains "$TEST_DIR/init-zero-token-warn-output.log" "Copilot metrics anomaly (warn mode, no retry)"
 assert_file_contains "$TEST_DIR/init-zero-token-warn-output.log" "metrics_anomalies="
 
+
 # ─────────────────────────────────────────────────────────────
-# Test 4j: Metrics retries occur before strict-mode failure
+# Test 4j: Strict mode fails on zero metrics without retrying
 # ─────────────────────────────────────────────────────────────
-echo "═══ Test 4j: Copilot metrics retries before strict failure ═══"
+echo "═══ Test 4j: Copilot strict mode fails on zero metrics ═══"
 
 cat > "$TEST_DIR/init-zero-token-retry-strict.yml" << 'CONFIG'
 project:
@@ -805,20 +837,18 @@ STRICT_CALLS=$(cat "$MOCK_COUNTER_STRICT" 2>/dev/null || echo "0")
 unset MOCK_COPILOT_COUNTER_FILE MOCK_COPILOT_ZERO_METRICS_UNTIL_CALL MOCK_COPILOT_OUTPUT MOCK_COPILOT_EXIT_CODE
 
 assert_exit_code "$RC_ZERO_TOKEN_RETRY_STRICT" 97
-assert_file_contains "$TEST_DIR/init-zero-token-retry-strict-output.log" "Copilot metrics anomaly on attempt 1/3; retrying"
-assert_file_contains "$TEST_DIR/init-zero-token-retry-strict-output.log" "Copilot metrics anomaly on attempt 2/3; retrying"
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$STRICT_CALLS" -ge 3 ]]; then
+if [[ "$STRICT_CALLS" -eq 1 ]]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  echo "  FAIL: expected at least 3 copilot invocations in strict retry scenario"
+  echo "  FAIL: expected exactly 1 copilot invocation in strict mode (no retries for zero metrics), but got $STRICT_CALLS"
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Test 4k: Metrics retries occur before warn-mode continuation
+# Test 4k: Warn mode continues without retrying on zero metrics
 # ─────────────────────────────────────────────────────────────
-echo "═══ Test 4k: Copilot metrics retries before warn continuation ═══"
+echo "═══ Test 4k: Copilot warn mode accepts zero metrics without retry ═══"
 
 cat > "$TEST_DIR/init-zero-token-retry-warn.yml" << 'CONFIG'
 project:
@@ -859,14 +889,13 @@ WARN_CALLS=$(cat "$MOCK_COUNTER_WARN" 2>/dev/null || echo "0")
 unset MOCK_COPILOT_COUNTER_FILE MOCK_COPILOT_ZERO_METRICS_UNTIL_CALL MOCK_COPILOT_OUTPUT MOCK_COPILOT_EXIT_CODE
 
 assert_exit_code "$RC_ZERO_TOKEN_RETRY_WARN" 0
-assert_file_contains "$TEST_DIR/init-zero-token-retry-warn-output.log" "Copilot metrics anomaly on attempt 1/3; retrying"
-assert_file_contains "$TEST_DIR/init-zero-token-retry-warn-output.log" "Copilot metrics anomaly tolerated (warn mode)"
+assert_file_contains "$TEST_DIR/init-zero-token-retry-warn-output.log" "Copilot metrics anomaly (warn mode, no retry)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$WARN_CALLS" -ge 3 ]]; then
+if [[ "$WARN_CALLS" -eq 2 ]]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  echo "  FAIL: expected at least 3 copilot invocations in warn retry scenario"
+  echo "  FAIL: expected exactly 2 copilot invocations in warn mode (no retries for zero metrics), but got $WARN_CALLS"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -1133,9 +1162,9 @@ if [[ -f "$PROJECT_DIR_PATTERN_CONSTRAINTS/.requirements/platform-guardrails.yml
   assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.requirements/platform-guardrails.yml" 'repo: "test-project-pattern-constraints-agent"'
   assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.requirements/platform-guardrails.yml" 'FoundryChatClient'
 fi
-if [[ -f "$PROJECT_DIR_PATTERN_CONSTRAINTS/.copilot/instructions.md" ]]; then
-  assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.copilot/instructions.md" "pattern_constraints"
-  assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.copilot/instructions.md" "Do not inject constraints that conflict"
+if [[ -f "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/copilot-instructions.md" ]]; then
+  assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/copilot-instructions.md" "pattern_constraints"
+  assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/copilot-instructions.md" "Do not inject constraints that conflict"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -1217,9 +1246,16 @@ bash -n "$FRAMEWORK_DIR/migrations/v2.8.0_to_v2.9.0.sh"
 assert_exit_code $? 0
 
 # ─────────────────────────────────────────────────────────────
-# Test 13: upgrade.sh applies v2.7.0 → v2.9.0 migration chain
+# Test 12a: migration v2.9.0_to_v2.10.0.sh syntax valid
 # ─────────────────────────────────────────────────────────────
-echo "═══ Test 13: upgrade.sh applies v2.7.0 to v2.9.0 migration chain ═══"
+echo "═══ Test 12a: migration v2.9.0_to_v2.10.0.sh syntax valid ═══"
+bash -n "$FRAMEWORK_DIR/migrations/v2.9.0_to_v2.10.0.sh"
+assert_exit_code $? 0
+
+# ─────────────────────────────────────────────────────────────
+# Test 13: upgrade.sh applies v2.7.0 → v2.10.0 migration chain
+# ─────────────────────────────────────────────────────────────
+echo "═══ Test 13: upgrade.sh applies v2.7.0 to v2.10.0 migration chain ═══"
 
 UPGRADE_DIR="$TEST_DIR/test-project-upgrade"
 mkdir -p "$UPGRADE_DIR/.copilot"
@@ -1273,11 +1309,11 @@ git commit -m "init" -q
 bash "$FRAMEWORK_DIR/scripts/upgrade.sh" --project-dir "$UPGRADE_DIR" > "$TEST_DIR/upgrade-output.log" 2>&1 || true
 
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ -f "$UPGRADE_DIR/.framework-version" ]] && grep -q "2.9.0" "$UPGRADE_DIR/.framework-version" &&    grep -q "local-only" "$UPGRADE_DIR/.copilot/instructions.md" &&    ! grep -q "project.enable_mcp: false" "$UPGRADE_DIR/.copilot/instructions.md"; then
+if [[ -f "$UPGRADE_DIR/.framework-version" ]] && grep -q "2.10.0" "$UPGRADE_DIR/.framework-version" &&    grep -q "local-only" "$UPGRADE_DIR/.github/copilot-instructions.md" &&    ! grep -q "project.enable_mcp: false" "$UPGRADE_DIR/.github/copilot-instructions.md"; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  echo "  FAIL: upgrade did not apply v2.7.0 → v2.9.0 migration chain correctly"
+  echo "  FAIL: upgrade did not apply v2.7.0 → v2.10.0 migration chain correctly"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -1335,7 +1371,7 @@ git commit -m "init" -q
 bash "$FRAMEWORK_DIR/scripts/upgrade.sh" --project-dir "$UPGRADE_DIR_V29" > "$TEST_DIR/upgrade-v29-output.log" 2>&1 || true
 
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ -f "$UPGRADE_DIR_V29/.framework-version" ]] && grep -q "2.9.0" "$UPGRADE_DIR_V29/.framework-version" && \
+if [[ -f "$UPGRADE_DIR_V29/.framework-version" ]] && grep -q "2.10.0" "$UPGRADE_DIR_V29/.framework-version" && \
    [[ -f "$CHILD_DIR_V29/.github/agents/test-api-v29-specialist.agent.md" ]] && \
    [[ -f "$CHILD_DIR_V29/.github/agents/test-api-v29-critic.agent.md" ]] && \
    [[ -f "$CHILD_DIR_V29/work/todo/request-001.md" ]] && \

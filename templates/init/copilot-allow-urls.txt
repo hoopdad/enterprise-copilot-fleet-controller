@@ -1,0 +1,14 @@
+https://github.com/hoopdad/standards
+https://raw.githubusercontent.com/hoopdad/standards
+https://azure.com
+http://azure.com
+https://*.azure.com
+http://*.azure.com
+https://github.com
+http://github.com
+https://*.github.com
+http://*.github.com
+https://microsoft.com
+http://microsoft.com
+https://*.microsoft.com
+http://*.microsoft.com

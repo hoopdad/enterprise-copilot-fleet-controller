@@ -74,6 +74,7 @@ SERVERS=(
   "terraform-local"
   "git-pr-orchestrator"
   "repo-index"
+  "child-agent-runner"
 )
 
 for server in "${SERVERS[@]}"; do

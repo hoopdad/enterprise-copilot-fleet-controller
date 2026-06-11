@@ -1,4 +1,6 @@
 __pycache__/
 
-# Usage metrics (auto-generated, local only)
-.metrics/usage.jsonl
+# Local test/runtime artifacts (auto-generated)
+.test-work/
+**/.metrics/
+**/.local/

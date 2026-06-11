@@ -1,4 +1,4 @@
-# Maintaining the Lean Agent Framework
+# Maintaining the Enterprise Copilot Fleet Controller
 
 ## Quick Reference
 
@@ -25,7 +25,7 @@ Use **conventional commits** — the GitHub Action auto-bumps versions on merge 
 
 ## When You Change Generated Files
 
-If your change affects what `init.sh` generates into projects (.github/agents/*.agent.md, .copilot/instructions.md, mcp.json, directory structure):
+If your change affects what `init.sh` generates into projects (.github/agents/*.agent.md, .github/copilot-instructions.md, .github/mcp.json, directory structure):
 
 1. **Bump at least MINOR** version
 2. **Write a migration** in `migrations/v{OLD}_to_v{NEW}.sh`
@@ -39,14 +39,14 @@ If your change affects what `init.sh` generates into projects (.github/agents/*.
 ## When You Add/Change MCP Tools
 
 1. Update/create `tools/<name>/server.py`
-2. Update the `mcp.json` generation block in `scripts/init-core.sh`
+2. Update `templates/init/mcp.json.tmpl`
 3. Update the `tools_for_role()` function in `scripts/init-core.sh` if the tool should be scoped
 4. Update `tools/README.md`
 5. If adding a new tool, this is a **MINOR** bump (existing projects need migration to get new mcp.json entry)
 
 ## When You Add a New Template Section
 
-1. Edit the `generate_agent_md()` function or `instructions.md` heredoc in `scripts/init-core.sh`
+1. Edit `generate_agent_md()` in `scripts/init-core.sh` or templates under `templates/init/`
 2. If it changes structure, write a migration
 3. Test with `bash tests/test-init.sh`
 
@@ -59,9 +59,9 @@ If your change affects what `init.sh` generates into projects (.github/agents/*.
 - [ ] README updated if user-facing behavior changed
 - [ ] PR merged to main → Action auto-bumps + tags
 
-## Architecture Reminders (v2.9.0)
+## Architecture Reminders (v2.10.0)
 
-- **Philosophy**: Parent orchestrator (.copilot/instructions.md) + child-repo specialists/critics (<child>/.github/agents/*.agent.md) with work queues (`work/todo → ready-for-review → done`)
+- **Philosophy**: Parent orchestrator (.github/copilot-instructions.md) + child-repo specialists/critics (<child>/.github/agents/*.agent.md) with work queues (`work/todo → ready-for-review → done`)
 - **Agent generation**: Deterministic templates for empty repos, LLM + reasonableness check for existing code
 - **Tools principle**: Tools handle mechanics, LLM handles decisions. Scoped per role via `tools:` frontmatter.
 - **Version chain**: `VERSION` file → git tag → `.framework-version` in projects → stamps in generated files
@@ -79,10 +79,21 @@ enterprise-copilot-fleet-controller/
 │   └── auto-version.yml             ← bumps version on merge to main
 ├── scripts/
 │   ├── init.sh                      ← shell wrapper entrypoint
-│   ├── init.py                      ← Python entrypoint
-│   ├── init-core.sh                 ← core generator (deterministic templates + LLM for existing code)
+│   ├── init.py                      ← Python orchestrator/entrypoint
+│   ├── init-core.sh                 ← core workflow + phase orchestration
 │   ├── upgrade.sh                   ← sequential migration runner
-│   └── bump-version.sh              ← manual version bump helper
+│   ├── bump-version.sh              ← manual version bump helper
+│   └── init/
+│       └── helpers.py               ← shared YAML/metrics/validation helpers
+├── templates/init/
+│   ├── agents/                     ← specialist/critic agent templates
+│   ├── docs/                       ← optional onboarding/portability templates
+│   ├── prompts/                    ← copilot prompt templates for phase orchestration
+│   ├── requirements/               ← generated requirement templates
+│   ├── workflows/                  ← optional mobile workflow templates
+│   ├── instructions.md.tmpl         ← orchestrator instructions template
+│   ├── mcp.json.tmpl                ← MCP server config template
+│   └── copilot-allow-urls.txt       ← init Copilot URL allowlist
 ├── migrations/
 │   ├── README.md                    ← migration writing guide
 │   ├── v0.0.0_to_v1.0.0.sh
@@ -95,7 +106,8 @@ enterprise-copilot-fleet-controller/
 │   ├── v2.5.0_to_v2.6.0.sh         ← optional feature guidance refresh
 │   ├── v2.6.0_to_v2.7.0.sh         ← repo-index migration + MCP tool refresh
 │   ├── v2.7.0_to_v2.8.0.sh         ← local-only guidance + MCP metadata refresh
-│   └── v2.8.0_to_v2.9.0.sh         ← child workflow queue/agent migration
+│   ├── v2.8.0_to_v2.9.0.sh         ← child workflow queue/agent migration
+│   └── v2.9.0_to_v2.10.0.sh        ← child-agent-runner MCP tool + guidance refresh
 ├── tools/
 │   ├── README.md                    ← tool documentation
 │   ├── requirements.txt             ← mcp, pyyaml, httpx

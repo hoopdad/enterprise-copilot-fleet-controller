@@ -14,10 +14,11 @@ Enterprise Copilot Fleet Controller is an opinionated scaffolding and operations
 
 ## Implementation Characteristics
 
-- **Two layers**: Orchestrator in the parent repo (`.copilot/instructions.md`) + specialist/critic agents in each child repo (`<child>/.github/agents/*.agent.md`)
+- **Two layers**: Orchestrator in the parent repo (`.github/copilot-instructions.md`) + specialist/critic agents in each child repo (`<child>/.github/agents/*.agent.md`)
 - **Three file types**: `.contracts/` (YAML interfaces), `.requirements/` (acceptance criteria), `.decisions/` (one-line ADRs)
 - **Queue-based execution**: coordinator writes child requests; specialist and critic iterate `work/todo → work/ready-for-review → work/done`
 - **Token-efficient**: Prefer structured YAML over free-form prose to keep context focused.
+- **Instruction layout**: default to one repo-wide `.github/copilot-instructions.md`; add `.github/instructions/**/*.instructions.md` only when path-specific policies diverge.
 - **Initialize with one config file**: `scripts/init.sh --config init.yml` (shell wrapper) → `scripts/init.py` (Python entrypoint) → `scripts/init-core.sh` (core generator)
 
 ### Philosophy
@@ -49,8 +50,9 @@ your-project/
 │   ├── guardrails/
 │   │   ├── pattern.yml      ← snapshot of the active pattern used at init
 │   │   └── nfr.yml          ← snapshot of the active NFRs used at init
-│   ├── instructions.md      ← orchestrator (main agent reads this)
-│   └── mcp.json             ← MCP tools configuration (optional, opt-in)
+├── .github/
+│   ├── copilot-instructions.md ← orchestrator (main agent reads this)
+│   └── mcp.json                ← MCP tools configuration (optional, opt-in)
 ├── .repo-index.yml             ← child repo references (name, role, local_path, visibility, remote)
 ├── children live in sibling/external paths from .repo-index.yml
 │
@@ -64,7 +66,10 @@ your-project/
 
 ## How Coordinator Workflow Works
 
-1. **Coordinator** (parent repo) reads `.copilot/instructions.md`, writes `.requirements/.contracts`, and creates per-repo request files in child `work/todo/`.
+1. **Coordinator** (parent repo) reads `.github/copilot-instructions.md`, writes `.requirements/.contracts`, and creates per-repo request files in child `work/todo/`.
+   - MCP-first orchestration is mandatory for child execution: use `check_repo_index` + `check_repo_queues` + async child-agent-runner dispatch tools (`start_child_agents_batch`/`start_child_agent`) with polling (`get_child_agent_job`/`list_child_agent_jobs`), not background sub-agents or `task`.
+   - Init runs a deterministic preflight before Phase 6 to validate executable/tooling and expected child repo paths (`repo_dir`, `.github/agents`, and `work/*` queues).
+   - During init-time parent Copilot phases, child access is scoped from `.repo-index.yml` to `<child>/work` and `<child>/.github/agents` (not full child repo roots), so queue/agent files are readable without broad discovery scans.
 2. **Specialist** (child repo cwd) processes one request, implements + validates, then moves it to `work/ready-for-review/`.
 3. **Critic** (child repo cwd) reviews and iterates with specialist until PASS, then moves request to `work/done/`.
 4. **Coordinator** validates done items against acceptance criteria before final acceptance.
@@ -107,6 +112,8 @@ copilot -p "the create button fails with 'resume_text cannot be empty'" --allow-
 copilot -p "Process the next work/todo request as specialist or critic" --allow-all-tools --autopilot --no-ask-user --add-dir "$(pwd)"
 ```
 
+Parent orchestrator runs should stay MCP-first for child work; background sub-agents are the wrong path for child execution.
+
 ## init.yml Format
 
 ```yaml
@@ -116,7 +123,7 @@ project:
   create_repos: true          # optional: create GitHub repos if they don't exist
   visibility: "private"       # optional: public | private | local (defaults to private)
   fresh_start: true           # optional: remove framework files and re-init
-  enable_mcp: false           # optional: default OFF, set true to generate .copilot/mcp.json
+  enable_mcp: false           # optional: default OFF, set true to generate .github/mcp.json
   pattern: "azure-fullstack"  # optional: use a predefined pattern for children
   initial_prompt: "Set up the project with a REST API and React frontend."
   nfr: |                      # optional: literal text, file path, or URL
@@ -156,8 +163,8 @@ children:
     description: "React frontend"
 ```
 
-When `project.enable_mcp` is omitted or `false`, init skips `.copilot/mcp.json` and specialists are generated without scoped MCP tools.  
-Set `project.enable_mcp: true` to generate `.copilot/mcp.json` and add role-based MCP tool scoping in specialist frontmatter.
+When `project.enable_mcp` is omitted or `false`, init skips `.github/mcp.json` and specialists are generated without scoped MCP tools.  
+Set `project.enable_mcp: true` to generate `.github/mcp.json` and add role-based MCP tool scoping in specialist frontmatter.
 
 Set `visibility: "local"` to create local git repos on disk and skip GitHub repo creation for that repo.
 
@@ -175,10 +182,10 @@ Use `critic.scope.repos` and `critic.scope.requirements` to narrow what the crit
 ## Governance Chain
 
 ```
-.copilot/instructions.md               → governs the orchestrator (main agent)
+.github/copilot-instructions.md        → governs the orchestrator (main agent)
 <child>/.github/agents/<name>-specialist.agent.md → governs each specialist subagent
 <child>/.github/agents/<name>-critic.agent.md     → governs each critic subagent
-.copilot/mcp.json                       → MCP tools available to all (optional, only when enable_mcp=true)
+.github/mcp.json                        → MCP tools available to all (optional, only when enable_mcp=true)
 tools: [...] in each .agent.md          → restricts which tools each specialist sees
 ```
 
@@ -186,7 +193,7 @@ tools: [...] in each .agent.md          → restricts which tools each specialis
 
 ```
 Human (natural language)
-  → Orchestrator (reads .copilot/instructions.md)
+  → Orchestrator (reads .github/copilot-instructions.md)
     → writes .requirements/*.yml (structured acceptance criteria)
     → writes .contracts/*.yml (API shapes, if changed)
     → [tool: check_contract_compliance] — verify existing code still matches
@@ -205,11 +212,12 @@ Human (natural language)
 
 ## MCP Tools
 
-Tools handle mechanics so the LLM can focus on intelligence. MCP is opt-in (`project.enable_mcp: true`), and tools are registered via `.copilot/mcp.json`.
+Tools handle mechanics so the LLM can focus on intelligence. MCP is opt-in (`project.enable_mcp: true`), and tools are registered via `.github/mcp.json`.
 
 | Tool | Purpose | Scoped To |
 |------|---------|-----------|
-| `repo-index` | Validate/inspect `.repo-index.yml` child repo references and local repo health | Orchestrator |
+| `repo-index` | Validate/inspect `.repo-index.yml`, local repo health, and child queue state (`check_repo_queues`) | Orchestrator |
+| `child-agent-runner` | Start scoped async child-repo Copilot sessions (`start_child_agent`/`start_child_agents_batch`) and poll completion (`get_child_agent_job`/`list_child_agent_jobs`) | Orchestrator |
 | `contract-compliance` | Compare implemented routes to `.contracts/*.yml` endpoint definitions | Orchestrator + backend specialists |
 | `scaffold-generator` | Generate non-overwriting FastAPI/TypeScript stubs from contracts | backend specialists |
 | `azure-inspector` | Read Container Apps, Cosmos DB, and ACR state via Azure CLI | infra specialists |

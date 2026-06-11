@@ -39,6 +39,16 @@ def terraform_module():
     return _load_module("tools/terraform-local/server.py", "terraform_local_server")
 
 
+@pytest.fixture
+def child_runner_module():
+    return _load_module("tools/child-agent-runner/server.py", "child_agent_runner_server")
+
+
+@pytest.fixture
+def repo_index_module():
+    return _load_module("tools/repo-index/server.py", "repo_index_server")
+
+
 def test_azure_list_resources_persists_inventory(azure_module, monkeypatch):
     test_root = ROOT / ".test-work" / "pytest-azure-list"
     local_dir = test_root / ".local"
@@ -185,3 +195,254 @@ def test_terraform_rejects_dir_outside_workspace(terraform_module):
     payload = json.loads(terraform_module.terraform_fmt_check(terraform_dir="../"))
     assert payload["ok"] is False
     assert payload["error"]["code"] == "INVALID_TERRAFORM_DIR"
+
+
+def test_child_runner_rejects_unknown_repo(child_runner_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "child-runner-unknown"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text("repos: []\n", encoding="utf-8")
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    payload = json.loads(child_runner_module.run_child_agent(repo="missing-repo"))
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "REPO_NOT_FOUND"
+
+
+def test_child_runner_returns_no_work(child_runner_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "child-runner-no-work" / "parent"
+    child_dir = project_dir.parent / "api-no-work"
+    child_dir.mkdir(parents=True, exist_ok=True)
+    (child_dir / "work" / "todo").mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text(
+        "repos:\n"
+        '  - name: "api-no-work"\n'
+        '    role: "backend"\n'
+        '    local_path: "../api-no-work"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    payload = json.loads(child_runner_module.run_child_agent(repo="api-no-work"))
+    assert payload["ok"] is True
+    assert payload["status"] == "no_work"
+    assert payload["queue_depth"] == 0
+
+
+def test_child_runner_launches_scoped_copilot(child_runner_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "child-runner-success" / "parent"
+    child_dir = project_dir.parent / "api-success"
+    todo_dir = child_dir / "work" / "todo"
+    todo_dir.mkdir(parents=True, exist_ok=True)
+    request_file = todo_dir / "request-001.md"
+    request_file.write_text("request", encoding="utf-8")
+    (project_dir / ".repo-index.yml").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text(
+        "repos:\n"
+        '  - name: "api-success"\n'
+        '    role: "backend"\n'
+        '    local_path: "../api-success"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    seen: dict[str, object] = {}
+
+    def fake_run(command, cwd, capture_output, text, timeout):
+        seen["command"] = command
+        seen["cwd"] = cwd
+        seen["timeout"] = timeout
+        return SimpleNamespace(returncode=0, stdout="done", stderr="")
+
+    monkeypatch.setattr(child_runner_module.subprocess, "run", fake_run)
+
+    payload = json.loads(child_runner_module.run_child_agent(repo="api-success", timeout_seconds=90))
+    assert payload["ok"] is True
+    assert payload["status"] == "completed"
+    assert payload["request_file"] == "work/todo/request-001.md"
+    assert payload["exit_code"] == 0
+    assert Path(payload["log_file"]).exists()
+
+    command = seen["command"]
+    assert isinstance(command, list)
+    assert command[0] == "copilot"
+    assert "--autopilot" in command
+    assert "--no-ask-user" in command
+    assert "--add-dir" in command
+    assert str(child_dir.resolve()) in command
+    assert seen["cwd"] == str(child_dir.resolve())
+    assert seen["timeout"] == 90
+
+
+def test_child_runner_reports_lock(child_runner_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "child-runner-lock" / "parent"
+    child_dir = project_dir.parent / "api-lock"
+    todo_dir = child_dir / "work" / "todo"
+    todo_dir.mkdir(parents=True, exist_ok=True)
+    (todo_dir / "request-001.md").write_text("request", encoding="utf-8")
+    (project_dir / ".repo-index.yml").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text(
+        "repos:\n"
+        '  - name: "api-lock"\n'
+        '    role: "backend"\n'
+        '    local_path: "../api-lock"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    lock_file = child_runner_module._lock_path(project_dir.resolve(), "api-lock")
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    lock_file.write_text("123", encoding="utf-8")
+
+    payload = json.loads(child_runner_module.run_child_agent(repo="api-lock"))
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "REPO_LOCKED"
+
+
+def test_child_runner_batch_dispatches_multiple_repos(child_runner_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "child-runner-batch" / "parent"
+    api_dir = project_dir.parent / "api-batch"
+    web_dir = project_dir.parent / "web-batch"
+    (api_dir / "work" / "todo").mkdir(parents=True, exist_ok=True)
+    (web_dir / "work" / "todo").mkdir(parents=True, exist_ok=True)
+    (api_dir / "work" / "todo" / "request-api.md").write_text("api request", encoding="utf-8")
+    (web_dir / "work" / "todo" / "request-web.md").write_text("web request", encoding="utf-8")
+    (project_dir / ".repo-index.yml").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text(
+        "repos:\n"
+        '  - name: "api-batch"\n'
+        '    role: "backend"\n'
+        '    local_path: "../api-batch"\n'
+        '  - name: "web-batch"\n'
+        '    role: "frontend"\n'
+        '    local_path: "../web-batch"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    def fake_run(command, cwd, capture_output, text, timeout):
+        return SimpleNamespace(returncode=0, stdout=f"ok:{Path(cwd).name}", stderr="")
+
+    monkeypatch.setattr(child_runner_module.subprocess, "run", fake_run)
+
+    payload = json.loads(child_runner_module.run_child_agents_batch(max_parallel=2, timeout_seconds=90))
+    assert payload["ok"] is True
+    assert payload["status"] == "completed"
+    assert payload["summary"]["total"] == 2
+    assert payload["summary"]["completed"] == 2
+    assert payload["summary"]["failed"] == 0
+    assert payload["summary"]["no_work"] == 0
+    assert payload["worker_count"] == 2
+
+    repos = {item["repo"] for item in payload["results"] if item.get("repo")}
+    assert repos == {"api-batch", "web-batch"}
+
+
+def test_repo_index_reports_queue_state(repo_index_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "repo-index-queues" / "parent"
+    api_dir = project_dir.parent / "api-queues"
+    (api_dir / "work" / "todo").mkdir(parents=True, exist_ok=True)
+    (api_dir / "work" / "ready-for-review").mkdir(parents=True, exist_ok=True)
+    (api_dir / "work" / "done").mkdir(parents=True, exist_ok=True)
+    (api_dir / "work" / "todo" / "todo-1.yml").write_text("todo", encoding="utf-8")
+    (api_dir / "work" / "ready-for-review" / "rfr-1.yml").write_text("rfr", encoding="utf-8")
+    (api_dir / "work" / "done" / "done-1.yml").write_text("done", encoding="utf-8")
+
+    (project_dir / ".repo-index.yml").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text(
+        "repos:\n"
+        '  - name: "api-queues"\n'
+        '    role: "backend"\n'
+        '    local_path: "../api-queues"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    payload = json.loads(repo_index_module.check_repo_queues(project_dir=str(project_dir)))
+    assert payload["ok"] is True
+    assert len(payload["repos"]) == 1
+    repo = payload["repos"][0]
+    assert repo["name"] == "api-queues"
+    assert repo["queues"]["todo"]["count"] == 1
+    assert repo["queues"]["ready_for_review"]["count"] == 1
+    assert repo["queues"]["done"]["count"] == 1
+    assert repo["queues"]["todo"]["files"] == ["todo-1.yml"]
+
+
+def test_child_runner_start_async_returns_job(child_runner_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "child-runner-async-start" / "parent"
+    child_dir = project_dir.parent / "api-async"
+    todo_dir = child_dir / "work" / "todo"
+    todo_dir.mkdir(parents=True, exist_ok=True)
+    (todo_dir / "request-001.md").write_text("request", encoding="utf-8")
+    (project_dir / ".repo-index.yml").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text(
+        "repos:\n"
+        '  - name: "api-async"\n'
+        '    role: "backend"\n'
+        '    local_path: "../api-async"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    class FakeProc:
+        def __init__(self, pid: int):
+            self.pid = pid
+
+    monkeypatch.setattr(child_runner_module.subprocess, "Popen", lambda *args, **kwargs: FakeProc(12345))
+    monkeypatch.setattr(child_runner_module, "_is_pid_alive", lambda pid: True)
+
+    payload = json.loads(child_runner_module.start_child_agent(repo="api-async", timeout_seconds=90))
+    assert payload["ok"] is True
+    assert payload["status"] == "started"
+    assert payload["repo"] == "api-async"
+    assert payload["worker_pid"] == 12345
+    assert payload.get("job_id")
+
+    job_payload = json.loads(child_runner_module.get_child_agent_job(job_id=payload["job_id"]))
+    assert job_payload["ok"] is True
+    assert job_payload["job"]["job_id"] == payload["job_id"]
+    assert job_payload["job"]["status"] == "running"
+
+    child_runner_module._release_lock(Path(job_payload["job"]["lock_file"]))
+
+
+def test_child_runner_async_batch_start(child_runner_module, monkeypatch):
+    project_dir = ROOT / ".test-work" / "child-runner-async-batch" / "parent"
+    api_dir = project_dir.parent / "api-async-batch"
+    web_dir = project_dir.parent / "web-async-batch"
+    (api_dir / "work" / "todo").mkdir(parents=True, exist_ok=True)
+    (web_dir / "work" / "todo").mkdir(parents=True, exist_ok=True)
+    (api_dir / "work" / "todo" / "request-api.md").write_text("api request", encoding="utf-8")
+    (web_dir / "work" / "todo" / "request-web.md").write_text("web request", encoding="utf-8")
+    (project_dir / ".repo-index.yml").parent.mkdir(parents=True, exist_ok=True)
+    (project_dir / ".repo-index.yml").write_text(
+        "repos:\n"
+        '  - name: "api-async-batch"\n'
+        '    role: "backend"\n'
+        '    local_path: "../api-async-batch"\n'
+        '  - name: "web-async-batch"\n'
+        '    role: "frontend"\n'
+        '    local_path: "../web-async-batch"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_DIR", str(project_dir))
+
+    class FakeProc:
+        def __init__(self, pid: int):
+            self.pid = pid
+
+    pids = iter([20001, 20002])
+    monkeypatch.setattr(child_runner_module.subprocess, "Popen", lambda *args, **kwargs: FakeProc(next(pids)))
+    monkeypatch.setattr(child_runner_module, "_is_pid_alive", lambda pid: True)
+
+    payload = json.loads(child_runner_module.start_child_agents_batch(max_parallel=2, timeout_seconds=90))
+    assert payload["ok"] is True
+    assert payload["summary"]["requested"] == 2
+    assert payload["summary"]["started"] == 2
+    assert payload["summary"]["deferred_capacity"] == 0
+
+    for result in payload["results"]:
+        if result.get("status") == "started":
+            job = json.loads(child_runner_module.get_child_agent_job(job_id=result["job_id"]))
+            child_runner_module._release_lock(Path(job["job"]["lock_file"]))
