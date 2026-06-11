@@ -1,0 +1,3 @@
+Example from ps ax while running. One like this is per child repo.
+
+node /usr/local/bin/copilot -p Process exactly one queued request for repo 'laf-track-infra' as infra. Read and execute only 'work/todo/user-flows-phase-1-infra.md' from work/todo. Follow the child repo agent instructions, stay within this repo, and complete the queue handoff protocol. If implementation files are missing, scaffold the minimal required project/code structure in this repo to satisfy the request and acceptance criteria; do not mark blocked solely because the repo is greenfield. --allow-all-tools --autopilot --no-ask-user --no-color --stream on --log-level none --model auto --add-dir /home/mike/repos/laf-track/laf-track-infra
