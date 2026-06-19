@@ -101,8 +101,11 @@ def _select_repo_entry(project_dir: Path, repo: str, repos: list[dict[str, Any]]
     return None
 
 
-def _queue_files(repo_dir: Path) -> list[Path]:
-    queue_dir = repo_dir / "work" / "todo"
+def _queue_files(repo_dir: Path, phase: str = "specialist") -> list[Path]:
+    if phase == "critic":
+        queue_dir = repo_dir / "work" / "ready-for-review"
+    else:
+        queue_dir = repo_dir / "work" / "todo"
     if not queue_dir.is_dir():
         return []
     return sorted(path for path in queue_dir.iterdir() if path.is_file())
@@ -215,9 +218,18 @@ def _acquire_repo_lock(project_dir: Path, repo_name: str) -> tuple[bool, Path, d
     return False, lock_file, running_job
 
 
-def _build_prompt(repo_name: str, repo_role: str, request_file: Path) -> str:
+def _build_prompt(repo_name: str, repo_role: str, request_file: Path, phase: str = "specialist") -> str:
     role_label = repo_role if repo_role else "specialist/critic"
     request_rel = request_file.as_posix()
+    if phase == "critic":
+        return (
+            f"You are the critic for repo '{repo_name}'. "
+            f"Review '{request_rel}' from work/ready-for-review/. "
+            "Follow the critic agent instructions in .github/agents/*-critic.agent.md. "
+            "Run the full validation checklist. If all criteria pass, append your PASS rationale "
+            "and move the file to work/done/. If issues are found, append feedback with STATUS: FAIL "
+            "and move the file back to work/todo/ for the specialist to address."
+        )
     return (
         f"Process exactly one queued request for repo '{repo_name}' as {role_label}. "
         f"Read and execute only '{request_rel}' from work/todo. "
@@ -505,6 +517,7 @@ def _resolve_job_setup(
     repo: str,
     timeout_seconds: int,
     max_output_chars: int,
+    phase: str = "specialist",
 ) -> dict[str, Any]:
     if not repo or not repo.strip():
         return {"ok": False, "error": {"code": "INVALID_REPO", "message": "repo must be a non-empty string"}}
@@ -521,6 +534,8 @@ def _resolve_job_setup(
                 "message": "max_output_chars must be between 200 and 200000",
             },
         }
+    if phase not in ("specialist", "critic"):
+        return {"ok": False, "error": {"code": "INVALID_PHASE", "message": "phase must be 'specialist' or 'critic'"}}
 
     project_dir = _workspace_root()
     repos, err = _load_repo_index(project_dir)
@@ -539,7 +554,8 @@ def _resolve_job_setup(
     if not repo_dir.is_dir():
         return {"ok": False, "error": {"code": "REPO_PATH_MISSING", "message": f"Repo path does not exist: {repo_dir}"}}
 
-    queue = _queue_files(repo_dir)
+    queue_label = "work/ready-for-review" if phase == "critic" else "work/todo"
+    queue = _queue_files(repo_dir, phase=phase)
     if not queue:
         return {
             "ok": True,
@@ -548,7 +564,7 @@ def _resolve_job_setup(
             "role": repo_role,
             "repo_path": str(repo_dir),
             "queue_depth": 0,
-            "message": "No files in work/todo",
+            "message": f"No files in {queue_label}",
         }
     request_file = queue[0]
 
@@ -567,7 +583,7 @@ def _resolve_job_setup(
             },
         }
 
-    prompt = _build_prompt(repo_name, repo_role, request_file.relative_to(repo_dir))
+    prompt = _build_prompt(repo_name, repo_role, request_file.relative_to(repo_dir), phase=phase)
     command = [
         "copilot",
         "-p",
@@ -592,6 +608,7 @@ def _resolve_job_setup(
         "repo": repo_name,
         "role": repo_role,
         "repo_dir": repo_dir,
+        "phase": phase,
         "queue_depth_before": len(queue),
         "request_file": str(request_file.relative_to(repo_dir)),
         "prompt": prompt,
@@ -606,8 +623,9 @@ def _start_child_agent_job(
     repo: str,
     timeout_seconds: int,
     max_output_chars: int,
+    phase: str = "specialist",
 ) -> dict[str, Any]:
-    setup = _resolve_job_setup(repo=repo, timeout_seconds=timeout_seconds, max_output_chars=max_output_chars)
+    setup = _resolve_job_setup(repo=repo, timeout_seconds=timeout_seconds, max_output_chars=max_output_chars, phase=phase)
     if not setup.get("ok"):
         return setup
     if setup.get("status") == "no_work":
@@ -622,6 +640,7 @@ def _start_child_agent_job(
         "created_at": _now_iso(),
         "repo": setup["repo"],
         "role": setup["role"],
+        "phase": phase,
         "repo_path": str(setup["repo_dir"]),
         "request_file": setup["request_file"],
         "queue_depth_before": setup["queue_depth_before"],
@@ -758,12 +777,21 @@ def run_child_agent(
     repo: str,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     max_output_chars: int = 12000,
+    phase: str = "specialist",
 ) -> str:
-    """Spawn a scoped Copilot run in one child repo using .repo-index.yml allowlist."""
+    """Spawn a scoped Copilot run in one child repo using .repo-index.yml allowlist.
+
+    Args:
+        repo: Name of the repo from .repo-index.yml
+        timeout_seconds: Max execution time (30-7200)
+        max_output_chars: Max output to capture
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+    """
     payload = _run_child_agent_core(
         repo=repo,
         timeout_seconds=timeout_seconds,
         max_output_chars=max_output_chars,
+        phase=phase,
     )
     return json.dumps(payload)
 
@@ -772,8 +800,9 @@ def _run_child_agent_core(
     repo: str,
     timeout_seconds: int,
     max_output_chars: int,
+    phase: str = "specialist",
 ) -> dict[str, Any]:
-    setup = _resolve_job_setup(repo=repo, timeout_seconds=timeout_seconds, max_output_chars=max_output_chars)
+    setup = _resolve_job_setup(repo=repo, timeout_seconds=timeout_seconds, max_output_chars=max_output_chars, phase=phase)
     if not setup.get("ok") or setup.get("status") == "no_work":
         return setup
 
@@ -860,14 +889,25 @@ def run_child_agents_batch(
     max_parallel: int = DEFAULT_MAX_PARALLEL,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     max_output_chars: int = 12000,
+    phase: str = "specialist",
 ) -> str:
-    """Dispatch one queued request per repo concurrently using scoped child Copilot runs."""
+    """Dispatch one queued request per repo concurrently using scoped child Copilot runs.
+
+    Args:
+        repos: List of repo names (defaults to all repos in .repo-index.yml)
+        max_parallel: Max concurrent jobs (1-32)
+        timeout_seconds: Max execution time per job (30-7200)
+        max_output_chars: Max output to capture per job
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+    """
     if max_parallel < 1 or max_parallel > 32:
         return _error_payload("INVALID_MAX_PARALLEL", "max_parallel must be between 1 and 32")
     if timeout_seconds < 30 or timeout_seconds > 7200:
         return _error_payload("INVALID_TIMEOUT", "timeout_seconds must be between 30 and 7200")
     if max_output_chars < 200 or max_output_chars > 200000:
         return _error_payload("INVALID_OUTPUT_LIMIT", "max_output_chars must be between 200 and 200000")
+    if phase not in ("specialist", "critic"):
+        return _error_payload("INVALID_PHASE", "phase must be 'specialist' or 'critic'")
 
     project_dir = _workspace_root()
     repo_index, err = _load_repo_index(project_dir)
@@ -924,6 +964,7 @@ def run_child_agents_batch(
                 repo=repo_name,
                 timeout_seconds=timeout_seconds,
                 max_output_chars=max_output_chars,
+                phase=phase,
             ): repo_name
             for repo_name in deduped_targets
         }
@@ -970,13 +1011,22 @@ def start_child_agent(
     repo: str,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     max_output_chars: int = 12000,
+    phase: str = "specialist",
 ) -> str:
-    """Start one child-repo run asynchronously and return a job id immediately."""
+    """Start one child-repo run asynchronously and return a job id immediately.
+
+    Args:
+        repo: Name of the repo from .repo-index.yml
+        timeout_seconds: Max execution time (30-7200)
+        max_output_chars: Max output to capture
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+    """
     return json.dumps(
         _start_child_agent_job(
             repo=repo,
             timeout_seconds=timeout_seconds,
             max_output_chars=max_output_chars,
+            phase=phase,
         )
     )
 
@@ -988,14 +1038,25 @@ def start_child_agents_batch(
     max_parallel: int = DEFAULT_MAX_PARALLEL,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     max_output_chars: int = 12000,
+    phase: str = "specialist",
 ) -> str:
-    """Start async child-repo jobs up to max_parallel and return job ids for polling."""
+    """Start async child-repo jobs up to max_parallel and return job ids for polling.
+
+    Args:
+        repos: List of repo names (defaults to all repos in .repo-index.yml)
+        max_parallel: Max concurrent jobs (1-32)
+        timeout_seconds: Max execution time per job (30-7200)
+        max_output_chars: Max output to capture per job
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+    """
     if max_parallel < 1 or max_parallel > 32:
         return _error_payload("INVALID_MAX_PARALLEL", "max_parallel must be between 1 and 32")
     if timeout_seconds < 30 or timeout_seconds > 7200:
         return _error_payload("INVALID_TIMEOUT", "timeout_seconds must be between 30 and 7200")
     if max_output_chars < 200 or max_output_chars > 200000:
         return _error_payload("INVALID_OUTPUT_LIMIT", "max_output_chars must be between 200 and 200000")
+    if phase not in ("specialist", "critic"):
+        return _error_payload("INVALID_PHASE", "phase must be 'specialist' or 'critic'")
 
     project_dir = _workspace_root()
     repo_index, err = _load_repo_index(project_dir)
@@ -1038,6 +1099,7 @@ def start_child_agents_batch(
             repo=repo_name,
             timeout_seconds=timeout_seconds,
             max_output_chars=max_output_chars,
+            phase=phase,
         )
         started.append(result)
         if result.get("status") == "started":
