@@ -226,9 +226,28 @@ def _build_prompt(repo_name: str, repo_role: str, request_file: Path, phase: str
             f"You are the critic for repo '{repo_name}'. "
             f"Review '{request_rel}' from work/ready-for-review/. "
             "Follow the critic agent instructions in .github/agents/*-critic.agent.md. "
-            "Run the full validation checklist. If all criteria pass, append your PASS rationale "
-            "and move the file to work/done/. If issues are found, append feedback with STATUS: FAIL "
-            "and move the file back to work/todo/ for the specialist to address."
+            "Run the FULL tiered review (Tier 1: objective validation, Tier 2: requirement coverage, "
+            "Tier 3: failure modes, Tier 4: security, Tier 5: architecture/cross-repo). "
+            "If all tiers pass (allowing up to 2 LOW-severity NOTEs), append your PASS rationale "
+            "and move the file to work/done/. If any HIGH-severity finding, append structured feedback "
+            "with STATUS: FAIL and move the file back to work/todo/ for the specialist to address."
+        )
+    if phase == "full":
+        return (
+            f"Process ALL queued requests for repo '{repo_name}' as {role_label} with integrated quality gate.\n\n"
+            "For each file in work/todo/ (process them in sorted order):\n"
+            "1. SPECIALIST PHASE: Read the request, implement changes following .github/agents/*-specialist.agent.md.\n"
+            "2. CRITIC PHASE: Switch to critic mode per .github/agents/*-critic.agent.md. Run the full tiered review:\n"
+            "   - Tier 1: Objective validation (lint, test, build, contract alignment)\n"
+            "   - Tier 2: Requirement coverage (compare acceptance criteria vs implementation)\n"
+            "   - Tier 3: Failure mode analysis (error paths, race conditions, data consistency)\n"
+            "   - Tier 4: Security authorization (not just authn — check authz, data exposure, input bounds)\n"
+            "   - Tier 5: Architecture/decision compliance\n"
+            "3. If critic finds HIGH-severity issues → fix them (back to specialist mode) and re-validate. Max 3 cycles per item.\n"
+            "4. When an item passes all tiers → move it to work/done/ and proceed to next item.\n"
+            "5. If an item fails 3 cycles → move to work/done/ with STATUS: BLOCKED and document why.\n\n"
+            f"Start with: '{request_rel}'\n"
+            "Stay within this repo. Do not ask questions. Complete all items or exhaust retries."
         )
     return (
         f"Process exactly one queued request for repo '{repo_name}' as {role_label}. "
@@ -534,8 +553,8 @@ def _resolve_job_setup(
                 "message": "max_output_chars must be between 200 and 200000",
             },
         }
-    if phase not in ("specialist", "critic"):
-        return {"ok": False, "error": {"code": "INVALID_PHASE", "message": "phase must be 'specialist' or 'critic'"}}
+    if phase not in ("specialist", "critic", "full"):
+        return {"ok": False, "error": {"code": "INVALID_PHASE", "message": "phase must be 'specialist', 'critic', or 'full'"}}
 
     project_dir = _workspace_root()
     repos, err = _load_repo_index(project_dir)
@@ -785,7 +804,7 @@ def run_child_agent(
         repo: Name of the repo from .repo-index.yml
         timeout_seconds: Max execution time (30-7200)
         max_output_chars: Max output to capture
-        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review, 'full' processes all todo items with integrated specialist+critic loop (up to 3 retries per item)
     """
     payload = _run_child_agent_core(
         repo=repo,
@@ -898,7 +917,7 @@ def run_child_agents_batch(
         max_parallel: Max concurrent jobs (1-32)
         timeout_seconds: Max execution time per job (30-7200)
         max_output_chars: Max output to capture per job
-        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review, 'full' processes all todo items with integrated specialist+critic loop (up to 3 retries per item)
     """
     if max_parallel < 1 or max_parallel > 32:
         return _error_payload("INVALID_MAX_PARALLEL", "max_parallel must be between 1 and 32")
@@ -906,8 +925,8 @@ def run_child_agents_batch(
         return _error_payload("INVALID_TIMEOUT", "timeout_seconds must be between 30 and 7200")
     if max_output_chars < 200 or max_output_chars > 200000:
         return _error_payload("INVALID_OUTPUT_LIMIT", "max_output_chars must be between 200 and 200000")
-    if phase not in ("specialist", "critic"):
-        return _error_payload("INVALID_PHASE", "phase must be 'specialist' or 'critic'")
+    if phase not in ("specialist", "critic", "full"):
+        return _error_payload("INVALID_PHASE", "phase must be 'specialist', 'critic', or 'full'")
 
     project_dir = _workspace_root()
     repo_index, err = _load_repo_index(project_dir)
@@ -1019,7 +1038,7 @@ def start_child_agent(
         repo: Name of the repo from .repo-index.yml
         timeout_seconds: Max execution time (30-7200)
         max_output_chars: Max output to capture
-        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review, 'full' processes all todo items with integrated specialist+critic loop (up to 3 retries per item)
     """
     return json.dumps(
         _start_child_agent_job(
@@ -1047,7 +1066,7 @@ def start_child_agents_batch(
         max_parallel: Max concurrent jobs (1-32)
         timeout_seconds: Max execution time per job (30-7200)
         max_output_chars: Max output to capture per job
-        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review
+        phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review, 'full' processes all todo items with integrated specialist+critic loop (up to 3 retries per item)
     """
     if max_parallel < 1 or max_parallel > 32:
         return _error_payload("INVALID_MAX_PARALLEL", "max_parallel must be between 1 and 32")
@@ -1055,8 +1074,8 @@ def start_child_agents_batch(
         return _error_payload("INVALID_TIMEOUT", "timeout_seconds must be between 30 and 7200")
     if max_output_chars < 200 or max_output_chars > 200000:
         return _error_payload("INVALID_OUTPUT_LIMIT", "max_output_chars must be between 200 and 200000")
-    if phase not in ("specialist", "critic"):
-        return _error_payload("INVALID_PHASE", "phase must be 'specialist' or 'critic'")
+    if phase not in ("specialist", "critic", "full"):
+        return _error_payload("INVALID_PHASE", "phase must be 'specialist', 'critic', or 'full'")
 
     project_dir = _workspace_root()
     repo_index, err = _load_repo_index(project_dir)
