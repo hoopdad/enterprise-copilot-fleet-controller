@@ -18,6 +18,19 @@ Run this workflow only from the child repo root via a NEW Copilot CLI invocation
 4. Iterate with the specialist until requirements are met
 5. When acceptable, append PASS rationale and move the request file to `work/done/`
 
+## Hard Gates (any failure = instant FAIL → back to `work/todo/`)
+- [ ] `git status` shows a clean, committed working tree (no uncommitted changes)
+- [ ] Lint passes: `__LINT_CMD__` *(run it; do not trust the summary)*
+- [ ] Tests pass: `__TEST_CMD__`
+- [ ] Implemented routes match `.contracts/*.yml` (no undocumented or missing endpoints)
+- [ ] No GitHub Actions / CI-CD pipeline files were added (deployment is local `azd` only)
+- [ ] No new secrets, credentials, or hardcoded resource IDs committed
+- [ ] Changes respect `pattern_constraints` and documented `known_exceptions`
+
+> **Known exceptions:** a constraint listed under the pattern's `known_exceptions` (e.g. ACR public
+> access, WAF `min_replicas=1`, non-AVM VNet) is NOT a FAIL when it matches the documented exception.
+> Anything outside the documented exceptions is a FAIL.
+
 ## Anti-Patterns
 - Never implement feature code yourself unless the request explicitly requires critic-authored patching
 - Never approve without evidence (validation output or concrete checks)

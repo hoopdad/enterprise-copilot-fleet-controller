@@ -535,14 +535,14 @@ git commit --allow-empty -m "init" -q
 
 bash "$FRAMEWORK_DIR/scripts/init.sh" --config "$TEST_DIR/init-optional.yml" --start-phase 1 > "$TEST_DIR/init-optional-output.log" 2>&1 || true
 
-assert_file_exists "$PROJECT_DIR_OPTIONAL/.copilot/workflow-templates/mobile-ci.yml"
-assert_file_exists "$PROJECT_DIR_OPTIONAL/.copilot/workflow-templates/mobile-cd.yml"
+# mobile_ci_cd / runner_self_heal / semantic_release are DEPRECATED no-ops in v0.2.0
+# (GitHub Actions removed in favor of local azd). They must NOT generate workflow templates.
+assert_file_not_exists "$PROJECT_DIR_OPTIONAL/.copilot/workflow-templates/mobile-ci.yml"
+assert_file_not_exists "$PROJECT_DIR_OPTIONAL/.copilot/workflow-templates/mobile-cd.yml"
+assert_file_contains "$TEST_DIR/init-optional-output.log" "mobile_ci_cd is deprecated and ignored"
+# Non-deprecated optional docs are still generated.
 assert_file_exists "$PROJECT_DIR_OPTIONAL/.copilot/docs/developer-onboarding.md"
 assert_file_exists "$PROJECT_DIR_OPTIONAL/.copilot/docs/portability-blueprint.md"
-if [[ -f "$PROJECT_DIR_OPTIONAL/.copilot/workflow-templates/mobile-ci.yml" ]]; then
-  assert_file_contains "$PROJECT_DIR_OPTIONAL/.copilot/workflow-templates/mobile-ci.yml" "Check and install prerequisites"
-  assert_file_contains "$PROJECT_DIR_OPTIONAL/.copilot/workflow-templates/mobile-ci.yml" "semantic_version_release"
-fi
 
 # ─────────────────────────────────────────────────────────────
 # Test 4d: Init with visibility=local creates local repos only

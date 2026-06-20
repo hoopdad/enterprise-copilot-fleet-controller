@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars and fill in values as needed.
+# Set subscription IDs through TF_VAR_* environment variables.
+
+hub_resource_group_name   = "myorg-lab-hub-rg"
+hub_region                = "eastus2"
+hub_resource_group_region = "eastus2"
+hub_vnet_name             = "myorg-lab-hub-vnet"
+hub_law_name              = "myorg-lab-hub-law"
+dns_resolver_name         = "myorg-lab-dns-resolver"
+lab_prefix                = "myorg-lab"
+
+private_dns_zones = {
+  "privatelink.blob.core.windows.net"         = {}
+  "privatelink.vaultcore.azure.net"           = {}
+  "privatelink.monitor.azure.com"             = {}
+  "privatelink.oms.opinsights.azure.com"      = {}
+  "privatelink.ods.opinsights.azure.com"      = {}
+  "privatelink.agentsvc.azure-automation.net" = {}
+}
+
+# Optional VPN settings
+# vpn_client_address_pool = "172.20.0.0/27"
+
+# Optional admin assignment
+# lab_admin_object_id = "00000000-0000-0000-0000-000000000000"
+
+# Optional alert recipients
+# vpn_gateway_alert_email_receivers = ["admin@example.com"]

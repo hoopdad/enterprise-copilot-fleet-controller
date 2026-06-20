@@ -1,0 +1,1 @@
+subscription_id = ""  # Set your target Azure subscription ID here, or export TF_VAR_subscription_id

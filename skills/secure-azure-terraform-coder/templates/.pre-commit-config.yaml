@@ -1,0 +1,14 @@
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.99.3
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --args=-recursive
+  - repo: https://github.com/bridgecrewio/checkov.git
+    rev: 3.2.78
+    hooks:
+      - id: checkov
+        args:
+          - --framework
+          - terraform

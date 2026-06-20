@@ -3,6 +3,13 @@
 
 __PROJECT_DESC__
 
+## Session Init Checklist
+- First action in any orchestrator session: call `tool_search_tool_regex` with pattern
+  `child-agent|repo-index|contract` to discover the available MCP tool prefixes.
+- Never assume MCP tools are unavailable without a direct tool call attempt.
+- Consult `.copilot/topology.md` FIRST for file locations, resource IDs, Entra config, and the
+  request flow — do not rediscover them with `find`/`grep`.
+
 ## Architecture
 
 This is a multi-repo project managed by the enterprise-copilot-fleet-controller. You are the orchestrator.
@@ -19,10 +26,24 @@ The files under `.copilot/guardrails/` are the active source of truth for the pr
 
 ### Child Repo Workflow
 
-| Repo | Role | Path | Specialist Agent | Critic Agent | Deployment Agent |
-|------|------|------|------------------|--------------|------------------|
+| Repo | Role | Path | Specialist Agent | Critic Agent |
+|------|------|------|------------------|--------------|
 __CHILD_WORKFLOW_LIST__
 Specialist and critic agents live inside each child repo under `.github/agents/`.
+
+## Local Deployment (azd)
+
+This project deploys with the **Azure Developer CLI (`azd`)** from the harness repo — there are
+**no GitHub Actions pipelines**.
+
+- Full deploy: `azd up`
+- Infra only: `azd provision`
+- Services only: `bash scripts/azd-deploy.sh`
+- Programmatic deploys: use the MCP tools `deploy_local` (full flow) or `quick_deploy` (one service)
+
+**Pre-deploy gate (MANDATORY):** before any deploy, every changed repo MUST be committed, pushed,
+and version-tagged. Run `bash scripts/predeploy-gate.sh` (or the `create_prs` + `auto_merge_prs`
+MCP tools) and confirm a clean, pushed, tagged state before invoking `azd`.
 
 
 ## Your Protocol
@@ -59,10 +80,16 @@ Specialist and critic agents live inside each child repo under `.github/agents/`
 8. **Wait for critic-approved completion** in child repo `work/done/` (critic iterates with specialist via `work/ready-for-review/`)
 9. **Validate done items** against acceptance criteria, then log novel decisions to .decisions/log.md
 __CRITIC_PROTOCOL_SECTION__
-10. **Trigger deployment agent** (after all critic-approved `work/done/` items are validated):
-    - Create a deployment request in `work/todo/` describing the CI/CD changes needed
-    - Use `start_child_agent` with the deployment role and poll with `get_child_agent_job` to build and push CI/CD workflows
-    - The deployment agent will push a feature branch and open a PR — verify the PR URL in the run result
+10. **Pre-deploy gate** (after all critic-approved `work/done/` items are validated):
+    - For every changed repo, ensure the working tree is clean, commits are **pushed**, and a
+      **version tag** is created. Run `bash scripts/predeploy-gate.sh` (it commits/pushes/tags each
+      repo from `.repo-index.yml`) or use `create_prs` + `auto_merge_prs`.
+    - Do NOT deploy until the gate reports every repo committed, pushed, and tagged.
+11. **Trigger local deployment** (only after the pre-deploy gate passes):
+    - Full deploy: `azd up` · Infra only: `azd provision` · Services only: `bash scripts/azd-deploy.sh`
+    - Or use the MCP tool `deploy_local` (programmatic) / `quick_deploy` (single service)
+    - After deploy, run `verify_deployment` and dispatch the `__PROJECT_NAME__-e2e-tester` agent to
+      validate authenticated flows through the WAF.
 
 ## File Formats
 
@@ -114,3 +141,5 @@ __USAGE_QUALITY_SECTION__
 - Never launch child implementation/review from the parent via runtime background agents; use MCP child-agent-runner dispatch tools only (prefer `start_child_agents_batch`/`start_child_agent` + polling)
 - **NEVER** probe child repo existence with shell commands (`ls ../`, `find ../`, `cd .. && ls`, etc.) — child repo paths are definitive in `.repo-index.yml`
 - **NEVER** call non-existent tools with server-prefixed names like `usage_tracker_log_usage` or `repo_index_check_repo_index` — use the exact tool name (e.g., `log_usage`, `check_repo_index`)
+- **Never deploy without the pre-deploy gate** — every repo must be committed, pushed, and version-tagged first
+- **Never add GitHub Actions / CI-CD pipelines** — deployment is local `azd` only

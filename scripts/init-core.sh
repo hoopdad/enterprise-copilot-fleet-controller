@@ -698,9 +698,9 @@ optional_feature_state_table() {
   cat <<EOF
 | Feature | Enabled | Notes |
 |---------|---------|-------|
-| mobile_ci_cd | ${FEATURE_MOBILE_CI_CD} | Generate mobile CI/CD workflow templates under \`.copilot/workflow-templates/\` |
-| runner_self_heal | ${FEATURE_RUNNER_SELF_HEAL} | Add prerequisite self-healing blocks in workflow templates |
-| semantic_release | ${FEATURE_SEMANTIC_RELEASE} | Add semantic versioning release job in CI template |
+| mobile_ci_cd | ${FEATURE_MOBILE_CI_CD} | DEPRECATED (no-op) — GitHub Actions removed in favor of local \`azd\` |
+| runner_self_heal | ${FEATURE_RUNNER_SELF_HEAL} | DEPRECATED (no-op) — GitHub Actions removed in favor of local \`azd\` |
+| semantic_release | ${FEATURE_SEMANTIC_RELEASE} | DEPRECATED (no-op) — GitHub Actions removed in favor of local \`azd\` |
 | onboarding_docs | ${FEATURE_ONBOARDING_DOCS} | Generate \`.copilot/docs/developer-onboarding.md\` |
 | portability_blueprints | ${FEATURE_PORTABILITY_BLUEPRINTS} | Generate \`.copilot/docs/portability-blueprint.md\` |
 | critic_evaluator | ${FEATURE_CRITIC_EVALUATOR} | Run optional PASS/FAIL critic gate using configured \`critic.scope\` context |
@@ -1156,15 +1156,129 @@ EOF
 }
 
 generate_critic_md() {
-  local name="$1" role="$2" description="$3" repo_path="$4"
-  local tools
+  local name="$1" role="$2" description="$3" repo_path="$4" validate_str="$5"
+  local tools lint_cmd test_cmd
   tools=$(tools_for_role "$role")
+  lint_cmd=$(echo "$validate_str" | sed 's/.*lint:\([^|]*\).*/\1/')
+  test_cmd=$(echo "$validate_str" | sed 's/.*test:\([^|]*\).*/\1/')
   TPL_NAME="$name" \
   TPL_DESCRIPTION="$description" \
   TPL_REPO_PATH="$repo_path" \
   TPL_TOOLS="$tools" \
   TPL_ROLE="$role" \
+  TPL_LINT_CMD="$lint_cmd" \
+  TPL_TEST_CMD="$test_cmd" \
   render_template_stdout "$TEMPLATE_DIR/agents/critic.agent.md.tmpl"
+}
+
+# ─── Skills install ──────────────────────────────────────────
+# Render a single skill folder from the framework skills/ library into a repo's
+# .github/skills/<name>/, substituting __TOKENS__ from project config.
+render_skill_into() {
+  local skill_name="$1" dest_repo_dir="$2"
+  local src_dir="$FRAMEWORK_DIR/skills/$skill_name"
+  local dst_dir="$dest_repo_dir/.github/skills/$skill_name"
+  if [[ ! -d "$src_dir" ]]; then
+    warn "Skill not found in library: $skill_name (skipping)"
+    return 0
+  fi
+  mkdir -p "$dst_dir"
+  local rel out
+  while IFS= read -r src_file; do
+    rel="${src_file#"$src_dir"/}"
+    out="$dst_dir/$rel"
+    mkdir -p "$(dirname "$out")"
+    TPL_PROJECT_NAME="$PROJECT_NAME" \
+    TPL_REGION="${REGION:-centralus}" \
+    TPL_RESOURCE_GROUP="${PROJECT_NAME}-dev-rg" \
+    TPL_ACR_NAME="<set-after-provision>" \
+    TPL_COSMOS_ACCOUNT="<set-after-provision>" \
+    TPL_ACA_ENV_SUFFIX="<set-after-provision>" \
+    TPL_WEB_CLIENT_ID="<set-after-provision>" \
+    TPL_API_CLIENT_ID="<set-after-provision>" \
+    TPL_TENANT_ID="<set-after-provision>" \
+    render_template_file "$src_file" "$out"
+  done < <(find "$src_dir" -type f)
+}
+
+# scope_matches_repo <scope-token> <kind> <role>
+#   kind = "parent" | "child"
+scope_matches_repo() {
+  local scope="$1" kind="$2" role="$3"
+  case "$scope" in
+    parent) [[ "$kind" == "parent" ]] ;;
+    child)  [[ "$kind" == "child" ]] ;;
+    role:*) [[ "$kind" == "child" && "${scope#role:}" == "$role" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# Install pattern-declared skills into the parent and each child repo.
+install_skills() {
+  [[ -n "${PATTERN_FILE:-}" && -f "${PATTERN_FILE:-}" ]] || { log "No pattern skills to install"; return 0; }
+  local skill_count
+  skill_count=$(parse_yaml_array_length "$PATTERN_FILE" ".skills")
+  [[ "${skill_count:-0}" -gt 0 ]] || { log "Pattern declares no skills"; return 0; }
+
+  local parent_installed=0
+  declare -A child_installed=()
+
+  for ((s=0; s<skill_count; s++)); do
+    local skill_name
+    skill_name=$(parse_yaml_value "$PATTERN_FILE" ".skills.$s.name")
+    [[ -n "$skill_name" ]] || continue
+    local scopes
+    scopes=$(parse_yaml_string_list "$PATTERN_FILE" ".skills.$s.scope")
+
+    while IFS= read -r scope; do
+      [[ -n "$scope" ]] || continue
+      if scope_matches_repo "$scope" "parent" ""; then
+        render_skill_into "$skill_name" "$TARGET_DIR"
+        parent_installed=$((parent_installed + 1))
+      fi
+      local idx
+      for ((idx=0; idx<CHILD_COUNT; idx++)); do
+        local crole="${CHILD_ROLES[$idx]}" cpath cdir
+        if scope_matches_repo "$scope" "child" "$crole"; then
+          cpath="${CHILD_LOCAL_PATHS[$idx]}"
+          cdir="$(resolve_repo_path "$cpath")"
+          [[ -d "$cdir" ]] || continue
+          render_skill_into "$skill_name" "$cdir"
+          child_installed["${CHILD_NAMES[$idx]}"]=$(( ${child_installed["${CHILD_NAMES[$idx]}"]:-0} + 1 ))
+        fi
+      done
+    done <<< "$scopes"
+  done
+
+  log "Installed $parent_installed skill(s) into parent .github/skills/"
+  for ((idx=0; idx<CHILD_COUNT; idx++)); do
+    local n="${CHILD_NAMES[$idx]}"
+    [[ -n "${child_installed[$n]:-}" ]] && log "Installed ${child_installed[$n]} skill(s) into $n/.github/skills/"
+  done
+}
+
+# Generate a child repo's .github/copilot-instructions.md (azd-aware, no GitHub Actions).
+generate_child_instructions() {
+  local name="$1" role="$2" desc="$3" repo_path="$4" stack="$5" validate_cmd="$6"
+  local out_file mcp_bullets tools_csv repo_dir
+  repo_dir="$(resolve_repo_path "$repo_path")"
+  out_file="$repo_dir/.github/copilot-instructions.md"
+  mkdir -p "$repo_dir/.github"
+  tools_csv="$(tools_for_role "$role")"
+  if [[ -n "$tools_csv" ]]; then
+    mcp_bullets="$(echo "$tools_csv" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/"//g' -e 's/^/- `/' -e 's/$/`/')"
+  else
+    mcp_bullets="- (MCP tools disabled for this project)"
+  fi
+  TPL_FRAMEWORK_VERSION="$FRAMEWORK_VERSION" \
+  TPL_NAME="$name" \
+  TPL_PROJECT_NAME="$PROJECT_NAME" \
+  TPL_ROLE="$role" \
+  TPL_DESCRIPTION="$desc" \
+  TPL_STACK="$stack" \
+  TPL_VALIDATE_CMD="$validate_cmd" \
+  TPL_CHILD_MCP_TOOLS="$mcp_bullets" \
+  render_template_file "$TEMPLATE_DIR/child-instructions.md.tmpl" "$out_file"
 }
 
 # Validate LLM-generated agent.md for reasonableness
@@ -1208,6 +1322,8 @@ if [[ -n "$CONFIG_FILE" ]]; then
   PARENT_DIR=$(parse_yaml_value "$CONFIG_FILE" ".project.parent_dir")
   PATTERN=$(parse_yaml_value "$CONFIG_FILE" ".project.pattern")
   ENABLE_MCP=$(parse_yaml_value "$CONFIG_FILE" ".project.enable_mcp")
+  DEPLOYMENT_MODEL=$(parse_yaml_value "$CONFIG_FILE" ".project.deployment_model")
+  REGION=$(parse_yaml_value "$CONFIG_FILE" ".project.region")
   cfg_mobile_ci_cd=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.mobile_ci_cd")
   cfg_runner_self_heal=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.runner_self_heal")
   cfg_semantic_release=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.semantic_release")
@@ -1261,6 +1377,18 @@ if [[ -n "$CONFIG_FILE" ]]; then
   # ─── Pattern expansion ───────────────────────────────────────
   CHILD_COUNT=$(parse_yaml_array_length "$CONFIG_FILE" ".children")
   declare -a CHILD_NAMES=() CHILD_URLS=() CHILD_ROLES=() CHILD_DESCS=() CHILD_VISIBILITIES=() CHILD_STACKS=() CHILD_LOCAL_PATHS=()
+
+  # Resolve the pattern file whenever a pattern is named — independent of whether
+  # children are auto-expanded. This lets skills, topology, and the pattern snapshot
+  # apply even when children are listed explicitly.
+  if [[ -n "${PATTERN:-}" ]]; then
+    PATTERN_DIR="$FRAMEWORK_DIR/patterns/$PATTERN"
+    PATTERN_FILE="$PATTERN_DIR/pattern.yml"
+    if [[ ! -f "$PATTERN_FILE" ]]; then
+      echo "ERROR: Pattern not found: $PATTERN (expected $PATTERN_FILE)"; exit 1
+    fi
+    log "Using pattern: $PATTERN"
+  fi
 
   if [[ -n "${PATTERN:-}" && "$CHILD_COUNT" -eq 0 ]]; then
     PATTERN_DIR="$FRAMEWORK_DIR/patterns/$PATTERN"
@@ -1332,6 +1460,12 @@ ${doc_content}"
     [[ -n "$pat_portability_blueprints" ]] && FEATURE_PORTABILITY_BLUEPRINTS="$pat_portability_blueprints"
     [[ -n "$pat_critic_evaluator" ]] && FEATURE_CRITIC_EVALUATOR="$pat_critic_evaluator"
 
+    # Deployment model + region (pattern defaults; init.yml project.* overrides win).
+    pat_deployment_model=$(parse_yaml_value "$PATTERN_FILE" ".deployment_model")
+    [[ -z "${DEPLOYMENT_MODEL:-}" && -n "$pat_deployment_model" ]] && DEPLOYMENT_MODEL="$pat_deployment_model"
+    pat_region=$(parse_yaml_value "$PATTERN_FILE" ".region")
+    [[ -z "${REGION:-}" && -n "$pat_region" ]] && REGION="$pat_region"
+
     # Expand pattern children
     CHILD_COUNT=$(parse_yaml_array_length "$PATTERN_FILE" ".children")
     if [[ "$REPO_VISIBILITY" != "local" && -z "$GITHUB_OWNER" ]]; then
@@ -1394,6 +1528,10 @@ ${doc_content}"
     CHILD_ROLES[$i]="${CHILD_ROLES[$i],,}"
     require_role "${CHILD_ROLES[$i]}" "children.$i.role"
   done
+
+  # Deployment model + region final defaults (local-azd is the supported default).
+  [[ -z "${DEPLOYMENT_MODEL:-}" ]] && DEPLOYMENT_MODEL="local-azd"
+  [[ -z "${REGION:-}" ]] && REGION="centralus"
 
   # Explicit init.yml flags override pattern defaults.
   [[ -n "${cfg_mobile_ci_cd:-}" ]] && FEATURE_MOBILE_CI_CD="$cfg_mobile_ci_cd"
@@ -1774,64 +1912,11 @@ if [[ ! -f "$TARGET_DIR/.decisions/log.md" ]]; then
 fi
 
 # Optional feature artifacts
+# NOTE: GitHub Actions CI/CD generation (incl. mobile workflow templates) was removed in v0.2.0
+# in favor of local `azd` deployment. The mobile_ci_cd / runner_self_heal / semantic_release flags
+# are retained as no-ops for backward compatibility with older init.yml files.
 if [[ "$FEATURE_MOBILE_CI_CD" == "true" ]]; then
-  mkdir -p "$TARGET_DIR/.copilot/workflow-templates"
-  if [[ "$FEATURE_RUNNER_SELF_HEAL" == "true" ]]; then
-    MOBILE_SELF_HEAL_BLOCK=$(cat <<'EOF'
-      - name: Check and install prerequisites
-        run: |
-          echo "Checking runner prerequisites..."
-          if ! command -v java >/dev/null 2>&1; then
-            echo "Java missing — install JDK 17 before running this workflow."
-            exit 1
-          fi
-          if [ -z "${ANDROID_HOME:-}" ] && [ ! -d "$HOME/Android/Sdk" ] && [ ! -d "/usr/local/lib/android/sdk" ]; then
-            echo "Android SDK missing — install Android SDK before running this workflow."
-            exit 1
-          fi
-          if [ ! -x "$HOME/bin/ktlint" ] && ! command -v ktlint >/dev/null 2>&1; then
-            echo "ktlint missing — install ktlint before running this workflow."
-            exit 1
-          fi
-EOF
-)
-  else
-    MOBILE_SELF_HEAL_BLOCK=""
-  fi
-
-  if [[ "$FEATURE_SEMANTIC_RELEASE" == "true" ]]; then
-    MOBILE_SEMVER_BLOCK=$(cat <<'EOF'
-
-  semantic_version_release:
-    name: Semantic Version Release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build_and_test
-    runs-on: [self-hosted, android]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Compute and tag semver release
-        run: |
-          set -euo pipefail
-          latest_tag="$(git tag --list 'v*' | sort -V | tail -n 1)"
-          [ -z "$latest_tag" ] && latest_tag="v0.0.0"
-          echo "Latest tag: $latest_tag"
-          echo "Implement semver bump strategy for this repo before enabling auto-tagging."
-EOF
-)
-  else
-    MOBILE_SEMVER_BLOCK=""
-  fi
-
-  TPL_MOBILE_SELF_HEAL_BLOCK="$MOBILE_SELF_HEAL_BLOCK" \
-  TPL_MOBILE_SEMVER_BLOCK="$MOBILE_SEMVER_BLOCK" \
-  write_from_template "workflows/mobile-ci.yml.tmpl" "$TARGET_DIR/.copilot/workflow-templates/mobile-ci.yml"
-  log "Created .copilot/workflow-templates/mobile-ci.yml"
-
-  TPL_MOBILE_SELF_HEAL_BLOCK="$MOBILE_SELF_HEAL_BLOCK" \
-  write_from_template "workflows/mobile-cd.yml.tmpl" "$TARGET_DIR/.copilot/workflow-templates/mobile-cd.yml"
-  log "Created .copilot/workflow-templates/mobile-cd.yml"
+  warn "optional_features.mobile_ci_cd is deprecated and ignored (GitHub Actions removed in favor of azd)"
 fi
 
 if [[ "$FEATURE_ONBOARDING_DOCS" == "true" ]]; then
@@ -2042,14 +2127,80 @@ Rewrite ${specialist_file} now. No explanation." || true
   fi
 
   if [[ ! -f "$critic_file" ]]; then
-    generate_critic_md "$name" "$role" "$desc" "$repo_path" > "$critic_file"
+    critic_validate=$(detect_validate_commands "$repo_dir" "$role")
+    generate_critic_md "$name" "$role" "$desc" "$repo_path" "$critic_validate" > "$critic_file"
     log "✓ Agent ${name}-critic generated (deterministic)"
   else
     log "Agent ${name}-critic already exists, skipping"
   fi
+
+  # Child repo orchestration instructions (azd-aware; no GitHub Actions).
+  child_instr_file="$repo_dir/.github/copilot-instructions.md"
+  if [[ ! -f "$child_instr_file" ]]; then
+    ci_stack="${CHILD_STACKS[$i]}"
+    [[ -z "$ci_stack" ]] && ci_stack=$(default_stack_for_role "$role")
+    ci_validate=$(detect_validate_commands "$repo_dir" "$role")
+    generate_child_instructions "$name" "$role" "$desc" "$repo_path" "$ci_stack" "$ci_validate"
+    log "✓ Child instructions generated for ${name} (.github/copilot-instructions.md)"
+  else
+    log "Child instructions already exist for ${name}, skipping"
+  fi
 done
 
 fi  # end Phase 2
+
+# ─────────────────────────────────────────────────────────────
+# Phase 2.5: Install skills + parent topology + orchestrator agents
+# ─────────────────────────────────────────────────────────────
+if should_run_phase 2; then
+set_copilot_stage "Phase 2.5: Installing skills, topology, orchestrator agents"
+header "Phase 2.5: Installing skills, topology, orchestrator agents"
+
+# Skills (parent + scoped children) from the framework skills/ library.
+install_skills
+
+# Parent topology quick-reference.
+if [[ -n "${PATTERN_FILE:-}" && -f "$TEMPLATE_DIR/topology.md.tmpl" ]]; then
+  if [[ ! -f "$TARGET_DIR/.copilot/topology.md" ]]; then
+    mkdir -p "$TARGET_DIR/.copilot"
+    TPL_PROJECT_NAME="$PROJECT_NAME" \
+    TPL_REGION="${REGION:-centralus}" \
+    TPL_RESOURCE_GROUP="${PROJECT_NAME}-dev-rg" \
+    render_template_file "$TEMPLATE_DIR/topology.md.tmpl" "$TARGET_DIR/.copilot/topology.md"
+    log "✓ Created .copilot/topology.md"
+  else
+    log ".copilot/topology.md already exists, skipping"
+  fi
+fi
+
+# Orchestrator-level agents declared by the pattern (e.g., e2e-tester).
+if [[ -n "${PATTERN_FILE:-}" ]]; then
+  orch_agent_count=$(parse_yaml_array_length "$PATTERN_FILE" ".orchestrator_agents")
+  for ((oa=0; oa<${orch_agent_count:-0}; oa++)); do
+    oa_name=$(parse_yaml_value "$PATTERN_FILE" ".orchestrator_agents.$oa")
+    oa_tmpl="$TEMPLATE_DIR/agents/${oa_name}.agent.md.tmpl"
+    oa_out="$TARGET_DIR/.github/agents/${PROJECT_NAME}-${oa_name}.agent.md"
+    if [[ -f "$oa_tmpl" && ! -f "$oa_out" ]]; then
+      mkdir -p "$TARGET_DIR/.github/agents"
+      TPL_PROJECT_NAME="$PROJECT_NAME" \
+      render_template_file "$oa_tmpl" "$oa_out"
+      log "✓ Created orchestrator agent .github/agents/${PROJECT_NAME}-${oa_name}.agent.md"
+    fi
+  done
+fi
+
+# Pre-deploy gate script (commit + push + version-tag every repo before azd deploy).
+if [[ -f "$TEMPLATE_DIR/scripts/predeploy-gate.sh.tmpl" ]]; then
+  mkdir -p "$TARGET_DIR/scripts"
+  gate_out="$TARGET_DIR/scripts/predeploy-gate.sh"
+  TPL_PROJECT_NAME="$PROJECT_NAME" \
+  render_template_file "$TEMPLATE_DIR/scripts/predeploy-gate.sh.tmpl" "$gate_out"
+  chmod +x "$gate_out"
+  log "✓ Created scripts/predeploy-gate.sh"
+fi
+
+fi  # end Phase 2.5
+
 
 # ─────────────────────────────────────────────────────────────
 # Phase 3: Generate .github/copilot-instructions.md (orchestrator)
@@ -2076,18 +2227,20 @@ if [[ "${ENABLE_MCP:-false}" == "true" ]]; then
 
 | Tool | When to Use |
 |------|-------------|
-| `check_all_contracts` | Before merge to catch contract drift across all providers |
+| `check_all_contracts` | Before deploy to catch contract drift across all providers |
 | `check_contract_compliance` | Validate one provider repo against one contract's routes |
 | `run_local_lint` | Fast local lint pass before test/build or before delegating a fix back |
 | `start_child_agent` / `start_child_agents_batch` / `get_child_agent_job` / `list_child_agent_jobs` | Start async child-repo Copilot runs and poll status/results without long blocking MCP calls |
-| `terraform_fmt_check` / `terraform_init_validate` / `terraform_plan_check` | Infra changes: formatting, validation, and plan safety checks before PR |
+| `terraform_fmt_check` / `terraform_init_validate` / `terraform_plan_check` | Infra changes: formatting, validation, and plan safety checks before deploy |
 | `list_azure_resources` / `get_azure_status` / `find_error` | Infra incidents: inspect Azure inventory, runtime status, and recent failure events |
 | `inspect_container_app` / `inspect_cosmos` / `inspect_acr` | Deep Azure diagnostics when one service needs focused investigation |
+| `diagnose_container_app` / `get_container_logs` / `list_revisions` / `check_image_accessibility` / `compare_container_apps` | Container App troubleshooting: activation failures, crash loops, image pull errors, health probes. Pair with the `container-app-troubleshoot` skill. |
 | `check_repo_index` / `sync_repo_index` / `check_repo_queues` | Verify/normalize child repo references and inspect `work/{todo,ready-for-review,done}` queue state without shell checks |
-| `check_ci_status` | After push/PR update to inspect failing workflows quickly |
-| `verify_deployment` | After CD to verify health/version endpoints are reachable |
-| `security_scan` | Before final merge/deploy to consolidate security findings from available scanners |
-| `orchestrate_release` / `create_prs` / `wait_for_ci` / `auto_merge_prs` | Multi-repo release flow when coordinating commit→PR→CI→merge handoff |
+| `create_prs` / `auto_merge_prs` | Pre-deploy gate: commit → push → PR → merge for every changed repo (no CI to wait for) |
+| `deploy_local` | Run the local `azd` deployment flow (provision + service deploy) programmatically |
+| `quick_deploy` | Single-service build+deploy cycle for fast iteration |
+| `verify_deployment` | After an `azd` deploy to verify health/version endpoints are reachable |
+| `security_scan` | Before final deploy to consolidate security findings from available scanners |
 | `log_usage` | Record orchestration events with status + timing metadata for correlation |
 | `get_usage_quality_report` | Review usage quality, anomalies, and value signals from `.metrics/usage.jsonl` |
 EOF
@@ -2214,10 +2367,11 @@ fi
 if [[ -f "$TARGET_DIR/.requirements/platform-guardrails.yml" ]]; then
   echo "    .requirements/platform-guardrails.yml ✓ AVM guardrails"
 fi
-if [[ "$FEATURE_MOBILE_CI_CD" == "true" ]]; then
-  echo "    .copilot/workflow-templates/*.yml     ✓ mobile workflow templates"
-else
-  echo "    .copilot/workflow-templates/*.yml     · disabled by config"
+if [[ -f "$TARGET_DIR/.copilot/topology.md" ]]; then
+  echo "    .copilot/topology.md                  ✓ project topology / quick reference"
+fi
+if [[ -d "$TARGET_DIR/.github/skills" ]]; then
+  echo "    .github/skills/*                      ✓ installed skills (parent)"
 fi
 if [[ "$FEATURE_ONBOARDING_DOCS" == "true" ]]; then
   echo "    .copilot/docs/developer-onboarding.md ✓ generated"
@@ -2335,9 +2489,8 @@ echo "    .contracts/                      — API interface definitions"
 echo "    .requirements/                   — acceptance criteria"
 echo "    .decisions/log.md                — decision record"
 echo "    .repo-index.yml                  — child repo references (external paths)"
-if [[ "$FEATURE_MOBILE_CI_CD" == "true" ]]; then
-  echo "    .copilot/workflow-templates/     — optional mobile CI/CD templates"
-fi
+echo "    .copilot/topology.md             — project topology / quick reference"
+echo "    .github/skills/                  — installed Copilot skills"
 if [[ "$FEATURE_ONBOARDING_DOCS" == "true" || "$FEATURE_PORTABILITY_BLUEPRINTS" == "true" ]]; then
   echo "    .copilot/docs/                   — optional onboarding/portability docs"
 fi

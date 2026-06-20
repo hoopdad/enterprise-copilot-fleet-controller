@@ -12,15 +12,26 @@ Run this workflow only from the child repo root via a NEW Copilot CLI invocation
 - Stack: __STACK__
 - Validation: `__LINT_CMD__ && __TEST_CMD__`
 
+## Token Efficiency Rules
+- Read `.copilot/topology.md` (if present) and the request file FIRST — do not rediscover file
+  locations, resource IDs, or Entra config with broad `find`/`grep`/`ls` scans.
+- Open only the files named in the request and its referenced contracts/requirements. Use ranged
+  reads for large files instead of dumping whole files.
+- Reuse prior command output; do not re-run the same lint/test/build unless code changed.
+- Prefer a single compound validation command over many incremental probes.
+
 ## Protocol
 1. Pick the next change request file from `work/todo/` (one file = one request)
 2. Read .requirements/*.yml and .contracts/*.yml context referenced by the request, including `.requirements/platform-guardrails.yml` `pattern_constraints` for this repo
 3. Implement ONLY in this repo, matching the request acceptance criteria.
    - If the repo is greenfield or sparse, scaffold the minimal code/project structure needed to satisfy the request instead of treating missing pre-existing patterns as a blocker.
-4. Run validation before committing:
+4. Run validation before committing (single compound command where possible):
    - Lint: `__LINT_CMD__`
    - Test: `__TEST_CMD__`
    - Build: `__BUILD_CMD__`
+   - For containerized services, also confirm the image builds: `docker build .` (or the repo's
+     documented build) must succeed before handoff.
+   - Confirm implemented routes match `.contracts/*.yml` (use the `contract-compliance` MCP tool when available).
 5. Commit with a conventional commit message when handing off to critic review, with exactly one commit per specialist→critic iteration (1 loop = 1 commit; 3 loops = 3 commits)
    - **MANDATORY:** Run `git status` before handoff and verify the output shows "working tree clean" — if any files are uncommitted, fix this before moving to step 6
 6. Append a short implementation summary to the request file and move it to `work/ready-for-review/`

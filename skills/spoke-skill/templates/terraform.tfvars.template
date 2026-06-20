@@ -1,0 +1,50 @@
+# Copy to terraform.tfvars and fill in values as needed.
+# Set subscription IDs and spoke identity through TF_VAR_* environment variables first.
+# Source of truth for CIDR allocation is remote cidr.yaml in TF_VAR_cidr_registry_repo
+# (or backward-compatible alias TF_VAR_spoke_registry_repo).
+# Local writes apply only to this working repo; remote cidr.yaml updates are committed to the registry repo.
+
+hub_resource_group_name = "myorg-lab-hub-rg"
+hub_vnet_name           = "myorg-lab-hub-vnet"
+hub_law_name            = "myorg-lab-hub-law"
+hub_ampls_name          = "myorg-lab-hub-ampls"
+
+spoke_region            = "centralus"
+lab_prefix              = "myorg-lab"
+
+# Derived names (computed from TF_VAR_spoke_short_name by the skill):
+# spoke_prefix            = "${TF_VAR_lab_prefix}-${TF_VAR_spoke_short_name}"
+# app_resource_group_name = "${spoke_prefix}-rg"
+# app_vnet_name           = "${spoke_prefix}-vnet"
+spoke_prefix            = "myorg-lab-app"
+app_resource_group_name = "myorg-lab-app-rg"
+app_vnet_name           = "myorg-lab-app-vnet"
+app_vnet_address_space  = ["10.0.10.0/24"]
+use_remote_gateways     = true
+
+# Default subnet plan by spoke type:
+# generic: workload-subnet /25, pep-subnet /26
+# aks: aks-subnet /25, pep-subnet /26
+# ml: private-endpoint-subnet /25, compute-subnet /26
+# Example below is generic.
+app_subnets = {
+  workload-subnet = ["10.0.10.0/25"]
+  pep-subnet      = ["10.0.10.128/26"]
+}
+
+private_dns_zones = {
+  "privatelink.blob.core.windows.net"         = "blob"
+  "privatelink.vaultcore.azure.net"           = "kv"
+  "privatelink.monitor.azure.com"             = "monitor"
+  "privatelink.oms.opinsights.azure.com"      = "oms"
+  "privatelink.ods.opinsights.azure.com"      = "ods"
+  "privatelink.agentsvc.azure-automation.net" = "agentsvc"
+}
+
+subnet_with_delegations = {}
+
+app_tags = {
+  environment = "lab"
+  spoke       = "app"
+  managed_by  = "terraform"
+}

@@ -1,0 +1,37 @@
+meta:
+  supernet: "10.0.0.0/16"
+  vpn_p2s_pool: "172.20.0.0/27"
+  home_lan: "10.1.0.0/24"
+
+hub_vnets:
+  - name: "myorg-lab-hub-vnet"
+    region: eastus2
+    cidr: "10.0.0.0/22"
+    purpose: hub-eus2
+
+reserved_blocks:
+  - cidr: "192.168.0.0/16"
+    purpose: "AKS internal service CIDR"
+  - cidr: "172.20.0.0/27"
+    purpose: "VPN P2S client pool"
+
+spoke_vnets:
+  - name: "myorg-lab-mlws-vnet"
+    region: centralus
+    cidr: "10.0.4.0/24"
+    spoke_module: ml
+    status: active
+    subnets:
+      - name: private-endpoint-subnet
+        cidr: "10.0.4.0/25"
+
+  - name: "myorg-lab-aks-vnet"
+    region: centralus
+    cidr: "10.0.5.0/24"
+    spoke_module: aks
+    status: active
+    subnets:
+      - name: aks-subnet
+        cidr: "10.0.5.0/25"
+      - name: pep-subnet
+        cidr: "10.0.5.128/25"

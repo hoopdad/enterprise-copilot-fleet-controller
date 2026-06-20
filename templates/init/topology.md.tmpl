@@ -1,0 +1,156 @@
+# __PROJECT_NAME__ — Project Topology & Quick Reference
+
+Use this file to eliminate repeated file discovery (find/grep) in sessions.
+Agents should consult this FIRST before searching for files.
+
+> Values marked `<set-after-provision>` are filled in by the orchestrator after the first
+> `azd provision` / `azd up` (read them from `.azure/tf-outputs.json`).
+
+## Deployment Model
+
+- **Method**: Local `azd up` from __PROJECT_NAME__-harness (NOT GitHub Actions)
+- **Infra**: Terraform with local state (`.azure/tf-outputs.json` has all outputs)
+- **Images**: `az acr build` to the project ACR (not docker push)
+- **Deploy script**: `scripts/azd-deploy.sh` (builds + deploys all services)
+- **Verify**: `scripts/verify-deploy.sh` (post-deploy smoke test)
+- **Pre-deploy gate**: `scripts/predeploy-gate.sh` (commit + push + version-tag every repo)
+
+## Azure Resource IDs
+
+| Resource | Name | Resource Group |
+|----------|------|----------------|
+| ACR | <set-after-provision> | __RESOURCE_GROUP__ |
+| Container App Env | <set-after-provision> | __RESOURCE_GROUP__ |
+| WAF App | __PROJECT_NAME__-waf | __RESOURCE_GROUP__ |
+| Web App | __PROJECT_NAME__-web | __RESOURCE_GROUP__ |
+| API App | __PROJECT_NAME__-api | __RESOURCE_GROUP__ |
+| Agent App | __PROJECT_NAME__-agent | __RESOURCE_GROUP__ |
+| Cosmos DB | <set-after-provision> | __RESOURCE_GROUP__ |
+| Key Vault | <set-after-provision> | __RESOURCE_GROUP__ |
+
+- Region: __REGION__
+
+## Entra ID Configuration
+
+| App | Client ID | Purpose |
+|-----|-----------|---------|
+| Web (SPA) | <set-after-provision> | MSAL browser auth |
+| API | <set-after-provision> | Token validation |
+| Tenant | <set-after-provision> | Directory |
+
+- API Scope: `api://<api-client-id>/access_as_user`
+- Redirect URIs (SPA platform): production WAF FQDN + `/welcome`
+
+## Request Flow (User → WAF → Services)
+
+```
+User Browser
+  │
+  ├── GET /* (SPA routes)  →  WAF (:443) → __PROJECT_NAME__-web (:80)
+  ├── GET/POST /api/*      →  WAF (:443) → __PROJECT_NAME__-api (:8000)
+  ├── WS /ws/*             →  WAF (:443) → __PROJECT_NAME__-api (:8000)
+  └── POST /agent/*        →  WAF (:443) → __PROJECT_NAME__-agent (:8000)
+```
+
+WAF FQDN: `<set-after-provision>`
+
+## Key File Locations
+
+### __PROJECT_NAME__-harness
+| Purpose | Path |
+|---------|------|
+| Azure config | azure.yaml |
+| Terraform outputs | .azure/tf-outputs.json |
+| Deploy all services | scripts/azd-deploy.sh |
+| Pre-deploy gate (commit/push/tag) | scripts/predeploy-gate.sh |
+| Post-deploy verify | scripts/verify-deploy.sh |
+| Guardrails | .copilot/guardrails/pattern.yml, nfr.yml |
+| Contracts | .contracts/ |
+
+### __PROJECT_NAME__-web
+| Purpose | Path |
+|---------|------|
+| MSAL auth hook | src/hooks/useAuth.ts |
+| App entry (MSAL config) | src/App.tsx |
+| API client | src/services/apiClient.ts |
+| Dockerfile | Dockerfile |
+| Nginx config | nginx.conf |
+
+### __PROJECT_NAME__-api
+| Purpose | Path |
+|---------|------|
+| FastAPI main | app/main.py |
+| Pydantic models | app/models.py |
+| Auth/JWT validation | app/auth.py |
+| Route handlers | app/routes/ |
+| Dockerfile | Dockerfile |
+
+### __PROJECT_NAME__-waf
+| Purpose | Path |
+|---------|------|
+| Nginx config template | docker/nginx/nginx.conf.template |
+| ModSecurity overrides | docker/modsecurity/modsecurity-override.conf |
+| Dockerfile | Dockerfile |
+
+### __PROJECT_NAME__-agent
+| Purpose | Path |
+|---------|------|
+| Agent main | app/main.py |
+| Foundry client | app/foundry_client.py |
+| Dockerfile | Dockerfile |
+
+### __PROJECT_NAME__-infra
+| Purpose | Path |
+|---------|------|
+| Main config | main.tf |
+| Container Apps | containerapps.tf |
+| Networking/VNet | networking.tf |
+| ACR | acr.tf |
+| Cosmos DB | cosmos.tf |
+| Key Vault | keyvault.tf |
+| Variables / Outputs | variables.tf / outputs.tf |
+
+## Deployment Wait Pattern (NO sleep!)
+
+Instead of `sleep N && az containerapp revision show ...`, poll with a timeout:
+
+```bash
+TIMEOUT=120; ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+  STATE=$(az containerapp revision show --name $APP --resource-group $RG \
+    --revision $REV --query properties.runningState -o tsv 2>/dev/null || echo "Unknown")
+  case "$STATE" in
+    Running) echo "✅ $APP running"; break ;;
+    Failed)  echo "❌ $APP failed"; exit 1 ;;
+    *)       sleep 10; ELAPSED=$((ELAPSED + 10)) ;;
+  esac
+done
+```
+
+## Common Mistakes to Avoid
+
+1. **MSAL redirectUri**: Must use `window.location.origin` at runtime, NOT a `VITE_*` env var
+2. **Vite build args**: `VITE_*` must be ARG→ENV BEFORE `npm run build` in Dockerfile
+3. **Token fallback**: Use `acquireTokenPopup`, NEVER `acquireTokenRedirect` (causes infinite loops)
+4. **API field names**: Always snake_case in request bodies (Python/Pydantic convention)
+5. **WAF min replicas**: Must be 1 (not 0) — it's the public entry point
+6. **OWASP CRS 911100**: Blocks PUT/PATCH/DELETE by default — must exclude for API paths
+7. **ACR access**: `public_network_access_enabled=true` needed for `az acr build`
+8. **nginx map_hash_bucket_size**: Set to 128 for long ACA FQDNs
+9. **Deploy gate**: Commit + push + tag every repo BEFORE `azd up` (use `scripts/predeploy-gate.sh`)
+
+## Child Agent Dispatch Model
+
+Use `phase="full"` for the standard workflow (preferred):
+
+```
+start_child_agents_batch(repos=["__PROJECT_NAME__-api", "__PROJECT_NAME__-web"], phase="full")
+```
+
+This runs a single Copilot session per repo that drains `work/todo/` through an integrated
+specialist → critic loop (5-tier review; up to 3 fix cycles per item) and exits when empty.
+
+Available phases:
+- `phase="full"` — integrated specialist+critic loop (default for production use)
+- `phase="specialist"` — specialist only, moves to `work/ready-for-review/`
+- `phase="critic"` — critic only, picks from `work/ready-for-review/`

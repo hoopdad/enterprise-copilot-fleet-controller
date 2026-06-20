@@ -1,0 +1,32 @@
+version: 1
+review_cadence: monthly
+policy:
+  continuous_update: true
+  prune_obsolete: true
+  require_owner: true
+  require_last_reviewed: true
+patterns:
+  - id: private-endpoint-default
+    status: active
+    owner: platform-network
+    last_reviewed: 2026-06-15
+    summary: Use private endpoints and disable public network access where supported.
+    migration: n/a
+  - id: uami-first-auth
+    status: active
+    owner: platform-identity
+    last_reviewed: 2026-06-15
+    summary: Prefer user-assigned managed identity for resource-to-resource access.
+    migration: n/a
+  - id: secretless-outputs
+    status: active
+    owner: platform-security
+    last_reviewed: 2026-06-15
+    summary: Keep secrets out of outputs; mark sensitive variables and outputs.
+    migration: n/a
+  - id: force-replace-change-review
+    status: active
+    owner: platform-iac
+    last_reviewed: 2026-06-15
+    summary: Flag replacement-class diffs including semantic unit normalization that can ForceNew.
+    migration: n/a

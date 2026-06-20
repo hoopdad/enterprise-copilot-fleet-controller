@@ -1,13 +1,24 @@
 # azure-fullstack pattern definition
 # Stack: Web (React/TS) + API (Python/FastAPI) + Agent (Python/MAF) + Infra (Terraform/Azure)
-# Platform: Azure Container Apps, Cosmos DB, Entra External ID, GitHub Actions
+# Platform: Azure Container Apps, Cosmos DB, Entra External ID, local azd deployment
 
 name: "azure-fullstack"
 description: |
   Full-stack Azure SaaS pattern with four repos: a React/TypeScript SPA frontend,
   a Python/FastAPI REST API, a Python AI agent service, and Terraform infrastructure.
   Deploys to Azure Container Apps with Cosmos DB for data, Entra External ID for
-  authentication, and GitHub Actions CI/CD pipelines on self-hosted runners.
+  authentication, using a local Azure Developer CLI (`azd up`) deployment flow.
+
+# Deployment model: "local-azd" (azd up from the harness) or "github-actions".
+# local-azd is the default and supported model for this pattern.
+deployment_model: "local-azd"
+
+# Default Azure region for all regional resources (override in init.yml).
+region: "centralus"
+
+# Orchestrator-level (non specialist/critic) agents installed into the parent repo.
+orchestrator_agents:
+  - "e2e-tester"
 
 children:
   - suffix: "waf"
@@ -36,6 +47,31 @@ children:
     stack: "Terraform / azurerm provider / Azure Verified Modules"
 
 nfr_url: "https://raw.githubusercontent.com/hoopdad/standards/main/nfr.yml"
+
+# Skills installed into generated repos from the framework skills/ library.
+# scope: parent | child | role:<role>  (role:* installs into matching child(ren))
+# A skill may declare multiple scopes.
+skills:
+  # azure-fullstack troubleshooting (parameterized from the word-game fleet)
+  - name: "container-app-troubleshoot"
+    scope: ["parent", "child"]
+  - name: "cosmos-db-troubleshoot"
+    scope: ["parent"]
+  - name: "e2e-test"
+    scope: ["parent"]
+  - name: "entra-vite-spa-auth"
+    scope: ["parent", "role:frontend"]
+  - name: "route-flow-debug"
+    scope: ["parent", "role:waf"]
+  # Infra (Terraform / Azure) — vendored from hoopdad/mcaps-infra-skills
+  - name: "secure-azure-terraform-coder"
+    scope: ["role:infra"]
+  - name: "hub-skill"
+    scope: ["role:infra"]
+  - name: "spoke-skill"
+    scope: ["role:infra", "parent"]
+  - name: "defender-servers-skill"
+    scope: ["role:infra"]
 
 docs:
   - name: "external-user-pattern"

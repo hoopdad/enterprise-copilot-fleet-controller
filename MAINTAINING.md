@@ -44,6 +44,19 @@ If your change affects what `init.sh` generates into projects (.github/agents/*.
 4. Update `tools/README.md`
 5. If adding a new tool, this is a **MINOR** bump (existing projects need migration to get new mcp.json entry)
 
+## When You Add/Change Skills
+
+1. Add the skill folder under `skills/<name>/` (tokenize project-specific literals — see `skills/README.md` token table)
+2. Map it to scopes (`parent` / `child` / `role:<role>`) in the relevant `patterns/*/pattern.yml` `skills:` list
+3. `install_skills()` in `scripts/init-core.sh` renders scoped skills into each repo's `.github/skills/`
+4. This is a **MINOR** bump; the migration should copy the new skill into existing projects
+
+## Deployment Model & Region
+
+- Patterns declare `deployment_model` (`local-azd` for `azure-fullstack`) and `region` (`centralus`).
+- `local-azd` means **no generated GitHub Actions** — deploys run via `azd` from the harness, gated by `scripts/predeploy-gate.sh` (commit + push + version-tag every repo).
+- The framework's OWN repo CI (`.github/workflows/auto-version.yml`, `tests.yml`) is maintenance CI and is intentionally retained.
+
 ## When You Add a New Template Section
 
 1. Edit `generate_agent_md()` in `scripts/init-core.sh` or templates under `templates/init/`

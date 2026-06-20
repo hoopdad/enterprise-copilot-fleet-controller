@@ -50,9 +50,13 @@ your-project/
 │   ├── guardrails/
 │   │   ├── pattern.yml      ← snapshot of the active pattern used at init
 │   │   └── nfr.yml          ← snapshot of the active NFRs used at init
+│   └── topology.md          ← project topology / quick reference (file locations, resource IDs, request flow)
 ├── .github/
 │   ├── copilot-instructions.md ← orchestrator (main agent reads this)
+│   ├── skills/                 ← scoped skills installed from the framework skills/ library
 │   └── mcp.json                ← MCP tools configuration (optional, opt-in)
+├── scripts/
+│   └── predeploy-gate.sh       ← commit + push + version-tag every repo before `azd` deploy
 ├── .repo-index.yml             ← child repo references (name, role, local_path, visibility, remote)
 ├── children live in sibling/external paths from .repo-index.yml
 │
@@ -60,9 +64,26 @@ your-project/
 │   ├── .github/agents/
 │   │   ├── repo-api-specialist.agent.md
 │   │   └── repo-api-critic.agent.md
+│   ├── .github/skills/      ← child-scoped + role-scoped skills
 │   └── work/{todo,ready-for-review,done}/
 └── ../repo-web/...
 ```
+
+## Deployment Model
+
+Patterns declare a `deployment_model`. The `azure-fullstack` pattern uses **`local-azd`**:
+deployments run locally via the **Azure Developer CLI (`azd`)** from the harness repo — there are
+**no generated GitHub Actions pipelines**. Before any deploy, `scripts/predeploy-gate.sh` enforces a
+commit + push + version-tag gate across every repo in `.repo-index.yml`. Regional Azure resources
+default to **Central US** (`region: centralus`).
+
+## Skills
+
+The framework ships a `skills/` library (vendored Azure infra + full-stack skills). `pattern.yml`
+maps each skill to a scope — `parent`, `child`, or `role:<role>` — and `init.sh` installs the
+scoped skills into the matching repo's `.github/skills/`. Skills are tokenized
+(`__PROJECT_NAME__`, `__REGION__`, `__RESOURCE_GROUP__`, …) and rendered at init time. See
+`skills/README.md` for the catalog and token table.
 
 ## How Coordinator Workflow Works
 
@@ -221,9 +242,12 @@ Tools handle mechanics so the LLM can focus on intelligence. MCP is opt-in (`pro
 | `contract-compliance` | Compare implemented routes to `.contracts/*.yml` endpoint definitions | Orchestrator + backend specialists |
 | `scaffold-generator` | Generate non-overwriting FastAPI/TypeScript stubs from contracts | backend specialists |
 | `azure-inspector` | Read Container Apps, Cosmos DB, and ACR state via Azure CLI | infra specialists |
+| `container-app-diagnostics` | Deep Container Apps troubleshooting — activation failures, logs, revisions/replicas, image pulls | Orchestrator + infra specialists |
 | `azure-resource-status` | Inventory Azure resources and inspect status/error events for troubleshooting | infra specialists |
-| `ci-monitor` | Summarize recent GitHub Actions runs and key failure hints | Orchestrator |
+| `ci-monitor` | Summarize recent GitHub Actions runs and key failure hints (framework-repo CI only) | Orchestrator |
 | `deploy-verifier` | Probe service endpoints like `/health` and `/version` after deploy | Orchestrator |
+| `deploy-local` | Deploy services locally via `azd` and custom scripts (no GitHub Actions) | Orchestrator |
+| `quick-deploy` | Commit, build image, deploy container app, and verify health for a single service in one call | Orchestrator |
 | `security-scanner` | Run available scanners and normalize findings into one report | All specialists |
 | `lint-local` | Run safe local lint commands (ruff/eslint/golangci-lint/shellcheck) | specialists |
 | `terraform-local` | Run deterministic local terraform fmt/init/validate/plan checks | infra specialists |

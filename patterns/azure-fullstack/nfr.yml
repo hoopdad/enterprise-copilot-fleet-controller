@@ -46,24 +46,39 @@ cost:
     - Enable scale-to-zero on Container Apps (min replicas: 0 for non-prod)
 
 devops:
+  deployment_model:
+    - Local Azure Developer CLI (`azd up`) from the harness repo — NO GitHub Actions pipelines
+    - Infrastructure applied via `azd provision` (Terraform with local state)
+    - Services deployed via `bash scripts/azd-deploy.sh`; images built with `az acr build`
+
   ci:
-    - All CI on self-hosted GitHub Actions runners (ephemeral per job)
-    - CI triggers on push to main and all pull requests
-    - Jobs: lint, security scan, unit tests (all must pass)
+    - Local validation gates run before commit: lint, security scan, unit tests (all must pass)
+    - Each specialist→critic iteration is exactly one commit
 
   cd:
-    - CD triggers only after CI succeeds on main branch
-    - Use GitHub OIDC federation for Azure authentication
-    - Build and push container images with both :sha and :latest tags
+    - Before any deploy, every repo MUST be committed, pushed, and version-tagged
+      (orchestrator runs `scripts/predeploy-gate.sh`)
+    - Authenticate to Azure with the developer's `az login` / managed identity (no OIDC federation)
+    - Container apps pull images from ACR via user-assigned managed identity (AcrPull)
 
   branching:
     - Trunk-based: main is the only long-lived branch
-    - Feature branches merge via PR with required CI pass
+    - Feature branches merge via PR after local validation + critic PASS
 
   containers:
     - All services deploy as Docker containers with multi-stage builds
     - Run as non-root in production
     - Minimum 1 running instance per service in production
+
+known_exceptions:
+  - ACR public_network_access_enabled=true is required for local `az acr build`
+    (documented exception to the private-endpoints-only rule)
+  - WAF Container App uses min_replicas=1 (no scale-to-zero) as the public entry point
+  - VNet uses native azurerm_virtual_network (not AVM) to avoid perpetual drift with delegated subnets
+
+region:
+  - Deploy all regional Azure resources to the configured region (default: centralus)
+
 
 testing:
   unit:

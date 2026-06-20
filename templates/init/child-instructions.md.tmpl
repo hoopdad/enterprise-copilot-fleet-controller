@@ -1,0 +1,33 @@
+<!-- enterprise-copilot-fleet-controller v__FRAMEWORK_VERSION__ -->
+# Copilot instructions — __NAME__
+
+This repository is the **__ROLE__** for the __PROJECT_NAME__ project (__DESCRIPTION__).
+
+## Stack
+- __STACK__
+
+## Validation commands
+```bash
+__VALIDATE_CMD__
+```
+
+## Deployment model
+- **Local `azd` only — no GitHub Actions / CI-CD pipelines.**
+- The project is deployed from `__PROJECT_NAME__-harness` via `azd up` (`azd provision` for infra,
+  `bash scripts/azd-deploy.sh` for services). Container images are built with `az acr build`.
+- **Before any deploy, code must be committed, pushed, and version-tagged** in every repo
+  (the orchestrator runs `scripts/predeploy-gate.sh`). Do not introduce GitHub Actions workflows,
+  self-hosted runners, OIDC deployment secrets, or SHA-named CD here.
+
+## Agent playbooks
+- Specialist: `.github/agents/__NAME__-specialist.agent.md`
+- Critic: `.github/agents/__NAME__-critic.agent.md`
+
+## Guardrails
+- Follow `.requirements/platform-guardrails.yml` `pattern_constraints` and the active request's
+  acceptance criteria. Read `.contracts/*.yml` before any interface-touching change.
+- Consult `.copilot/topology.md` (in __PROJECT_NAME__-harness) for file locations, resource IDs, and
+  the request flow instead of searching.
+
+## MCP tools available
+__CHILD_MCP_TOOLS__
