@@ -1883,6 +1883,9 @@ mkdir -p "$TARGET_DIR/.github"
 mkdir -p "$TARGET_DIR/.copilot/guardrails"
 
 # Child-repo workflow scaffolding
+# Create the framework workflow structure for every child first so that all
+# child repo roots exist before any orchestrator invocation (required for the
+# scoped --add-dir access granted in add_child_repo_access_for_stage).
 for ((i=0; i<CHILD_COUNT; i++)); do
   repo_dir="$(resolve_repo_path "${CHILD_LOCAL_PATHS[$i]}")"
   mkdir -p "$repo_dir/.github/agents"
@@ -1890,6 +1893,54 @@ for ((i=0; i<CHILD_COUNT; i++)); do
   mkdir -p "$repo_dir/work/ready-for-review"
   mkdir -p "$repo_dir/work/done"
 done
+
+# Orchestrator-driven folder scaffolding.
+# The orchestrator agent scaffolds each child folder into a minimal, buildable
+# starting point based on the pattern definition, using the Copilot CLI in
+# autopilot / non-interactive mode (see copilot_prompt). Skipped for repos that
+# already contain source code so re-runs never clobber real work.
+if command -v copilot >/dev/null 2>&1; then
+  for ((i=0; i<CHILD_COUNT; i++)); do
+    name="${CHILD_NAMES[$i]}"
+    role="${CHILD_ROLES[$i]}"
+    desc="${CHILD_DESCS[$i]}"
+    repo_path="${CHILD_LOCAL_PATHS[$i]}"
+    repo_dir="$(resolve_repo_path "$repo_path")"
+
+    if repo_has_code "$repo_dir"; then
+      log "Existing code detected in $name — skipping orchestrator scaffolding"
+      continue
+    fi
+
+    child_stack="${CHILD_STACKS[$i]}"
+    [[ -z "$child_stack" ]] && child_stack="$(default_stack_for_role "$role")"
+
+    log "Scaffolding $name ($role) from pattern definition via orchestrator..."
+    copilot_prompt "Act as the orchestrator agent for the ${PROJECT_NAME} fleet. Scaffold the child repository folder at ${repo_dir} into a minimal, buildable starting point for its role, based on the pattern definition.
+
+Pattern definition context (authoritative):
+- Repository name: ${name}
+- Role: ${role}
+- Description: ${desc}
+- Target stack: ${child_stack}
+- Pattern snapshot: read \`.copilot/guardrails/pattern.yml\` (and \`.copilot/guardrails/nfr.yml\` if present) for the full pattern, platform, and non-functional constraints. Honor any \`pattern_constraints\`.
+
+Scaffolding requirements:
+1. Create ONLY the conventional starter files for the target stack, rooted at ${repo_dir} (for example: pyproject.toml + src/ + tests/ for a Python service; package.json + Vite config + src/ for a React app; main.tf + variables.tf + outputs.tf for Terraform).
+2. Produce a minimal skeleton with placeholder content that lints/builds cleanly — not a full implementation. No business logic beyond a trivial health/hello entry point.
+3. Include a short README.md describing the repo's role and how to run lint/test/build.
+4. Add a stack-appropriate .gitignore.
+5. Match the platform and region choices from the pattern (default Azure region ${REGION:-centralus} where a region is required).
+
+Hard constraints:
+- Do NOT create, modify, or delete anything under ${repo_dir}/work/ or ${repo_dir}/.github/agents/ — those are managed by later phases.
+- Do NOT touch any other repository or the parent framework directories.
+- Do NOT overwrite pre-existing files; only add what is missing.
+- Keep it minimal; specialist agents implement features in later phases." || warn "Orchestrator scaffolding for $name did not complete cleanly (continuing)"
+  done
+else
+  warn "copilot CLI not found — skipping orchestrator folder scaffolding"
+fi
 
 # Stamp framework version into project
 echo "$FRAMEWORK_VERSION" > "$TARGET_DIR/.framework-version"

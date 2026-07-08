@@ -52,14 +52,16 @@ add_child_repo_access_for_stage() {
     return 0
   fi
 
+  # Phase 1 scaffolds each child repo folder from the pattern definition and
+  # Phase 6 executes child work; both need write access to the child repo root.
   case "$stage" in
-    *"Phase 6"*) include_repo_root="true" ;;
+    *"Phase 1"*|*"Phase 6"*) include_repo_root="true" ;;
   esac
 
   for repo_path in "${CHILD_LOCAL_PATHS[@]}"; do
     [[ -z "$repo_path" ]] && continue
     repo_dir="$(resolve_repo_path "$repo_path")"
-    if [[ "$include_repo_root" == "true" ]]; then
+    if [[ "$include_repo_root" == "true" && -d "$repo_dir" ]]; then
       args_ref+=(--add-dir "$repo_dir")
     fi
     for child_access_dir in "$repo_dir/work" "$repo_dir/.github/agents"; do

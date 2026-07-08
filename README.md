@@ -90,7 +90,7 @@ scoped skills into the matching repo's `.github/skills/`. Skills are tokenized
 1. **Coordinator** (parent repo) reads `.github/copilot-instructions.md`, writes `.requirements/.contracts`, and creates per-repo request files in child `work/todo/`.
    - MCP-first orchestration is mandatory for child execution: use `check_repo_index` + `check_repo_queues` + async child-agent-runner dispatch tools (`start_child_agents_batch`/`start_child_agent`) with polling (`get_child_agent_job`/`list_child_agent_jobs`), not background sub-agents or `task`.
    - Init runs a deterministic preflight before Phase 6 to validate executable/tooling and expected child repo paths (`repo_dir`, `.github/agents`, and `work/*` queues).
-   - During init-time parent Copilot phases, child access is scoped from `.repo-index.yml` to `<child>/work` and `<child>/.github/agents` (not full child repo roots), so queue/agent files are readable without broad discovery scans.
+   - During init-time parent Copilot phases, child access is scoped from `.repo-index.yml` to `<child>/work` and `<child>/.github/agents` (not full child repo roots), so queue/agent files are readable without broad discovery scans. The exceptions are Phase 1 (the orchestrator scaffolds each child folder from the pattern definition) and Phase 6 (child work execution), where the full child repo root is granted.
 2. **Specialist** (child repo cwd) processes one request, implements + validates, then moves it to `work/ready-for-review/`.
 3. **Critic** (child repo cwd) reviews and iterates with specialist until PASS, then moves request to `work/done/`.
 4. **Coordinator** validates done items against acceptance criteria before final acceptance.

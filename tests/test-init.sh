@@ -427,11 +427,14 @@ else
 fi
 
 TESTS_RUN=$((TESTS_RUN + 1))
+# Phase 1 (orchestrator folder scaffolding) and Phase 6 (child work execution)
+# legitimately grant the parent full child repo root access; all other init
+# phases stay scoped to work/ + .github/agents (asserted above).
 if [[ -f "$COPILOT_LOG" ]] && grep -Eq -- "--add-dir ${TEST_DIR}/test-api-metrics( |$)" "$COPILOT_LOG"; then
-  FAIL=$((FAIL + 1))
-  echo "  FAIL: parent copilot invocation should not get full child repo access"
-else
   PASS=$((PASS + 1))
+else
+  FAIL=$((FAIL + 1))
+  echo "  FAIL: expected Phase 1 scaffolding / Phase 6 execution to grant full child repo root access"
 fi
 
 unset COPILOT_LOG MOCK_REQUIRE_URL_ALLOWLIST MOCK_COPILOT_OUTPUT MOCK_COPILOT_EXIT_CODE
@@ -744,11 +747,11 @@ unset MOCK_COPILOT_COUNTER_FILE MOCK_COPILOT_ZERO_METRICS_UNTIL_CALL MOCK_COPILO
 assert_exit_code "$RC_ZERO_TOKEN" 0
 assert_file_contains "$TEST_DIR/init-zero-token-metrics-output.log" "Copilot metrics anomaly (warn mode, no retry)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$DEFAULT_POLICY_CALLS" -eq 2 ]]; then
+if [[ "$DEFAULT_POLICY_CALLS" -eq 3 ]]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  echo "  FAIL: expected exactly 2 copilot invocations (no retries for zero metrics, but Phase 2 validation may trigger agent regeneration), but got $DEFAULT_POLICY_CALLS"
+  echo "  FAIL: expected exactly 3 copilot invocations (Phase 1 folder scaffolding + Phase 6 initial + Phase 6b critique; no retries for zero metrics), but got $DEFAULT_POLICY_CALLS"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -838,11 +841,11 @@ unset MOCK_COPILOT_COUNTER_FILE MOCK_COPILOT_ZERO_METRICS_UNTIL_CALL MOCK_COPILO
 
 assert_exit_code "$RC_ZERO_TOKEN_RETRY_STRICT" 97
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$STRICT_CALLS" -eq 1 ]]; then
+if [[ "$STRICT_CALLS" -eq 2 ]]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  echo "  FAIL: expected exactly 1 copilot invocation in strict mode (no retries for zero metrics), but got $STRICT_CALLS"
+  echo "  FAIL: expected exactly 2 copilot invocations in strict mode (Phase 1 scaffolding is best-effort and continues; Phase 6 initial then hard-fails; no retries for zero metrics), but got $STRICT_CALLS"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -891,11 +894,11 @@ unset MOCK_COPILOT_COUNTER_FILE MOCK_COPILOT_ZERO_METRICS_UNTIL_CALL MOCK_COPILO
 assert_exit_code "$RC_ZERO_TOKEN_RETRY_WARN" 0
 assert_file_contains "$TEST_DIR/init-zero-token-retry-warn-output.log" "Copilot metrics anomaly (warn mode, no retry)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$WARN_CALLS" -eq 2 ]]; then
+if [[ "$WARN_CALLS" -eq 3 ]]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
-  echo "  FAIL: expected exactly 2 copilot invocations in warn mode (no retries for zero metrics), but got $WARN_CALLS"
+  echo "  FAIL: expected exactly 3 copilot invocations in warn mode (Phase 1 folder scaffolding + Phase 6 initial + Phase 6b critique; no retries for zero metrics), but got $WARN_CALLS"
 fi
 
 # ─────────────────────────────────────────────────────────────
