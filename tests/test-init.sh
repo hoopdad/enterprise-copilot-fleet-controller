@@ -65,6 +65,16 @@ assert_file_not_exists() {
   fi
 }
 
+assert_file_not_contains() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ -f "$1" ]] && grep -q "$2" "$1" 2>/dev/null; then
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: $1 should NOT contain '$2'"
+  else
+    PASS=$((PASS + 1))
+  fi
+}
+
 assert_dir_not_exists() {
   TESTS_RUN=$((TESTS_RUN + 1))
   if [[ ! -d "$1" ]]; then
@@ -501,6 +511,31 @@ fi
 
 if [[ -f "$TEST_DIR/test-api-mcp/.github/agents/test-api-mcp-specialist.agent.md" ]]; then
   assert_file_contains "$TEST_DIR/test-api-mcp/.github/agents/test-api-mcp-specialist.agent.md" "scaffold-generator"
+fi
+
+# Child repos must also carry a workspace MCP config (.github/mcp.json) so child
+# Copilot runs (cwd=<child repo>) auto-discover their tools — child-scoped copy
+# excludes the parent-only orchestration servers.
+CHILD_MCP_JSON="$TEST_DIR/test-api-mcp/.github/mcp.json"
+assert_file_exists "$CHILD_MCP_JSON"
+if [[ -f "$CHILD_MCP_JSON" ]]; then
+  assert_file_contains "$CHILD_MCP_JSON" "mcpServers"
+  assert_file_contains "$CHILD_MCP_JSON" "scaffold-generator"
+  assert_file_contains "$CHILD_MCP_JSON" "lint-local"
+  assert_file_not_contains "$CHILD_MCP_JSON" "repo-index"
+  assert_file_not_contains "$CHILD_MCP_JSON" "child-agent-runner"
+  assert_file_not_contains "$CHILD_MCP_JSON" "git-pr-orchestrator"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if python3 - <<PYEOF
+import json, pathlib
+json.loads(pathlib.Path("$CHILD_MCP_JSON").read_text(encoding="utf-8"))
+PYEOF
+  then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: child .github/mcp.json must be valid JSON"
+  fi
 fi
 
 # ─────────────────────────────────────────────────────────────

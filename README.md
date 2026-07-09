@@ -64,7 +64,8 @@ your-project/
 │   ├── .github/agents/
 │   │   ├── repo-api-specialist.agent.md
 │   │   └── repo-api-critic.agent.md
-│   ├── .github/skills/      ← child-scoped + role-scoped skills
+│   ├── .github/skills/      ← child-scoped + role-scoped skills (infra repos also get MCAPS infra skills)
+│   ├── .github/mcp.json     ← child-scoped MCP config (parent catalog minus orchestration servers; opt-in)
 │   └── work/{todo,ready-for-review,done}/
 └── ../repo-web/...
 ```
@@ -84,6 +85,21 @@ maps each skill to a scope — `parent`, `child`, or `role:<role>` — and `init
 scoped skills into the matching repo's `.github/skills/`. Skills are tokenized
 (`__PROJECT_NAME__`, `__REGION__`, `__RESOURCE_GROUP__`, …) and rendered at init time. See
 `skills/README.md` for the catalog and token table.
+
+In addition, every **infra-role** child repo receives the shared MCAPS infra skills
+(`secure-azure-terraform-coder`, `defender-servers-skill`, `spoke-skill`) pulled from
+[`hoopdad/mcaps-infra-skills`](https://github.com/hoopdad/mcaps-infra-skills) via its
+`install-skills.sh`, landing in the child's `.github/skills/`.
+
+### MCP config in child repos
+
+When `enable_mcp: true`, init writes the MCP tools configuration to the parent's
+`.github/mcp.json` **and** replicates a child-scoped copy into every child repo's
+`.github/mcp.json`. Copilot CLI discovers workspace MCP config from `.mcp.json` or
+`.github/mcp.json` (per `copilot mcp --help`), so child runs — which execute with the
+child repo as their working directory — auto-load their tools. The child copy omits the
+parent-only orchestration servers (`repo-index`, `child-agent-runner`, `git-pr-orchestrator`)
+so children cannot dispatch or index the fleet.
 
 ## How Coordinator Workflow Works
 

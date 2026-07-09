@@ -1257,6 +1257,80 @@ install_skills() {
   done
 }
 
+# External infra skills pulled from hoopdad/mcaps-infra-skills for infra repos.
+INFRA_SKILLS_REPO="hoopdad/mcaps-infra-skills"
+INFRA_SKILLS_REF="main"
+INFRA_SKILLS_LIST="secure-azure-terraform-coder defender-servers-skill spoke-skill"
+
+# Install the shared MCAPS infra skills into every child repo whose role is
+# "infra". Uses the upstream install-skills.sh, targeting each child repo so the
+# skills land in <child>/.github/skills/ alongside framework-provided skills.
+install_infra_skills() {
+  local idx crole cdir skill installer rc infra_repos=0 have_infra="false"
+
+  for ((idx=0; idx<CHILD_COUNT; idx++)); do
+    [[ "${CHILD_ROLES[$idx]}" == "infra" ]] && { have_infra="true"; break; }
+  done
+  if [[ "$have_infra" != "true" ]]; then
+    log "No infra-role child repos — skipped MCAPS infra skills"
+    return 0
+  fi
+
+  if ! command -v gh >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
+    warn "Neither gh nor curl available — skipping MCAPS infra skills install"
+    return 0
+  fi
+
+  installer="$(mktemp)"
+  if ! gh api -H "Accept: application/vnd.github.raw" \
+      "repos/${INFRA_SKILLS_REPO}/contents/scripts/install-skills.sh?ref=${INFRA_SKILLS_REF}" \
+      > "$installer" 2>/dev/null; then
+    warn "Could not fetch install-skills.sh from ${INFRA_SKILLS_REPO} — skipping infra skills"
+    rm -f "$installer"
+    return 0
+  fi
+
+  for ((idx=0; idx<CHILD_COUNT; idx++)); do
+    crole="${CHILD_ROLES[$idx]}"
+    [[ "$crole" == "infra" ]] || continue
+    cdir="$(resolve_repo_path "${CHILD_LOCAL_PATHS[$idx]}")"
+    [[ -d "$cdir" ]] || { warn "Infra repo dir missing, skipping: $cdir"; continue; }
+    infra_repos=$((infra_repos + 1))
+    for skill in $INFRA_SKILLS_LIST; do
+      rc=0
+      bash "$installer" --repo "$INFRA_SKILLS_REPO" --ref "$INFRA_SKILLS_REF" \
+        --target "$cdir" --skill "$skill" >/dev/null 2>&1 || rc=$?
+      if [[ $rc -eq 0 ]]; then
+        log "Installed infra skill '$skill' into ${CHILD_NAMES[$idx]}/.github/skills/"
+      else
+        warn "Failed to install infra skill '$skill' into ${CHILD_NAMES[$idx]} (rc=$rc)"
+      fi
+    done
+  done
+
+  rm -f "$installer"
+  log "Installed MCAPS infra skills into $infra_repos infra-role child repo(s)"
+}
+
+# Replicate the MCP tools configuration into every child repo so child Copilot
+# runs (spawned by child-agent-runner with cwd=<child repo>) auto-discover the
+# workspace MCP config. The CLI discovers workspace MCP from `.mcp.json` or
+# `.github/mcp.json`, so children use the same documented `.github/mcp.json`
+# path as the parent — minus the parent-only orchestration servers.
+install_child_mcp_configs() {
+  [[ "${ENABLE_MCP:-false}" == "true" ]] || { log "MCP disabled — skipping child MCP config install"; return 0; }
+  local idx cdir cfg installed=0
+  for ((idx=0; idx<CHILD_COUNT; idx++)); do
+    cdir="$(resolve_repo_path "${CHILD_LOCAL_PATHS[$idx]}")"
+    [[ -d "$cdir" ]] || { warn "Child repo dir missing, skipping MCP config: $cdir"; continue; }
+    cfg="$cdir/.github/mcp.json"
+    write_child_mcp_config "$cfg"
+    installed=$((installed + 1))
+    log "Installed child MCP config into ${CHILD_NAMES[$idx]}/.github/mcp.json"
+  done
+  log "Installed child-scoped MCP config into $installed child repo(s)"
+}
+
 # Generate a child repo's .github/copilot-instructions.md (azd-aware, no GitHub Actions).
 generate_child_instructions() {
   local name="$1" role="$2" desc="$3" repo_path="$4" stack="$5" validate_cmd="$6"
@@ -1923,7 +1997,13 @@ Pattern definition context (authoritative):
 - Role: ${role}
 - Description: ${desc}
 - Target stack: ${child_stack}
-- Pattern snapshot: read \`.copilot/guardrails/pattern.yml\` (and \`.copilot/guardrails/nfr.yml\` if present) for the full pattern, platform, and non-functional constraints. Honor any \`pattern_constraints\`.
+- Pattern snapshot: read the pattern definition at \`${TARGET_DIR}/.copilot/guardrails/pattern.yml\` (and \`${TARGET_DIR}/.copilot/guardrails/nfr.yml\` if present) for the full pattern, platform, and non-functional constraints. Honor any \`pattern_constraints\`.
+
+Directory access (scoped to least privilege — do not fight it):
+- WRITE access: exactly one child repo root — ${repo_dir}.
+- READ access: the harness guardrails under ${TARGET_DIR}/.copilot/guardrails/ (pattern.yml, nfr.yml, init-pattern.yml).
+- You have NO access to the parent workspace directory or any sibling repository; they are intentionally out of scope.
+- You already know every path you need (all listed above). Do NOT run discovery commands — no \`find\`, \`ls\`, \`grep\`, \`cd\`, or globbing against the parent workspace or any directory outside ${repo_dir} and ${TARGET_DIR}. Those commands are denied by design and only waste the run. Open the exact files by the absolute paths given above.
 
 Scaffolding requirements:
 1. Create ONLY the conventional starter files for the target stack, rooted at ${repo_dir} (for example: pyproject.toml + src/ + tests/ for a Python service; package.json + Vite config + src/ for a React app; main.tf + variables.tf + outputs.tf for Terraform).
@@ -1935,6 +2015,7 @@ Scaffolding requirements:
 Hard constraints:
 - Do NOT create, modify, or delete anything under ${repo_dir}/work/ or ${repo_dir}/.github/agents/ — those are managed by later phases.
 - Do NOT touch any other repository or the parent framework directories.
+- Do NOT probe, list, or explore any directory outside ${repo_dir} and ${TARGET_DIR}; every path you need is given above, so there is nothing to discover.
 - Do NOT overwrite pre-existing files; only add what is missing.
 - Keep it minimal; specialist agents implement features in later phases." || warn "Orchestrator scaffolding for $name did not complete cleanly (continuing)"
   done
@@ -2210,6 +2291,10 @@ header "Phase 2.5: Installing skills, topology, orchestrator agents"
 # Skills (parent + scoped children) from the framework skills/ library.
 install_skills
 
+# External MCAPS infra skills (secure-azure-terraform-coder, defender-servers-skill,
+# spoke-skill) into infra-role child repos.
+install_infra_skills
+
 # Parent topology quick-reference.
 if [[ -n "${PATTERN_FILE:-}" && -f "$TEMPLATE_DIR/topology.md.tmpl" ]]; then
   if [[ ! -f "$TARGET_DIR/.copilot/topology.md" ]]; then
@@ -2444,6 +2529,10 @@ if should_run_phase 6; then
 set_copilot_stage "Phase 6: Running initial Copilot prompt"
 header "Phase 6: Running initial Copilot prompt"
 
+# Ensure every child repo carries the workspace MCP config before dispatch so
+# child Copilot runs (cwd=<child repo>) auto-discover .github/mcp.json.
+install_child_mcp_configs
+
 if [[ -n "${INITIAL_PROMPT:-}" ]]; then
   run_orchestration_preflight
 
@@ -2533,6 +2622,7 @@ echo "    <child>/.github/agents/*.agent.md — specialist + critic agents in ea
 echo "    <child>/work/{todo,ready-for-review,done}/ — child workflow queues"
 if [[ "${ENABLE_MCP:-false}" == "true" ]]; then
   echo "    .github/mcp.json                — MCP tools configuration"
+  echo "    <child>/.github/mcp.json        — child-scoped MCP config (parent minus orchestration servers)"
 else
   echo "    .github/mcp.json                — MCP tools configuration (disabled by config)"
 fi
@@ -2542,6 +2632,7 @@ echo "    .decisions/log.md                — decision record"
 echo "    .repo-index.yml                  — child repo references (external paths)"
 echo "    .copilot/topology.md             — project topology / quick reference"
 echo "    .github/skills/                  — installed Copilot skills"
+echo "    <infra child>/.github/skills/    — MCAPS infra skills (secure-azure-terraform-coder, defender-servers-skill, spoke-skill)"
 if [[ "$FEATURE_ONBOARDING_DOCS" == "true" || "$FEATURE_PORTABILITY_BLUEPRINTS" == "true" ]]; then
   echo "    .copilot/docs/                   — optional onboarding/portability docs"
 fi

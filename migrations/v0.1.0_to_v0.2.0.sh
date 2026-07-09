@@ -53,7 +53,7 @@ for name, desc in add.items():
     if name not in servers:
         servers[name] = {
             "description": desc,
-            "command": "python3",
+            "command": f"{fw}/.venv/bin/python",
             "args": [f"{fw}/tools/{name}/server.py"],
             "env": {"PROJECT_DIR": pd},
         }

@@ -73,6 +73,35 @@ write_mcp_config() {
   write_from_template "mcp.json.tmpl" "$output_path"
 }
 
+# Servers that coordinate/dispatch/index across repos. These belong to the
+# parent orchestrator only and must never be exposed to a child repo (a child
+# with child-agent-runner could recursively dispatch the fleet).
+MCP_PARENT_ONLY_SERVERS="repo-index child-agent-runner git-pr-orchestrator"
+
+# Write a child-scoped MCP config: the same server catalog as the parent
+# (.github/mcp.json) minus the parent-only orchestration servers above. Uses
+# the parent config as the single source of truth so the two never drift.
+write_child_mcp_config() {
+  local output_path="$1"
+  local tmp
+  tmp="$(mktemp)"
+  write_mcp_config "$tmp"
+  MCP_EXCLUDE_SERVERS="$MCP_PARENT_ONLY_SERVERS" python3 - "$tmp" "$output_path" <<'PYEOF'
+import json, os, sys
+
+src, dst = sys.argv[1], sys.argv[2]
+exclude = set(os.environ.get("MCP_EXCLUDE_SERVERS", "").split())
+cfg = json.load(open(src, encoding="utf-8"))
+servers = cfg.get("mcpServers", {})
+cfg["mcpServers"] = {k: v for k, v in servers.items() if k not in exclude}
+os.makedirs(os.path.dirname(dst), exist_ok=True)
+with open(dst, "w", encoding="utf-8") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("\n")
+PYEOF
+  rm -f "$tmp"
+}
+
 write_orchestrator_instructions() {
   local output_path="$1" child_workflow_list="$2" mcp_section="$3" usage_schema_section="$4" usage_quality_section="$5"
   TPL_FRAMEWORK_VERSION="$FRAMEWORK_VERSION" \
