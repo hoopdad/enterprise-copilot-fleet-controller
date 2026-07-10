@@ -1490,18 +1490,23 @@ if [[ -n "$CONFIG_FILE" ]]; then
       doc_url=$(parse_yaml_value "$PATTERN_FILE" ".docs.$d.url")
       doc_local=$(parse_yaml_value "$PATTERN_FILE" ".docs.$d.local_path")
       doc_desc=$(parse_yaml_value "$PATTERN_FILE" ".docs.$d.description")
+      doc_content=""
       if [[ -n "$doc_local" ]]; then
         resolved_path=$(realpath -m "$FRAMEWORK_DIR/$doc_local" 2>/dev/null || echo "")
-        if [[ "$resolved_path" == "$FRAMEWORK_DIR"/* && -f "$resolved_path" ]]; then
-          doc_content=$(cat "$resolved_path")
-        else
+        if [[ "$resolved_path" != "$FRAMEWORK_DIR"/* ]]; then
+          # Resolved outside the framework tree — a genuine path-traversal attempt.
           warn "Blocked path traversal attempt in docs.local_path: $doc_local"
-          doc_content=""
+        elif [[ -f "$resolved_path" ]]; then
+          doc_content=$(cat "$resolved_path")
+        elif [[ -n "$doc_url" ]]; then
+          # Local snapshot is missing — fall back to the source URL so the doc is not silently dropped.
+          warn "Pattern doc local_path not found, falling back to url: $doc_local"
+          doc_content=$(resolve_content "$doc_url")
+        else
+          warn "Pattern doc local_path not found and no url fallback: $doc_local"
         fi
       elif [[ -n "$doc_url" ]]; then
         doc_content=$(resolve_content "$doc_url")
-      else
-        doc_content=""
       fi
       if [[ -n "$doc_content" ]]; then
         PATTERN_DOC_SNAPSHOT_NAMES+=("${doc_name:-doc-$d}")
