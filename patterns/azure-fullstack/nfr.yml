@@ -43,7 +43,6 @@ cost:
   general:
     - Prefer consumption/serverless: Cosmos DB serverless, ACA consumption plan
     - Right-size Container App resources: start with 0.25 vCPU/0.5 Gi memory
-    - Enable scale-to-zero on Container Apps (min replicas: 0 for non-prod)
 
 devops:
   deployment_model:
@@ -57,7 +56,7 @@ devops:
 
   cd:
     - Before any deploy, every repo MUST be committed, pushed, and version-tagged
-      (orchestrator runs `scripts/predeploy-gate.sh`)
+      (orchestrator runs, created if needed, `scripts/predeploy-gate.sh`)
     - Authenticate to Azure with the developer's `az login` / managed identity (no OIDC federation)
     - Container apps pull images from ACR via user-assigned managed identity (AcrPull)
 

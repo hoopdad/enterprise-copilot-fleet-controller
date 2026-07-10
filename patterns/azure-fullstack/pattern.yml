@@ -23,7 +23,7 @@ orchestrator_agents:
 children:
   - suffix: "waf"
     role: "waf"
-    description: "Web Application Firewall. Public IP, filters with OWASP CRS and routes to web, api, and agent"
+    description: "Web Application Firewall. default private IP but optional Public IP if explicitly specified, filters with OWASP CRS and routes to web, api, and agent"
     stack: "container / nginx"
   
   - suffix: "web"
