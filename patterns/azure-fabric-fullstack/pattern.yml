@@ -1,0 +1,288 @@
+# azure-fabric-fullstack pattern definition
+# Stack: Web (React/TS) + API (Python/FastAPI) + Agents (Python/Microsoft Agent Framework)
+# Data: Microsoft Fabric/OneLake + Document Intelligence
+# Platform: Azure Container Apps, Azure AI Foundry Agent Service, internal ACA WAF, Terraform, local azd deployment
+
+name: "azure-fabric-fullstack"
+description: |
+  Full-stack Azure banking demo pattern with seven repos: a React/TypeScript SPA frontend,
+  a Python/FastAPI API, Python multi-agent workflows built with Microsoft Agent Framework,
+  Microsoft Fabric/OneLake data and analytics assets, Terraform infrastructure, and an
+  internal-only nginx/ModSecurity OWASP CRS WAF running on Azure Container Apps.
+
+  The pattern is optimized for commercial banking demos such as Jet Set Bank's CRE loan
+  closing room: borrower document upload, Azure AI Document Intelligence extraction,
+  Fabric-backed workflow state and audit evidence, Foundry-hosted agents for completeness,
+  credit, compliance, approval routing, and audit, plus a closing coordinator review gate.
+  It is intentionally private-first: the WAF is an internal blast-radius control, not an
+  internet-facing ingress.
+
+# Deployment model: "local-azd" (azd up from the harness) or "github-actions".
+# local-azd is the default and supported model for this pattern.
+deployment_model: "local-azd"
+
+# Default Azure region for all regional resources (override in init.yml).
+region: "centralus"
+
+# Orchestrator-level (non specialist/critic) agents installed into the parent repo.
+orchestrator_agents:
+  - "e2e-tester"
+
+children:
+  - suffix: "waf"
+    role: "waf"
+    description: "Internal-only ACA-hosted nginx/ModSecurity WAF using OWASP CRS. Private IP only; routes approved internal traffic to web and API services for blast-radius control, not public ingress."
+    stack: "Azure Container Apps / nginx / ModSecurity / OWASP Core Rule Set"
+
+  - suffix: "web"
+    role: "frontend"
+    description: "React/TypeScript SPA for Jet Set Bank demo users: borrower upload portal, closing coordinator dashboard, Power BI-style executive dashboard simulation, lightweight policy admin page, agent findings review, and slightly cheesy jetset-themed landing page copy."
+    stack: "TypeScript / React 18 / Vite / Vitest / Playwright"
+
+  - suffix: "api"
+    role: "backend"
+    description: "Python/FastAPI REST API for local demo auth, document upload orchestration, Fabric/OneLake access, Document Intelligence job coordination, agent invocation, workflow state, and health/version endpoints."
+    stack: "Python 3.12 / FastAPI / pytest / Azure SDK / Fabric REST APIs"
+
+  - suffix: "agents"
+    role: "agent"
+    description: "Python multi-agent workflows coded with Microsoft Agent Framework and deployed to Azure AI Foundry Agent Service. Includes document completeness, credit review, compliance review, approval routing, closing coordination, and audit agents."
+    stack: "Python 3.12 / Microsoft Agent Framework / Azure AI Foundry Agent Service / pytest"
+
+  - suffix: "fabric"
+    role: "worker"
+    description: "Microsoft Fabric assets for OneLake document landing, Lakehouse/Warehouse tables, extracted fields, workflow state, findings, audit evidence, semantic model, and Power BI-ready demo analytics without requiring Power BI SaaS access."
+    stack: "Microsoft Fabric / OneLake / Lakehouse / Warehouse / Data Factory pipelines / notebooks / semantic model"
+
+  - suffix: "infra"
+    role: "infra"
+    description: "Terraform IaC for Central US Azure resources: hub-linked spoke network, internal ACA environment, private WAF, ACR, Key Vault, managed identities, Foundry, Document Intelligence, Fabric connectivity, private endpoints, private DNS links, diagnostics, and RBAC."
+    stack: "Terraform / azurerm provider / Azure Verified Modules / mcaps-infra-skills"
+
+pattern_constraints:
+  mission: |
+    Build and deploy a private-first Microsoft Fabric + Foundry Agents banking demo for
+    commercial real estate loan document gathering, review, approval routing, and closing
+    readiness. The target decision states are Ready to Close, Ready with Exceptions, and
+    Not Ready. The highlighted guided demo package should resolve to Ready with Exceptions
+    so the demo showcases controlled exception approval, accept-risk reasoning, and the
+    audit trail. The executive story should emphasize reduced closing cycle time, fewer
+    manual document touches, exception aging reduction, faster readiness decisions, and
+    stronger evidence-backed audit.
+
+  demo_branding: |
+    The demo project name should be jetset-bank-demo and the fictional bank should be
+    Jet Set Bank. The landing page should use slightly cheesy marketing language riffing
+    on "jetset" while remaining professional enough for banking executives and technical
+    architects/builders.
+
+  user_experience: |
+    Keep the interactive personas small: borrower and closing coordinator. The borrower
+    uploads documents and responds to remediation requests. The closing coordinator reviews
+    agent findings, accepts or rejects recommendations, requests remediation, and controls
+    whether a package can move to Ready to Close. Credit analyst, compliance reviewer,
+    approval routing, closing coordination, and audit responsibilities are represented by
+    agents rather than separate user personas. Borrower remediation messages and
+    notifications occur inside the portal only; do not send or simulate outbound email for
+    the first build. The closing coordinator may approve a controlled exception or accept
+    risk on an agent finding, within delegated authority, only by entering a required
+    reason/comment, which must be stored in the Fabric audit trail. Agent execution must
+    be asynchronous with visible per-agent status and progress
+    in the portal, including extraction, completeness, credit, compliance, approval routing,
+    and audit steps. Support multiple CRE loan packages concurrently with independent
+    per-package workflow and agent status, while the guided demo highlights one primary
+    package.
+
+  demo_data: |
+    The app must make sample CRE loan documents easy to obtain for upload. Prefer generated
+    and downloadable sample document bundles plus a repeatable load-sample path. The sample
+    package must intentionally contain visible issues for agents to detect, including a
+    missing guarantor signature, expired insurance, stale appraisal, borrower name mismatch,
+    and DSCR policy exception. The first-build CRE checklist should focus on loan
+    application, rent roll, operating statement, appraisal, insurance certificate, entity
+    documents, guaranty, environmental report, title commitment, and flood determination.
+
+  document_processing: |
+    Use Azure AI Document Intelligence to extract fields from uploaded CRE loan documents.
+    Use prebuilt-layout and prebuilt-document as the first-build model set; custom-trained
+    models are out of scope. Do not rely only on synthetic metadata or manual parsing.
+    Source PDFs land in OneLake, and extracted fields, findings, workflow state, approvals,
+    and audit records live in Fabric Lakehouse/Warehouse tables. Extraction records must
+    include model id, confidence where available, document id, page, field name, value, and
+    timestamp. Findings and audit records must include source citations back to the uploaded
+    document, page, extracted field, policy/check, agent recommendation, human decision, and
+    override reason when applicable.
+
+  data_platform: |
+    Microsoft Fabric is the authoritative system for operational loan package state,
+    document extraction outputs, workflow analytics, and audit evidence. Raw uploaded
+    documents land in OneLake. Do not introduce a separate operational database unless a
+    later requirement explicitly changes the pattern. Seed CRE document checklist and
+    policy rules into editable Fabric tables; agents read and cite these policy/checklist
+    rows rather than relying on hard-coded rules. Include a lightweight admin/policy page
+    in the React app to edit seeded Fabric policy/checklist rows, save changes to Fabric,
+    trigger affected agent checks through the event-driven workflow, and write audit
+    entries for policy changes. The main guided package has full source documents and
+    Document Intelligence extraction; the other 9 portfolio packages may be seeded Fabric
+    records for dashboard realism unless a later requirement expands full-document coverage.
+    Fabric capacity and workspace ownership must be explicit: the infra repo owns capacity,
+    workspace, private networking/private link, and RBAC where Terraform/provider support
+    exists; the fabric repo owns Lakehouse, Warehouse, Eventstream, Activator, semantic model,
+    seed data, and other Fabric workspace items through Fabric REST/CLI/PowerShell where
+    Terraform support is unavailable. Use a minimum F4 Fabric capacity unless current docs
+    or preflight checks require a higher SKU for selected Real-Time Intelligence features.
+
+  event_driven_workflow: |
+    Prefer Fabric-native event-driven triggers over manual "rerun agents" controls. Use
+    Microsoft Fabric Real-Time Intelligence eventstreams and Activator where supported for
+    document upload, Document Intelligence extraction completion, policy/checklist change,
+    coordinator decision, and remediation-submission events. Trigger downstream Fabric
+    pipelines, notebooks, User Data Functions, or business events to enqueue agent work and
+    update workflow state. The portal must not block while LLM-backed agents run; it should
+    render per-agent queued/running/complete/failed statuses from Fabric workflow state. If
+    native change notifications are not available for a specific Fabric artifact, write
+    explicit domain events and work-queue rows into Fabric as the fallback so the event
+    model remains observable and replayable. The API owns agent dispatch and is the sole
+    caller of Foundry Agent Service. Fabric events and work-queue rows enqueue work; the API
+    dispatcher drains the queue, invokes Foundry agents, and writes status/results back to
+    Fabric. This prevents duplicate dispatch paths and keeps orchestration observable.
+
+  dashboard_experience: |
+    Do not require Power BI SaaS access for the first build. Simulate the executive
+    Power BI experience with a dashboard inside the React web app that feels like a
+    banker-facing Power BI report: KPI cards, readiness funnel, exception breakdown,
+    document aging, package status, agent finding severity, and drill-through views.
+    Include executive metrics for dollar-weighted exposure, exception aging, SLA bottlenecks,
+    manual-touch reduction, and loans at risk of missing target close date.
+    Include both an executive portfolio view and a closing coordinator workbench view.
+    The executive view should show 10 sample CRE loan packages with the main demo package
+    highlighted, rather than only a single isolated loan package. The sample portfolio
+    should include varied statuses: Ready to Close, Ready with Exceptions, Not Ready,
+    In Review, and Awaiting Borrower Documents.
+    Back the simulated dashboard with Fabric Lakehouse/Warehouse tables and keep the
+    Fabric model Power BI-ready for future integration.
+
+  agent_platform: |
+    Agents must be coded in Python using Microsoft Agent Framework workflows and harness
+    patterns, with the implementation guidance from
+    https://learn.microsoft.com/en-us/agent-framework/get-started/. Agents must be deployed
+    to Azure AI Foundry Agent Service using the GA guidance from
+    https://devblogs.microsoft.com/foundry/foundry-agent-service-ga/. Agent findings should
+    come from real LLM-backed Foundry Agent execution and may vary slightly from run to run;
+    the intentional sample-package issues remain stable demo anchors. Use GPT-4.1-mini or
+    the lowest-cost equivalent mini-class Foundry model available in Central US that
+    supports agent/tool execution. The agents repo owns Python agent definitions, prompts,
+    tool contracts, deployment scripts, and deterministic check tools. Foundry hosts the
+    agent definitions/model runtime; the API dispatcher invokes them. Each anchor issue must
+    be enforced by a deterministic tool/function reading ground truth from Fabric, while the
+    LLM narrates, prioritizes, and explains. End-to-end tests assert the five anchor findings
+    are present regardless of LLM wording.
+
+  networking: |
+    The application must not expose a public endpoint. Use a private/internal-only WAF as
+    the single private application entry point for inspection, routing, and blast-radius
+    control. The WAF is not internet-facing. It exists to control internal access paths
+    and enforce HTTP security policy before traffic reaches the internal Azure Container
+    Apps environment.
+
+    Use an internal ACA environment and internal ACA ingress behind the private WAF. The
+    WAF itself runs on Azure Container Apps using nginx/ModSecurity with OWASP CRS. All
+    app, API, WAF backend, Foundry, Document Intelligence, Fabric/OneLake access paths,
+    registry, Key Vault, monitoring, and supporting services should use private networking
+    wherever supported. Foundry Agent Service and tool connectivity must be wired for
+    Private Link/private networking with hub private DNS integration where supported; any
+    unsupported control-plane or SaaS endpoints must be documented as controlled outbound
+    exceptions rather than implied private paths.
+
+    Use a hub-and-spoke network model. The spoke contains workload subnets and zero-trust
+    NSGs. Private DNS zones belong in the hub and are linked to every VNet; do not create
+    private DNS zones in the spoke. Do not create a new hub and do not modify VPN settings.
+    Demo users reach the private WAF through the existing hub/VPN/private DNS path. If that
+    route is unavailable, demo access is blocked and must be resolved outside this workload.
+    Prevent WAF bypass by restricting backend ingress to the internal ACA environment/WAF
+    path, publishing private DNS only for the WAF entry point, and requiring app/API requests
+    to carry a WAF-injected internal header except for platform health probes. Configure OWASP
+    CRS with documented route-specific exclusions for multipart PDF uploads, not global CRS
+    disablement; use PL1, a demo-appropriate request body limit such as 50 MB, and an E2E test
+    that uploads the sample bundle through the WAF.
+
+  identity_and_security: |
+    Use simple/local demo authentication for borrower and closing coordinator personas in
+    the first build. Do not require Entra ID or Entra External ID for interactive end-user
+    sign-in, and do not require Microsoft 365, SharePoint, or OneDrive licensing. Azure
+    service authentication still uses managed identities, service principals where required,
+    and Entra RBAC for service-to-service and service-to-Azure access. Keep secrets out of
+    source and code; use Key Vault where secrets are unavoidable.
+
+  infrastructure: |
+    Use Terraform only for infrastructure; do not use Bicep. Infrastructure work must use
+    skills from https://github.com/hoopdad/mcaps-infra-skills, especially secure Azure
+    Terraform, hub, and spoke skills. Deploy all regional Azure resources to Central US.
+    Deploy locally through azd from the harness repo. The harness deployment order is
+    infrastructure -> Fabric workspace/items/seed data -> API -> agents -> web -> WAF ->
+    private-path validation. Preflight checks must validate Central US model quota, Document
+    Intelligence availability, Fabric capacity/workspace readiness, hub private DNS/VPN
+    reachability, private endpoint support, and provider/API limitations before late-stage
+    deployment.
+
+  repositories: |
+    Use private multi-repo fleet naming under owner hoopdad with the jetset-bank-demo
+    prefix: jetset-bank-demo-harness, jetset-bank-demo-web, jetset-bank-demo-api,
+    jetset-bank-demo-agents, jetset-bank-demo-fabric, jetset-bank-demo-infra, and
+    jetset-bank-demo-waf.
+
+  quality_and_operations: |
+    Each service must expose health and version endpoints, emit structured logs, run as a
+    non-root multi-stage container where containerized, and support local lint, test, build,
+    IaC validation, container scanning, and end-to-end smoke tests before deployment. The
+    harness must own cross-service JSON Schema/OpenAPI contracts for package state, domain
+    events, work-queue rows, agent run status, findings, policy rows, decisions, and audit
+    records so web, API, agents, and Fabric implementations do not diverge. Use per-repo
+    semantic versioning starting at 0.1.0 and surface component versions in the app.
+
+# Skills installed into generated repos from the framework skills/ library.
+# scope: parent | child | role:<role>  (role:* installs into matching child(ren))
+# A skill may declare multiple scopes.
+skills:
+  - name: "container-app-troubleshoot"
+    scope: ["parent", "child"]
+  - name: "e2e-test"
+    scope: ["parent"]
+  - name: "route-flow-debug"
+    scope: ["parent", "role:waf"]
+
+  # Infra (Terraform / Azure) — vendored from hoopdad/mcaps-infra-skills.
+  - name: "secure-azure-terraform-coder"
+    scope: ["role:infra"]
+  - name: "hub-skill"
+    scope: ["role:infra"]
+  - name: "spoke-skill"
+    scope: ["role:infra", "parent"]
+  - name: "defender-servers-skill"
+    scope: ["role:infra"]
+
+docs:
+  - name: "jetset-bank-system-requirements"
+    description: "Full Jet Set Bank Demo system requirements for the Azure Fabric full-stack banking pattern."
+    url: "https://raw.githubusercontent.com/hoopdad/enterprise-copilot-fleet-controller/main/patterns/azure-fabric-fullstack/system-requirements.md"
+    local_path: "docs/jetset-bank-system-requirements.md"
+
+  - name: "jetset-bank-demo-summaries"
+    description: "Elevator pitch, high-level feature summary, and capability map for the Jet Set Bank Demo."
+    url: "https://raw.githubusercontent.com/hoopdad/enterprise-copilot-fleet-controller/main/patterns/azure-fabric-fullstack/demo-summaries.md"
+    local_path: "docs/jetset-bank-demo-summaries.md"
+
+  - name: "agent-framework-get-started"
+    description: "Microsoft Agent Framework getting started guide for building agents, tools, workflows, harnesses, memory, and hosting."
+    url: "https://learn.microsoft.com/en-us/agent-framework/get-started/"
+    local_path: "docs/agent-framework-get-started.md"
+
+  - name: "foundry-agent-service-ga"
+    description: "Azure AI Foundry Agent Service GA guidance, including Responses API-based runtime, private networking, tool connectivity, tracing, and evaluations."
+    url: "https://devblogs.microsoft.com/foundry/foundry-agent-service-ga/"
+    local_path: "docs/foundry-agent-service-ga.md"
+
+  - name: "azure-fullstack-reference-pattern"
+    description: "Reference pattern used as the structural source for this Azure Fabric full-stack pattern."
+    url: "https://raw.githubusercontent.com/hoopdad/enterprise-copilot-fleet-controller/main/patterns/azure-fullstack/pattern.yml"
+    local_path: "patterns/azure-fullstack/pattern.yml"
