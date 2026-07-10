@@ -10,7 +10,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FRAMEWORK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# FRAMEWORK_DIR locates static assets (VERSION, templates/, skills/, patterns/).
+# When launched from a stable snapshot (see scripts/init.py), the script body lives
+# outside the repo, so honor INIT_FRAMEWORK_DIR to keep asset paths pointed at the
+# real framework checkout. Falls back to the parent of SCRIPT_DIR for direct runs.
+FRAMEWORK_DIR="${INIT_FRAMEWORK_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 TEMPLATE_DIR="$FRAMEWORK_DIR/templates/init"
 INIT_HELPERS_PY="$SCRIPT_DIR/init/helpers.py"
 TARGET_DIR="$(pwd)"
@@ -2186,7 +2190,7 @@ tools: [${tools_list}]
 
 You are the ${role} specialist for ${name} (${repo_path}).
 Run this workflow only from the child repo root via a NEW Copilot CLI invocation with cwd set to this repository.
-If a parent orchestrator tries to route child execution through background sub-agents or task agents, reject that path and insist on MCP-first orchestration (`check_repo_index` + async child-agent-runner dispatch tools such as `start_child_agents_batch`/`start_child_agent`).
+If a parent orchestrator tries to route child execution through background sub-agents or task agents, reject that path and insist on MCP-first orchestration (\`check_repo_index\` + async child-agent-runner dispatch tools such as \`start_child_agents_batch\`/\`start_child_agent\`).
 
 ## Your Scope
 - Repository: ${repo_path}
@@ -2203,10 +2207,10 @@ If a parent orchestrator tries to route child execution through background sub-a
 
 ## MCP Skill/Workflow Callouts
 - Use tools only when they match this repo's scoped list.
-- Prefer `run_local_lint` before test/build commands for quick feedback.
-- For infra repos, run `terraform_fmt_check` + `terraform_init_validate` + `terraform_plan_check` and inspect Azure with `list_azure_resources` / `get_azure_status`.
-- For backend repos with contracts, use `check_contract_compliance`; for new routes, use `scaffold_from_contract`.
-- Run `security_scan` before handoff and record key events with `log_usage`; if you observe looping/retries, call `get_usage_quality_report`.
+- Prefer \`run_local_lint\` before test/build commands for quick feedback.
+- For infra repos, run \`terraform_fmt_check\` + \`terraform_init_validate\` + \`terraform_plan_check\` and inspect Azure with \`list_azure_resources\` / \`get_azure_status\`.
+- For backend repos with contracts, use \`check_contract_compliance\`; for new routes, use \`scaffold_from_contract\`.
+- Run \`security_scan\` before handoff and record key events with \`log_usage\`; if you observe looping/retries, call \`get_usage_quality_report\`.
 
 ${role_specific_prompt}
 

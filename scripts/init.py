@@ -5,14 +5,36 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 def resolve_shell_engine() -> Path:
     script_dir = Path(__file__).resolve().parent
     return script_dir / "init-core.sh"
+
+
+def snapshot_shell_engine(shell_engine: Path) -> tuple[Path, Path]:
+    """Copy the shell engine and its helper library into a throwaway temp dir.
+
+    An init run can take many minutes while it drives Copilot orchestrations.
+    Bash reads a script incrementally by byte offset, so editing the source on
+    disk mid-run (e.g. a ``git pull`` or an editor save) desynchronizes the
+    parser and produces spurious "syntax error near unexpected token" failures.
+    Running from an immutable snapshot makes an in-flight run immune to that.
+
+    Returns ``(snapshot_engine_path, snapshot_root)``.
+    """
+    src_dir = shell_engine.parent
+    snapshot_root = Path(tempfile.mkdtemp(prefix="fleet-init-core-"))
+    shutil.copy2(shell_engine, snapshot_root / shell_engine.name)
+    init_lib = src_dir / "init"
+    if init_lib.is_dir():
+        shutil.copytree(init_lib, snapshot_root / "init")
+    return snapshot_root / shell_engine.name, snapshot_root
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -31,20 +53,28 @@ def run_shell_engine(args: argparse.Namespace) -> int:
         print(f"ERROR: missing init shell engine: {shell_engine}", file=sys.stderr)
         return 1
 
-    cmd = ["bash", str(shell_engine), "--start-phase", str(args.start_phase), "--end-phase", str(args.end_phase)]
-    if args.config:
-        cmd.extend(["--config", args.config])
-    if args.auto_delete:
-        cmd.append("--auto-delete")
-    cmd.extend(args.shell_arg)
-
-    env = os.environ.copy()
+    # Framework assets (VERSION, templates/, skills/, patterns/) live at the repo
+    # root; the snapshot only carries the executable scripts.
+    framework_dir = shell_engine.parent.parent
+    snapshot_engine, snapshot_root = snapshot_shell_engine(shell_engine)
     try:
-        completed = subprocess.run(cmd, env=env, check=False)
-    except OSError as exc:
-        print(f"ERROR: failed to execute init core: {exc}", file=sys.stderr)
-        return 1
-    return int(completed.returncode)
+        cmd = ["bash", str(snapshot_engine), "--start-phase", str(args.start_phase), "--end-phase", str(args.end_phase)]
+        if args.config:
+            cmd.extend(["--config", args.config])
+        if args.auto_delete:
+            cmd.append("--auto-delete")
+        cmd.extend(args.shell_arg)
+
+        env = os.environ.copy()
+        env["INIT_FRAMEWORK_DIR"] = str(framework_dir)
+        try:
+            completed = subprocess.run(cmd, env=env, check=False)
+        except OSError as exc:
+            print(f"ERROR: failed to execute init core: {exc}", file=sys.stderr)
+            return 1
+        return int(completed.returncode)
+    finally:
+        shutil.rmtree(snapshot_root, ignore_errors=True)
 
 
 def main() -> int:
