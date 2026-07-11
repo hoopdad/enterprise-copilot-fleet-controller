@@ -249,6 +249,8 @@ def _build_prompt(repo_name: str, repo_role: str, request_file: Path, phase: str
             "Follow the critic agent instructions in .github/agents/*-critic.agent.md. "
             "Run the FULL tiered review (Tier 1: objective validation, Tier 2: requirement coverage, "
             "Tier 3: failure modes, Tier 4: security, Tier 5: architecture/cross-repo). "
+            "Use parent requirements/contracts/guardrails/docs as authoritative read-only references; "
+            "never modify them from the child session. "
             "If all tiers pass (allowing up to 2 LOW-severity NOTEs), append your PASS rationale "
             "and move the file to work/done/. If any HIGH-severity finding, append structured feedback "
             "with STATUS: FAIL and move the file back to work/todo/ for the specialist to address."
@@ -268,12 +270,15 @@ def _build_prompt(repo_name: str, repo_role: str, request_file: Path, phase: str
             "4. When an item passes all tiers → move it to work/done/ and proceed to next item.\n"
             "5. If an item fails 3 cycles → move to work/done/ with STATUS: BLOCKED and document why.\n\n"
             f"Start with: '{request_rel}'\n"
-            "Stay within this repo. Do not ask questions. Complete all items or exhaust retries."
+            "Stay within this repo for all writes. Parent requirements/contracts/guardrails/docs are "
+            "authoritative read-only references; never modify them from the child session. "
+            "Do not ask questions. Complete all items or exhaust retries."
         )
     return (
         f"Process exactly one queued request for repo '{repo_name}' as {role_label}. "
         f"Read and execute only '{request_rel}' from work/todo. "
         "Follow the child repo agent instructions, stay within this repo, and complete the queue handoff protocol. "
+        "Parent requirements/contracts/guardrails/docs are authoritative read-only references; never modify them. "
         "If implementation files are missing, scaffold the minimal required project/code structure in this repo "
         "to satisfy the request and acceptance criteria; do not mark blocked solely because the repo is greenfield."
     )
@@ -705,6 +710,15 @@ def _resolve_job_setup(
         "--add-dir",
         str(repo_dir),
     ]
+    for reference_dir in (
+        project_dir / ".requirements",
+        project_dir / ".contracts",
+        project_dir / ".copilot" / "guardrails",
+        project_dir / ".decisions",
+        project_dir / "docs",
+    ):
+        if reference_dir.is_dir():
+            command.extend(["--add-dir", str(reference_dir)])
 
     return {
         "ok": True,

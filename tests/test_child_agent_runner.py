@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -100,6 +101,37 @@ class ChildAgentRunnerTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["status"], "already_finished")
+
+    def test_job_command_scopes_parent_reference_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            repo_dir = project_dir / "child"
+            (repo_dir / "work" / "todo").mkdir(parents=True)
+            (repo_dir / "work" / "todo" / "request.md").write_text("work", encoding="utf-8")
+            for relative in (".requirements", ".contracts", ".copilot/guardrails", ".decisions", "docs"):
+                (project_dir / relative).mkdir(parents=True)
+            (project_dir / ".repo-index.yml").write_text(
+                "repos:\n  - name: child\n    role: backend\n    local_path: child\n",
+                encoding="utf-8",
+            )
+            old_project_dir = os.environ.get("PROJECT_DIR")
+            os.environ["PROJECT_DIR"] = str(project_dir)
+            try:
+                setup = runner._resolve_job_setup("child", 60, 1000, "full")
+            finally:
+                if old_project_dir is None:
+                    os.environ.pop("PROJECT_DIR", None)
+                else:
+                    os.environ["PROJECT_DIR"] = old_project_dir
+
+            self.assertTrue(setup["ok"])
+            command = setup["command"]
+            added_dirs = [command[index + 1] for index, value in enumerate(command[:-1]) if value == "--add-dir"]
+            self.assertIn(str(repo_dir), added_dirs)
+            self.assertIn(str(project_dir / ".requirements"), added_dirs)
+            self.assertIn(str(project_dir / ".contracts"), added_dirs)
+            self.assertIn(str(project_dir / ".copilot" / "guardrails"), added_dirs)
+            runner._release_lock(Path(setup["lock_file"]))
 
 
 if __name__ == "__main__":
