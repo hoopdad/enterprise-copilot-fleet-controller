@@ -14,7 +14,7 @@ Lightweight MCP (Model Context Protocol) servers that handle mechanical tasks so
 | Tool | Purpose | Used By |
 |------|---------|---------|
 | `repo-index` | Validate/inspect `.repo-index.yml` and report child queue state (`work/todo`, `work/ready-for-review`, `work/done`) | Orchestrator |
-| `child-agent-runner` | Start scoped async child-repo Copilot sessions (`start_child_agent`/`start_child_agents_batch`) and poll completion (`get_child_agent_job`/`list_child_agent_jobs`) | Orchestrator |
+| `child-agent-runner` | Control scoped async child-repo Copilot sessions: start, compact status/polling, runner health, and graceful/forced stop for individual or selected batch jobs | Orchestrator |
 | `contract-compliance` | Compare implemented routes to `.contracts/*.yml` endpoints | Orchestrator |
 | `scaffold-generator` | Generate non-overwriting FastAPI/TypeScript stubs from contracts | Specialists |
 | `azure-inspector` | Read Container Apps, Cosmos DB, and ACR state via Azure CLI | Specialists (infra) |

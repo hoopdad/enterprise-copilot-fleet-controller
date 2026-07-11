@@ -11,7 +11,10 @@
       "description": "Spawn scoped child-repo Copilot runs for one queued work/todo item.",
       "command": "__FRAMEWORK_DIR__/.venv/bin/python",
       "args": ["__FRAMEWORK_DIR__/tools/child-agent-runner/server.py"],
-      "env": { "PROJECT_DIR": "__TARGET_DIR__" }
+      "env": {
+        "PROJECT_DIR": "__TARGET_DIR__",
+        "RUNNER_CONTROL_VERSION": "2"
+      }
     },
     "contract-compliance": {
       "description": "Compare implemented routes to .contracts/*.yml endpoint definitions.",

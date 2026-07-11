@@ -31,6 +31,9 @@ PROGRESS_EXTENSION_DECISION_WINDOW_SECONDS = 90
 PROGRESS_ACTIVE_OUTPUT_WINDOW_SECONDS = 180
 TIMEOUT_EXTENSION_SECONDS = 600
 MAX_TIMEOUT_SECONDS = 7200
+DEFAULT_STOP_GRACE_SECONDS = 10
+TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
+ACTIVE_JOB_STATUSES = {"queued", "running", "cancel_requested"}
 
 
 def _workspace_root() -> Path:
@@ -175,6 +178,24 @@ def _is_pid_alive(pid: int | None) -> bool:
     return True
 
 
+def _signal_process(pid: int | None, sig: signal.Signals) -> bool:
+    if not _is_pid_alive(pid):
+        return False
+    assert pid is not None
+    try:
+        # Runner workers and Copilot children are launched with start_new_session=True.
+        # Only signal the process group when the saved PID is its leader.
+        if os.getpgid(pid) == pid:
+            os.killpg(pid, sig)
+        else:
+            os.kill(pid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return False
+
+
 def _load_job(project_dir: Path, job_id: str) -> dict[str, Any] | None:
     return _read_json(_job_path(project_dir, job_id))
 
@@ -198,7 +219,7 @@ def _find_running_repo_job(project_dir: Path, repo_name: str) -> dict[str, Any] 
         if str(job.get("repo", "")) != repo_name:
             continue
         status = str(job.get("status", ""))
-        if status in ("queued", "running"):
+        if status in ACTIVE_JOB_STATUSES:
             if _is_pid_alive(int(job.get("worker_pid") or 0)):
                 return job
     return None
@@ -310,6 +331,38 @@ def _extract_progress_step(line: str) -> str | None:
     return None
 
 
+def _compact_job(
+        job: dict[str, Any],
+        *,
+        include_output: bool = False,
+        include_details: bool = False,
+        max_output_chars: int = 12000,
+) -> dict[str, Any]:
+    """Return a transport-safe job view instead of replaying full prompts and commands."""
+    compact = dict(job)
+    if not include_details:
+        compact.pop("prompt", None)
+        compact.pop("command", None)
+    output = str(compact.get("output", ""))
+    if include_output:
+        if len(output) > max_output_chars:
+            compact["output"] = output[: max_output_chars - 3] + "..."
+    else:
+        compact.pop("output", None)
+    return compact
+
+
+def _job_cancel_requested(project_dir: Path | None, job_id: str | None) -> tuple[bool, str]:
+    if project_dir is None or not job_id:
+        return False, ""
+    current = _load_job(project_dir, job_id)
+    if current is None:
+        return False, ""
+    status = str(current.get("status", ""))
+    reason = str(current.get("cancel_reason", "")).strip()
+    return status in ("cancel_requested", "cancelled"), reason
+
+
 def _update_job_progress(
     project_dir: Path | None,
     job_id: str | None,
@@ -383,6 +436,34 @@ def _run_copilot_with_progress(
     while True:
         now = time.monotonic()
         elapsed = int(now - start)
+
+        cancel_requested, cancel_reason = _job_cancel_requested(project_dir, job_id)
+        if cancel_requested:
+            _signal_process(proc.pid, signal.SIGTERM)
+            try:
+                tail_out, tail_err = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                _signal_process(proc.pid, signal.SIGKILL)
+                tail_out, tail_err = proc.communicate()
+            if tail_out:
+                stdout_chunks.append(tail_out)
+            if tail_err:
+                stderr_chunks.append(tail_err)
+            error = {
+                "code": "JOB_CANCELLED",
+                "message": cancel_reason or "child-agent job was cancelled",
+            }
+            _update_job_progress(
+                project_dir,
+                job_id,
+                job,
+                elapsed_seconds=int(time.monotonic() - start),
+                timeout_seconds_effective=current_timeout,
+                extension_count=extension_count,
+                phase="cancelled",
+                last_step=error["message"],
+            )
+            return 130, "".join(stdout_chunks), "".join(stderr_chunks), error
 
         if (now - last_heartbeat) >= PROGRESS_HEARTBEAT_SECONDS:
             _update_job_progress(
@@ -511,7 +592,7 @@ def _run_copilot_with_progress(
 
 def _refresh_job_state(job: dict[str, Any]) -> dict[str, Any]:
     status = str(job.get("status", ""))
-    if status not in ("queued", "running"):
+    if status not in ACTIVE_JOB_STATUSES:
         return job
     if _is_pid_alive(int(job.get("worker_pid") or 0)):
         return job
@@ -521,13 +602,17 @@ def _refresh_job_state(job: dict[str, Any]) -> dict[str, Any]:
     if lock_file_value:
         _release_lock(Path(lock_file_value))
 
-    job["status"] = "failed"
+    cancelled = status == "cancel_requested"
+    job["status"] = "cancelled" if cancelled else "failed"
     job["ok"] = False
     job["finished_at"] = _now_iso()
-    job["error"] = {
-        "code": "WORKER_EXITED",
-        "message": "child-agent worker exited before writing completion status",
-    }
+    if cancelled:
+        job["cancelled_at"] = job["finished_at"]
+    else:
+        job["error"] = {
+            "code": "WORKER_EXITED",
+            "message": "child-agent worker exited before writing completion status",
+        }
     _save_job(project_dir, str(job["job_id"]), job)
     return job
 
@@ -775,8 +860,11 @@ def _run_worker(job_id: str) -> int:
     job["log_file"] = str(log_file)
     job["output"] = output
     job["request_file"] = request_file
+    cancelled = error is not None and error.get("code") == "JOB_CANCELLED"
     job["ok"] = rc == 0 and error is None
-    job["status"] = "completed" if job["ok"] else "failed"
+    job["status"] = "cancelled" if cancelled else ("completed" if job["ok"] else "failed")
+    if cancelled:
+        job["cancelled_at"] = job["finished_at"]
     if error is not None:
         error.setdefault("details", {})
         error["details"]["repo"] = repo_name
@@ -1105,7 +1193,12 @@ def start_child_agents_batch(
             deduped_targets.append(repo_name)
             seen.add(repo_name)
 
-    running_jobs = [job for job in _list_jobs(project_dir) if str(job.get("status")) in ("queued", "running") and _is_pid_alive(int(job.get("worker_pid") or 0))]
+    running_jobs = [
+        job
+        for job in _list_jobs(project_dir)
+        if str(job.get("status")) in ACTIVE_JOB_STATUSES
+        and _is_pid_alive(int(job.get("worker_pid") or 0))
+    ]
     available_slots = max(0, max_parallel - len(running_jobs))
 
     started: list[dict[str, Any]] = []
@@ -1152,31 +1245,254 @@ def start_child_agents_batch(
 
 @mcp.tool()
 @track_usage("child-agent-runner")
-def get_child_agent_job(job_id: str) -> str:
-    """Get current status/result for one async child-agent job id."""
+def get_child_agent_job(
+    job_id: str,
+    include_output: bool = True,
+    include_details: bool = False,
+    max_output_chars: int = 12000,
+) -> str:
+    """Get current status/result for one async child-agent job id.
+
+    Args:
+        job_id: Async job identifier returned by start_child_agent/start_child_agents_batch
+        include_output: Include captured Copilot output (defaults true for a single-job lookup)
+        include_details: Include the full prompt and command (defaults false)
+        max_output_chars: Maximum captured output characters to return (200-200000)
+    """
     if not job_id or not job_id.strip():
         return _error_payload("INVALID_JOB_ID", "job_id must be a non-empty string")
+    if max_output_chars < 200 or max_output_chars > 200000:
+        return _error_payload("INVALID_OUTPUT_LIMIT", "max_output_chars must be between 200 and 200000")
     project_dir = _workspace_root()
     job = _load_job(project_dir, job_id.strip())
     if job is None:
         return _error_payload("JOB_NOT_FOUND", f"job_id '{job_id}' was not found")
     refreshed = _refresh_job_state(job)
-    return json.dumps({"ok": True, "job": refreshed})
+    return json.dumps(
+        {
+            "ok": True,
+            "job": _compact_job(
+                refreshed,
+                include_output=include_output,
+                include_details=include_details,
+                max_output_chars=max_output_chars,
+            ),
+        }
+    )
 
 
 @mcp.tool()
 @track_usage("child-agent-runner")
-def list_child_agent_jobs(limit: int = 20, include_finished: bool = True) -> str:
-    """List recent async child-agent jobs for queue polling/orchestration loops."""
+def list_child_agent_jobs(
+    limit: int = 20,
+    include_finished: bool = True,
+    include_output: bool = False,
+    include_details: bool = False,
+    max_output_chars: int = 2000,
+) -> str:
+    """List recent async jobs using compact transport-safe status records.
+
+    Args:
+        limit: Maximum jobs to return (1-500)
+        include_finished: Include terminal completed/failed/cancelled jobs
+        include_output: Include captured output (defaults false to keep polling responses small)
+        include_details: Include full prompts and commands (defaults false)
+        max_output_chars: Per-job captured output limit when include_output is true
+    """
     if limit < 1 or limit > 500:
         return _error_payload("INVALID_LIMIT", "limit must be between 1 and 500")
+    if max_output_chars < 200 or max_output_chars > 200000:
+        return _error_payload("INVALID_OUTPUT_LIMIT", "max_output_chars must be between 200 and 200000")
 
     project_dir = _workspace_root()
     jobs = _list_jobs(project_dir)
     refreshed_jobs = [_refresh_job_state(job) for job in jobs]
     if not include_finished:
-        refreshed_jobs = [job for job in refreshed_jobs if str(job.get("status")) in ("queued", "running")]
-    return json.dumps({"ok": True, "jobs": refreshed_jobs[:limit]})
+        refreshed_jobs = [job for job in refreshed_jobs if str(job.get("status")) in ACTIVE_JOB_STATUSES]
+    compact_jobs = [
+        _compact_job(
+            job,
+            include_output=include_output,
+            include_details=include_details,
+            max_output_chars=max_output_chars,
+        )
+        for job in refreshed_jobs[:limit]
+    ]
+    return json.dumps({"ok": True, "jobs": compact_jobs})
+
+
+def _stop_job_core(
+    project_dir: Path,
+    job_id: str,
+    *,
+    force: bool,
+    grace_seconds: int,
+    reason: str,
+) -> dict[str, Any]:
+    job = _load_job(project_dir, job_id)
+    if job is None:
+        return {"ok": False, "error": {"code": "JOB_NOT_FOUND", "message": f"job_id '{job_id}' was not found"}}
+
+    job = _refresh_job_state(job)
+    status = str(job.get("status", ""))
+    if status in TERMINAL_JOB_STATUSES:
+        return {"ok": True, "status": "already_finished", "job": _compact_job(job)}
+
+    job["status"] = "cancel_requested"
+    job["cancel_requested_at"] = _now_iso()
+    job["cancel_reason"] = reason.strip() or "cancelled by orchestrator"
+    _save_job(project_dir, job_id, job)
+
+    copilot_pid = int(job.get("copilot_pid") or 0)
+    worker_pid = int(job.get("worker_pid") or 0)
+    signalled = _signal_process(copilot_pid, signal.SIGKILL if force else signal.SIGTERM)
+
+    deadline = time.monotonic() + (0 if force else grace_seconds)
+    while time.monotonic() < deadline:
+        time.sleep(0.1)
+        current = _load_job(project_dir, job_id)
+        if current is None:
+            break
+        current = _refresh_job_state(current)
+        if str(current.get("status", "")) in TERMINAL_JOB_STATUSES:
+            return {
+                "ok": True,
+                "status": str(current.get("status")),
+                "signalled": signalled,
+                "job": _compact_job(current),
+            }
+
+    if _is_pid_alive(copilot_pid):
+        signalled = _signal_process(copilot_pid, signal.SIGKILL) or signalled
+    if _is_pid_alive(worker_pid):
+        signalled = _signal_process(worker_pid, signal.SIGKILL) or signalled
+
+    current = _load_job(project_dir, job_id) or job
+    current["status"] = "cancelled"
+    current["ok"] = False
+    current["finished_at"] = _now_iso()
+    current["cancelled_at"] = current["finished_at"]
+    current["cancel_reason"] = job["cancel_reason"]
+    current["progress"] = {
+        **dict(current.get("progress") or {}),
+        "phase": "cancelled",
+        "last_update": _now_iso(),
+        "last_step": current["cancel_reason"],
+    }
+    _save_job(project_dir, job_id, current)
+    lock_file_value = str(current.get("lock_file", "")).strip()
+    if lock_file_value:
+        _release_lock(Path(lock_file_value))
+    return {
+        "ok": True,
+        "status": "cancelled",
+        "signalled": signalled,
+        "job": _compact_job(current),
+    }
+
+
+@mcp.tool()
+@track_usage("child-agent-runner")
+def stop_child_agent(
+    job_id: str,
+    force: bool = False,
+    grace_seconds: int = DEFAULT_STOP_GRACE_SECONDS,
+    reason: str = "cancelled by orchestrator",
+) -> str:
+    """Stop one queued/running async child-agent job and release its repo lock.
+
+    Args:
+        job_id: Async job identifier
+        force: Skip graceful cancellation and terminate immediately
+        grace_seconds: Seconds to allow cooperative shutdown before SIGKILL (0-60)
+        reason: Human-readable cancellation reason persisted with the job
+    """
+    if not job_id or not job_id.strip():
+        return _error_payload("INVALID_JOB_ID", "job_id must be a non-empty string")
+    if grace_seconds < 0 or grace_seconds > 60:
+        return _error_payload("INVALID_GRACE_SECONDS", "grace_seconds must be between 0 and 60")
+    return json.dumps(
+        _stop_job_core(
+            _workspace_root(),
+            job_id.strip(),
+            force=force,
+            grace_seconds=grace_seconds,
+            reason=reason,
+        )
+    )
+
+
+@mcp.tool()
+@track_usage("child-agent-runner")
+def stop_child_agents_batch(
+    job_ids: list[str] | None = None,
+    repos: list[str] | None = None,
+    force: bool = False,
+    grace_seconds: int = DEFAULT_STOP_GRACE_SECONDS,
+    reason: str = "cancelled by orchestrator",
+) -> str:
+    """Stop selected active jobs by job id and/or repo name.
+
+    At least one job id or repo must be supplied; this tool never implicitly stops all jobs.
+    """
+    if grace_seconds < 0 or grace_seconds > 60:
+        return _error_payload("INVALID_GRACE_SECONDS", "grace_seconds must be between 0 and 60")
+    requested_ids = {value.strip() for value in (job_ids or []) if isinstance(value, str) and value.strip()}
+    requested_repos = {value.strip() for value in (repos or []) if isinstance(value, str) and value.strip()}
+    if not requested_ids and not requested_repos:
+        return _error_payload("INVALID_SELECTION", "provide at least one job_id or repo")
+
+    project_dir = _workspace_root()
+    targets: list[str] = []
+    for job in _list_jobs(project_dir):
+        job_id = str(job.get("job_id", ""))
+        repo = str(job.get("repo", ""))
+        if job_id in requested_ids or repo in requested_repos:
+            if job_id and job_id not in targets:
+                targets.append(job_id)
+
+    missing_ids = sorted(requested_ids - set(targets))
+    results = [
+        _stop_job_core(
+            project_dir,
+            job_id,
+            force=force,
+            grace_seconds=grace_seconds,
+            reason=reason,
+        )
+        for job_id in targets
+    ]
+    return json.dumps(
+        {
+            "ok": all(result.get("ok") for result in results) and not missing_ids,
+            "status": "completed" if not missing_ids else "completed_with_errors",
+            "results": results,
+            "missing_job_ids": missing_ids,
+        }
+    )
+
+
+@mcp.tool()
+@track_usage("child-agent-runner")
+def get_child_agent_runner_status() -> str:
+    """Return compact runner health, capacity, and active-job status."""
+    project_dir = _workspace_root()
+    jobs = [_refresh_job_state(job) for job in _list_jobs(project_dir)]
+    active = [job for job in jobs if str(job.get("status")) in ACTIVE_JOB_STATUSES]
+    counts: dict[str, int] = {}
+    for job in jobs:
+        status = str(job.get("status", "unknown"))
+        counts[status] = counts.get(status, 0) + 1
+    return json.dumps(
+        {
+            "ok": True,
+            "status": "healthy",
+            "project_dir": str(project_dir),
+            "active_count": len(active),
+            "counts": counts,
+            "active_jobs": [_compact_job(job) for job in active],
+        }
+    )
 
 
 def _main() -> int:
