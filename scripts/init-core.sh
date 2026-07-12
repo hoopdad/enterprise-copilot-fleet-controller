@@ -1848,25 +1848,35 @@ if [[ "${CREATE_REPOS:-false}" == "true" ]]; then
       fi
       # Fresh start handling
       if [[ "${FRESH_START:-false}" == "true" ]]; then
-        log "fresh_start enabled — scanning framework files in ${PROJECT_NAME}"
-        DELETE_LIST=()
-        for fw_path in .agents .copilot .github/agents .github/copilot-instructions.md .github/mcp.json .contracts .requirements .gitmodules .framework-version .repo-index.yml; do
-          if [[ -e "$TARGET_DIR/$fw_path" ]]; then
-            DELETE_LIST+=("$fw_path")
-          fi
-        done
-        if [[ -d "$TARGET_DIR/work" ]]; then
-          DELETE_LIST+=("work/")
+        MANIFEST_FILE="$TARGET_DIR/$FRAMEWORK_MANIFEST_NAME"
+        DELETE_LIST=()   # repo-relative regular files the framework installed
+        MANIFEST_MODE=false
+
+        if [[ -f "$MANIFEST_FILE" ]]; then
+          MANIFEST_MODE=true
+          log "fresh_start enabled — using $FRAMEWORK_MANIFEST_NAME (only framework-installed files)"
+          while IFS= read -r rel; do
+            [[ -n "$rel" ]] || continue
+            if [[ -e "$TARGET_DIR/$rel" ]]; then
+              DELETE_LIST+=("$rel")
+            fi
+          done < "$MANIFEST_FILE"
+        else
+          # Legacy project without a manifest — fall back to the known framework
+          # path set (whole trees). Still backed up before removal.
+          log "fresh_start enabled — no manifest found, scanning known framework paths in ${PROJECT_NAME}"
+          for fw_path in .agents .copilot .github/agents .github/copilot-instructions.md .github/mcp.json .contracts .requirements .decisions .gitmodules .framework-version .repo-index.yml; do
+            if [[ -e "$TARGET_DIR/$fw_path" ]]; then
+              DELETE_LIST+=("$fw_path")
+            fi
+          done
         fi
 
-        DECISIONS_BACKUP=""
-        if [[ -f "$TARGET_DIR/.decisions/log.md" ]]; then
-          DECISIONS_BACKUP="$TARGET_DIR/.decisions/log.md.bak.$(date +%Y%m%d%H%M%S)"
-          cp "$TARGET_DIR/.decisions/log.md" "$DECISIONS_BACKUP"
-          DELETE_LIST+=(".decisions/")
-        fi
+        # work/ (child submodules) is git plumbing, handled structurally below.
+        HAS_WORK=false
+        [[ -d "$TARGET_DIR/work" ]] && HAS_WORK=true
 
-        if [[ ${#DELETE_LIST[@]} -eq 0 ]]; then
+        if [[ ${#DELETE_LIST[@]} -eq 0 && "$HAS_WORK" != true ]]; then
           log "No framework files found to remove"
         else
           echo ""
@@ -1876,7 +1886,9 @@ if [[ "${CREATE_REPOS:-false}" == "true" ]]; then
           for item in "${DELETE_LIST[@]}"; do
             echo "  │   • $item"
           done
+          [[ "$HAS_WORK" == true ]] && echo "  │   • work/ (child submodules)"
           echo "  │"
+          echo "  │ Every file is backed up to $FRAMEWORK_BACKUP_DIRNAME/ first."
           echo "  │ Project source code will NOT be touched."
           echo "  └─────────────────────────────────────────────────"
           echo ""
@@ -1893,25 +1905,43 @@ if [[ "${CREATE_REPOS:-false}" == "true" ]]; then
           fi
 
           if [[ "$proceed" == true ]]; then
-            for fw_path in .agents .copilot .github/agents .github/copilot-instructions.md .github/mcp.json .contracts .requirements .gitmodules .framework-version .repo-index.yml; do
-              if [[ -e "$TARGET_DIR/$fw_path" ]]; then
-                git rm -rf "$fw_path" 2>/dev/null || rm -rf "$TARGET_DIR/$fw_path"
-                log "  removed $fw_path"
-              fi
+            BACKUP_DIR="$TARGET_DIR/$FRAMEWORK_BACKUP_DIRNAME/$(date +%Y%m%d%H%M%S)"
+            mkdir -p "$BACKUP_DIR"
+            log "Backing up framework files to $FRAMEWORK_BACKUP_DIRNAME/$(basename "$BACKUP_DIR")/"
+
+            for rel in "${DELETE_LIST[@]}"; do
+              backup_framework_file "$TARGET_DIR" "$rel" "$BACKUP_DIR"
+              git -C "$TARGET_DIR" rm -rf --quiet "$rel" 2>/dev/null || rm -rf "$TARGET_DIR/$rel"
+              log "  removed $rel"
             done
-            if [[ -d "$TARGET_DIR/work" ]]; then
-              git submodule deinit -f --all 2>/dev/null || true
-              git rm -rf work 2>/dev/null || rm -rf "$TARGET_DIR/work"
-              log "  removed work/"
+
+            # Prune now-empty framework directories (never touches user files).
+            if [[ "$MANIFEST_MODE" == true ]]; then
+              for root in $FRAMEWORK_MANIFEST_ROOTS; do
+                [[ -d "$TARGET_DIR/$root" ]] || continue
+                find "$TARGET_DIR/$root" -type d -empty -delete 2>/dev/null || true
+                rmdir "$TARGET_DIR/$root" 2>/dev/null || true
+              done
             fi
-            if [[ -d "$TARGET_DIR/.decisions" ]]; then
-              git rm -rf .decisions 2>/dev/null || rm -rf "$TARGET_DIR/.decisions"
-              log "  removed .decisions/ (backed up)"
+
+            # work/ child submodules — structural git teardown.
+            if [[ "$HAS_WORK" == true ]]; then
+              backup_framework_file "$TARGET_DIR" "work" "$BACKUP_DIR"
+              git -C "$TARGET_DIR" submodule deinit -f --all 2>/dev/null || true
+              git -C "$TARGET_DIR" rm -rf --quiet work 2>/dev/null || rm -rf "$TARGET_DIR/work"
+              rm -rf "$TARGET_DIR/.git/modules" 2>/dev/null || true
+              log "  removed work/ (child submodules)"
             fi
-            rm -rf "$TARGET_DIR/.git/modules" 2>/dev/null || true
-            git commit -m "chore: fresh start — remove framework files" --allow-empty 2>/dev/null || true
-            git push origin "$(git branch --show-current 2>/dev/null || echo main)" --force 2>/dev/null || true
-            log "Framework files removed (project source preserved)"
+
+            # Finally drop the manifest itself (backed up).
+            if [[ -f "$MANIFEST_FILE" ]]; then
+              backup_framework_file "$TARGET_DIR" "$FRAMEWORK_MANIFEST_NAME" "$BACKUP_DIR"
+              git -C "$TARGET_DIR" rm -f --quiet "$FRAMEWORK_MANIFEST_NAME" 2>/dev/null || rm -f "$MANIFEST_FILE"
+            fi
+
+            git -C "$TARGET_DIR" commit -m "chore: fresh start — remove framework files (backed up in $FRAMEWORK_BACKUP_DIRNAME/)" --allow-empty 2>/dev/null || true
+            git -C "$TARGET_DIR" push origin "$(git -C "$TARGET_DIR" branch --show-current 2>/dev/null || echo main)" --force 2>/dev/null || true
+            log "Framework files removed (project source preserved; backup in $FRAMEWORK_BACKUP_DIRNAME/)"
           else
             log "Fresh start cancelled by user"
             exit 0
@@ -2655,6 +2685,15 @@ if should_run_phase 5; then
 fi
 
 # -------------------------------------------------------------
+# Record framework manifest (source of truth for fresh_start)
+# -------------------------------------------------------------
+# Enumerate every framework-owned file that now exists so a later fresh_start
+# re-init removes only what the framework installed — never user source or
+# additions dropped into framework-owned directories after init.
+write_framework_manifest "$TARGET_DIR"
+log "Recorded $FRAMEWORK_MANIFEST_NAME ($(wc -l < "$TARGET_DIR/$FRAMEWORK_MANIFEST_NAME" | tr -d ' ') framework files)"
+
+# -------------------------------------------------------------
 # Done
 # -------------------------------------------------------------
 print_copilot_usage_summary
@@ -2678,6 +2717,7 @@ echo "    .contracts/                      — API interface definitions"
 echo "    .requirements/                   — acceptance criteria"
 echo "    .decisions/log.md                — decision record"
 echo "    .repo-index.yml                  — child repo references (external paths)"
+echo "    .framework-manifest              — files the framework installed (fresh_start scope)"
 echo "    .copilot/topology.md             — project topology / quick reference"
 echo "    .github/skills/                  — installed Copilot skills"
 echo "    <infra child>/.github/skills/    — MCAPS infra skills (secure-azure-terraform-coder, defender-servers-skill, spoke-skill)"

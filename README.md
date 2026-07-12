@@ -43,6 +43,7 @@ Enterprise Copilot Fleet Controller is an opinionated scaffolding and operations
 ```
 your-project/
 ├── .framework-version          ← tracks which framework version initialized this
+├── .framework-manifest         ← list of files the framework installed (fresh_start deletes only these)
 ├── .contracts/              ← API/interface definitions (YAML)
 ├── .requirements/           ← acceptance criteria per feature (YAML)
 ├── .decisions/log.md        ← append-only one-line ADRs
@@ -227,7 +228,7 @@ project:
   description: "What this system does"
   create_repos: true          # optional: create GitHub repos if they don't exist
   visibility: "private"       # optional: public | private | local (defaults to private)
-  fresh_start: true           # optional: remove framework files and re-init
+  fresh_start: true           # optional: remove framework-installed files (per .framework-manifest, backed up to .framework-backups/) and re-init
   enable_mcp: false           # optional: default OFF, set true to generate .github/mcp.json
   pattern: "azure-fullstack"  # optional: use a predefined pattern for children
   initial_prompt: "Set up the project with a REST API and React frontend."

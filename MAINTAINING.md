@@ -84,7 +84,7 @@ inheriting stdio can consume or hold open the JSON-RPC transport.
 - **Tools principle**: Tools handle mechanics, LLM handles decisions. Scoped per role via `tools:` frontmatter.
 - **Version chain**: `VERSION` file → git tag → `.framework-version` in projects → stamps in generated files
 - **Upgrade path**: Always sequential (v1→v2→v3), never skip versions
-- **fresh_start**: Only deletes framework files, never project source. Previews + confirms.
+- **fresh_start**: Deletes only framework-installed files (tracked in `.framework-manifest`), never project source. Backs up every file to `.framework-backups/<timestamp>/` before deleting, previews, and confirms. Projects predating the manifest fall back to the known framework-path set (still backed up).
 
 ## File Map
 

@@ -327,3 +327,62 @@ ${repos_scope_text}
 13. **Critic Scope (requirements)**:
 ${requirements_scope_text}"
 }
+
+# ─────────────────────────────────────────────────────────────
+# Framework file manifest + backup helpers
+#
+# The framework tracks exactly which files it installs into a project so that
+# a later `fresh_start` re-init only removes framework-originated files and
+# never touches user-authored source, config, or additions dropped into the
+# framework-owned directories after init.
+# ─────────────────────────────────────────────────────────────
+
+# Roots enumerated recursively for the manifest (every regular file below them
+# that exists at the end of init is framework-owned).
+FRAMEWORK_MANIFEST_ROOTS=".agents .copilot .contracts .requirements .decisions .github/agents .github/skills"
+# Individual framework-owned files (not directory trees).
+FRAMEWORK_MANIFEST_FILES=".github/copilot-instructions.md .github/mcp.json .repo-index.yml .framework-version .gitmodules"
+# Name of the manifest file written at the project root.
+FRAMEWORK_MANIFEST_NAME=".framework-manifest"
+# Name of the backup directory root (timestamped subdirs are created inside).
+FRAMEWORK_BACKUP_DIRNAME=".framework-backups"
+
+# Generate/refresh the framework manifest for the parent project. Enumerates
+# framework-owned files that currently exist and writes their repo-relative
+# paths (sorted) to $TARGET_DIR/$FRAMEWORK_MANIFEST_NAME.
+write_framework_manifest() {
+  local target="${1:-$TARGET_DIR}"
+  local manifest="$target/$FRAMEWORK_MANIFEST_NAME"
+  local tmp
+  tmp="$(mktemp)"
+  local root path
+  for root in $FRAMEWORK_MANIFEST_ROOTS; do
+    if [[ -d "$target/$root" ]]; then
+      # Record regular files only; skip anything under the backup dir.
+      (cd "$target" && find "$root" -type f 2>/dev/null) >> "$tmp"
+    fi
+  done
+  for path in $FRAMEWORK_MANIFEST_FILES; do
+    if [[ -f "$target/$path" ]]; then
+      echo "$path" >> "$tmp"
+    fi
+  done
+  # Sort/unique, drop the manifest and backup dir if they somehow appear.
+  sort -u "$tmp" \
+    | grep -v -x -F "$FRAMEWORK_MANIFEST_NAME" \
+    | grep -v "^${FRAMEWORK_BACKUP_DIRNAME}/" \
+    > "$manifest"
+  rm -f "$tmp"
+}
+
+# Back up a single project-relative file into a timestamped backup dir before
+# it is deleted or overwritten. Preserves the relative directory structure.
+#   $1 = project root, $2 = repo-relative file path, $3 = backup timestamp dir
+backup_framework_file() {
+  local target="$1" rel="$2" backup_dir="$3"
+  local src="$target/$rel"
+  [[ -e "$src" ]] || return 0
+  local dest="$backup_dir/$rel"
+  mkdir -p "$(dirname "$dest")"
+  cp -a "$src" "$dest" 2>/dev/null || cp -R "$src" "$dest"
+}
