@@ -52,7 +52,8 @@ your-project/
 │   │   └── nfr.yml          ← snapshot of the active NFRs used at init
 │   └── topology.md          ← project topology / quick reference (file locations, resource IDs, request flow)
 ├── .github/
-│   ├── copilot-instructions.md ← orchestrator (main agent reads this)
+│   ├── copilot-instructions.md ← orchestrator (main agent reads this; thin by default)
+│   ├── agents/                 ← by default (fleet_instrument: true) holds <project>-fleet-instrument.agent.md (the full delivery protocol)
 │   ├── skills/                 ← scoped skills installed from the framework skills/ library
 │   └── mcp.json                ← MCP tools configuration (optional, opt-in)
 ├── scripts/
@@ -150,6 +151,51 @@ copilot -p "Process the next work/todo request as specialist or critic" --allow-
 ```
 
 Parent orchestrator runs should stay MCP-first for child work; background sub-agents are the wrong path for child execution.
+
+## How to Use: agent vs. inline instrumentation
+
+The delivery protocol (requirements → contracts → red-team → MCP child dispatch → critic gate →
+pre-deploy gate → `azd` deploy, plus the MCP tool tables and file formats) can live in one of two
+places. This is controlled by `optional_features.fleet_instrument` in `init.yml`.
+
+### Default — agent instrumentation (`fleet_instrument: true`)
+
+**This is the default.** Init writes a **thin** `.github/copilot-instructions.md` (session
+orientation, scope boundaries, and guardrails only) and puts the full delivery protocol in an
+on-demand agent at `.github/agents/<project>-fleet-instrument.agent.md`. The agent is loaded only
+when needed, so routine turns stay lean on tokens.
+
+To use it, just describe the work to the orchestrator — it delegates to the agent automatically. You
+can also invoke the agent explicitly:
+
+```bash
+cd your-project
+# Orchestrator delegates to the fleet-instrument agent for any plan/build/ship request:
+copilot -p "Run the <project>-fleet-instrument agent: add tenant-scoped API keys across web, api, and auth" \
+  --allow-all-tools --autopilot --no-ask-user --add-dir "$(pwd)"
+```
+
+Replace `<project>` with your `project.name`. Use this mode when you want the lowest always-on token
+overhead and the tightest session context.
+
+### Inline — copilot-instructions instrumentation (`fleet_instrument: false`)
+
+Set `optional_features.fleet_instrument: false` in `init.yml` to write the **full** delivery protocol
+directly into `.github/copilot-instructions.md`. No separate agent is generated — the orchestrator
+follows the protocol inline on every run.
+
+```bash
+cd your-project
+# Full protocol is in .github/copilot-instructions.md; the orchestrator follows it directly:
+copilot -p "add tenant-scoped API keys across web, api, and auth" \
+  --allow-all-tools --autopilot --no-ask-user --add-dir "$(pwd)"
+```
+
+Use this mode when you prefer a single always-on instructions file and don't mind the larger
+per-turn context.
+
+Either way, child specialist/critic execution is dispatched via MCP `child-agent-runner` (never
+background sub-agents), and children run in their own Copilot session with the child repo as cwd.
 
 ## Scenario: A cross-repo enhancement across 6 repos
 
