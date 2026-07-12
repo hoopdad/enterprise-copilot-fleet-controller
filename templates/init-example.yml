@@ -40,6 +40,7 @@ optional_features:
   semantic_release: false      # Add semantic release job in CI template (requires mobile_ci_cd=true)
   onboarding_docs: false       # Generate .copilot/docs/developer-onboarding.md
   portability_blueprints: false # Generate .copilot/docs/portability-blueprint.md
+  fleet_instrument: true       # Default on: thin .github/copilot-instructions.md + on-demand <project>-fleet-instrument agent (set false to keep the delivery protocol inline)
 
 children:
   - url: "https://github.com/your-org/my-app-api.git"

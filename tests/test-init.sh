@@ -262,7 +262,7 @@ assert_dir_exists "$PROJECT_DIR/.contracts"
 assert_dir_exists "$PROJECT_DIR/.requirements"
 assert_dir_exists "$PROJECT_DIR/.decisions"
 assert_dir_exists "$PROJECT_DIR/.copilot"
-assert_dir_not_exists "$PROJECT_DIR/.github/agents"
+assert_dir_exists "$PROJECT_DIR/.github/agents"
 assert_dir_exists "$CHILD_API_DIR/.github/agents"
 assert_dir_exists "$CHILD_WEB_DIR/.github/agents"
 assert_dir_exists "$CHILD_API_DIR/work/todo"
@@ -334,7 +334,7 @@ if [[ -f "$CHILD_API_DIR/.github/agents/test-api-specialist.agent.md" ]]; then
   fi
 fi
 
-# Verify orchestrator (.github/copilot-instructions.md)
+# Verify orchestrator (.github/copilot-instructions.md) — thin by default (fleet_instrument on)
 assert_file_exists "$PROJECT_DIR/.github/copilot-instructions.md"
 if [[ -f "$PROJECT_DIR/.github/copilot-instructions.md" ]]; then
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Orchestrator"
@@ -343,16 +343,30 @@ if [[ -f "$PROJECT_DIR/.github/copilot-instructions.md" ]]; then
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "\\.github/agents/test-api-critic.agent.md"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "work/todo"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "NEW Copilot CLI"
-  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "MCP-first orchestration is mandatory"
-  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Do not use \`task\`, background sub-agents"
-  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "First dispatch action must be a direct MCP tool call to \`check_repo_index\`"
-  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Do not run shell checks like \`command -v check_repo_index\`"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Anti-Patterns"
-  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Critic Gate"
-  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Accept only PASS"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "capabilities.md"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "unless the human explicitly scopes"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "built-in \`/fleet\` command"
+  # Thin-instructions layout: delivery protocol delegated to the on-demand agent, not inline.
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Delivery Flow (delegated)"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "test-project-fleet-instrument"
+  assert_file_not_contains "$PROJECT_DIR/.github/copilot-instructions.md" "## Your Protocol"
+  assert_file_not_contains "$PROJECT_DIR/.github/copilot-instructions.md" "## File Formats"
+fi
+
+# Verify the default on-demand fleet-instrument agent carries the heavy delivery protocol.
+FLEET_AGENT_DEFAULT="$PROJECT_DIR/.github/agents/test-project-fleet-instrument.agent.md"
+assert_file_exists "$FLEET_AGENT_DEFAULT"
+if [[ -f "$FLEET_AGENT_DEFAULT" ]]; then
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "name: test-project-fleet-instrument"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "## Your Protocol"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "## File Formats"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "MCP-first orchestration is mandatory"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "Do not use \`task\`, background sub-agents"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "First dispatch action must be a direct MCP tool call to \`check_repo_index\`"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "Do not run shell checks like \`command -v check_repo_index\`"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "Critic Gate"
+  assert_file_contains "$FLEET_AGENT_DEFAULT" "Accept only PASS"
 fi
 
 # Verify capabilities manifest (once-read index)
@@ -517,9 +531,10 @@ PYEOF
   fi
 fi
 
-if [[ -f "$PROJECT_DIR_MCP/.github/copilot-instructions.md" ]]; then
-  assert_file_contains "$PROJECT_DIR_MCP/.github/copilot-instructions.md" "## Usage Metrics Schema (v2.5.0+)"
-  assert_file_contains "$PROJECT_DIR_MCP/.github/copilot-instructions.md" "## Usage Quality Reporting (v2.5.0+)"
+if [[ -f "$PROJECT_DIR_MCP/.github/agents/test-project-mcp-fleet-instrument.agent.md" ]]; then
+  # With fleet_instrument on by default, the MCP tool tables + usage sections live in the agent.
+  assert_file_contains "$PROJECT_DIR_MCP/.github/agents/test-project-mcp-fleet-instrument.agent.md" "## Usage Metrics Schema (v2.5.0+)"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/agents/test-project-mcp-fleet-instrument.agent.md" "## Usage Quality Reporting (v2.5.0+)"
 fi
 
 if [[ -f "$TEST_DIR/test-api-mcp/.github/agents/test-api-mcp-specialist.agent.md" ]]; then
@@ -570,6 +585,7 @@ optional_features:
   semantic_release: true
   onboarding_docs: true
   portability_blueprints: true
+  fleet_instrument: false
 
 children:
   - name: test-mobile
@@ -594,6 +610,16 @@ assert_file_contains "$TEST_DIR/init-optional-output.log" "mobile_ci_cd is depre
 # Non-deprecated optional docs are still generated.
 assert_file_exists "$PROJECT_DIR_OPTIONAL/.copilot/docs/developer-onboarding.md"
 assert_file_exists "$PROJECT_DIR_OPTIONAL/.copilot/docs/portability-blueprint.md"
+
+# fleet_instrument=false: opt out of the default thin-instructions layout — the full delivery
+# protocol stays inline in copilot-instructions.md and no fleet-instrument agent is generated.
+FLEET_AGENT="$PROJECT_DIR_OPTIONAL/.github/agents/test-project-optional-fleet-instrument.agent.md"
+assert_file_not_exists "$FLEET_AGENT"
+if [[ -f "$PROJECT_DIR_OPTIONAL/.github/copilot-instructions.md" ]]; then
+  assert_file_contains "$PROJECT_DIR_OPTIONAL/.github/copilot-instructions.md" "## Your Protocol"
+  assert_file_contains "$PROJECT_DIR_OPTIONAL/.github/copilot-instructions.md" "## File Formats"
+  assert_file_not_contains "$PROJECT_DIR_OPTIONAL/.github/copilot-instructions.md" "Delivery Flow (delegated)"
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Test 4d: Init with visibility=local creates local repos only
@@ -1214,8 +1240,12 @@ if [[ -f "$PROJECT_DIR_PATTERN_CONSTRAINTS/.requirements/platform-guardrails.yml
   assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.requirements/platform-guardrails.yml" 'FoundryChatClient'
 fi
 if [[ -f "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/copilot-instructions.md" ]]; then
+  # `pattern_constraints` guidance stays in the always-on Project Guardrails section.
   assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/copilot-instructions.md" "pattern_constraints"
-  assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/copilot-instructions.md" "Do not inject constraints that conflict"
+fi
+if [[ -f "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/agents/test-project-pattern-constraints-fleet-instrument.agent.md" ]]; then
+  # Default thin instructions: the child-request protocol lives in the on-demand agent.
+  assert_file_contains "$PROJECT_DIR_PATTERN_CONSTRAINTS/.github/agents/test-project-pattern-constraints-fleet-instrument.agent.md" "Do not inject constraints that conflict"
 fi
 
 # ─────────────────────────────────────────────────────────────

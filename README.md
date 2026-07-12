@@ -196,6 +196,7 @@ optional_features:            # optional: defaults shown
   semantic_release: false     # semver release job in mobile CI template (requires mobile_ci_cd=true)
   onboarding_docs: false      # generate .copilot/docs/developer-onboarding.md
   portability_blueprints: false # generate .copilot/docs/portability-blueprint.md
+  fleet_instrument: true      # default on: thin .github/copilot-instructions.md + on-demand <project>-fleet-instrument agent; set false to keep the delivery protocol inline
   critic_evaluator: true      # optional critic PASS/FAIL gate for generated artifacts (default enabled)
 
 critic:                       # optional: scope the critic evaluator review inputs
@@ -227,10 +228,11 @@ Set `project.enable_mcp: true` to generate `.github/mcp.json` and add role-based
 
 Set `visibility: "local"` to create local git repos on disk and skip GitHub repo creation for that repo.
 
-When `optional_features` flags are omitted, init leaves those artifacts out except `critic_evaluator`, which defaults to `true`.
+When `optional_features` flags are omitted, init leaves those artifacts out except `critic_evaluator` and `fleet_instrument`, which default to `true`.
 `runner_self_heal` and `semantic_release` require `mobile_ci_cd: true`.
 `copilot_usage_metrics.enforcement_mode: warn` lets production runs continue when token metrics are intermittently missing while still reporting `metrics_anomalies` in the usage summary.
 Set `optional_features.critic_evaluator: false` to disable the critic PASS/FAIL gate for initialization.  
+Set `optional_features.fleet_instrument: false` to disable the thin-instructions layout and keep the full delivery protocol inline in `.github/copilot-instructions.md`. **This feature is enabled by default**: the always-on orchestrator instructions stay thin (session orientation, scope boundaries, and guardrails only) and the full delivery protocol — requirements → contracts → red-team → MCP child dispatch → critic gate → pre-deploy gate → `azd` deploy, plus MCP tool tables and file formats — lives in an on-demand `<project>-fleet-instrument` agent under `.github/agents/`. This trades a small per-invocation cost for lower always-on token overhead and tighter session context; the orchestrator delegates to the agent when asked to plan, build, or ship fleet work.
 Use `critic.scope.repos` and `critic.scope.requirements` to narrow what the critic evaluator prioritizes during review.
 
 ## Agent Generation Strategy

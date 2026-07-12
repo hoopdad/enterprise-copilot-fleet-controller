@@ -37,6 +37,7 @@ FEATURE_RUNNER_SELF_HEAL="false"
 FEATURE_SEMANTIC_RELEASE="false"
 FEATURE_ONBOARDING_DOCS="false"
 FEATURE_PORTABILITY_BLUEPRINTS="false"
+FEATURE_FLEET_INSTRUMENT="true"
 FEATURE_CRITIC_EVALUATOR="true"
 COPILOT_METRICS_ENFORCEMENT_MODE="warn"
 COPILOT_METRICS_RETRY_ATTEMPTS=2
@@ -713,6 +714,7 @@ optional_feature_state_table() {
 | semantic_release | ${FEATURE_SEMANTIC_RELEASE} | DEPRECATED (no-op) — GitHub Actions removed in favor of local \`azd\` |
 | onboarding_docs | ${FEATURE_ONBOARDING_DOCS} | Generate \`.copilot/docs/developer-onboarding.md\` |
 | portability_blueprints | ${FEATURE_PORTABILITY_BLUEPRINTS} | Generate \`.copilot/docs/portability-blueprint.md\` |
+| fleet_instrument | ${FEATURE_FLEET_INSTRUMENT} | Move the delivery protocol into an on-demand \`<project>-fleet-instrument\` agent and keep \`.github/copilot-instructions.md\` thin |
 | critic_evaluator | ${FEATURE_CRITIC_EVALUATOR} | Run optional PASS/FAIL critic gate using configured \`critic.scope\` context |
 EOF
 }
@@ -1413,6 +1415,7 @@ if [[ -n "$CONFIG_FILE" ]]; then
   cfg_semantic_release=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.semantic_release")
   cfg_onboarding_docs=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.onboarding_docs")
   cfg_portability_blueprints=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.portability_blueprints")
+  cfg_fleet_instrument=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.fleet_instrument")
   cfg_critic_evaluator=$(parse_yaml_value "$CONFIG_FILE" ".optional_features.critic_evaluator")
   cfg_copilot_metrics_enforcement_mode=$(parse_yaml_value "$CONFIG_FILE" ".copilot_usage_metrics.enforcement_mode")
   cfg_copilot_metrics_retry_attempts=$(parse_yaml_value "$CONFIG_FILE" ".copilot_usage_metrics.retry_attempts")
@@ -1424,6 +1427,7 @@ if [[ -n "$CONFIG_FILE" ]]; then
   [[ -z "$cfg_semantic_release" ]] && cfg_semantic_release=$(parse_yaml_value "$CONFIG_FILE" ".project.optional_features.semantic_release")
   [[ -z "$cfg_onboarding_docs" ]] && cfg_onboarding_docs=$(parse_yaml_value "$CONFIG_FILE" ".project.optional_features.onboarding_docs")
   [[ -z "$cfg_portability_blueprints" ]] && cfg_portability_blueprints=$(parse_yaml_value "$CONFIG_FILE" ".project.optional_features.portability_blueprints")
+  [[ -z "$cfg_fleet_instrument" ]] && cfg_fleet_instrument=$(parse_yaml_value "$CONFIG_FILE" ".project.optional_features.fleet_instrument")
   [[ -z "$cfg_critic_evaluator" ]] && cfg_critic_evaluator=$(parse_yaml_value "$CONFIG_FILE" ".project.optional_features.critic_evaluator")
   [[ -z "$cfg_copilot_metrics_enforcement_mode" ]] && cfg_copilot_metrics_enforcement_mode=$(parse_yaml_value "$CONFIG_FILE" ".project.copilot_usage_metrics.enforcement_mode")
   [[ -z "$cfg_copilot_metrics_retry_attempts" ]] && cfg_copilot_metrics_retry_attempts=$(parse_yaml_value "$CONFIG_FILE" ".project.copilot_usage_metrics.retry_attempts")
@@ -1540,6 +1544,7 @@ ${doc_content}"
     pat_semantic_release=$(parse_yaml_value "$PATTERN_FILE" ".optional_features.semantic_release")
     pat_onboarding_docs=$(parse_yaml_value "$PATTERN_FILE" ".optional_features.onboarding_docs")
     pat_portability_blueprints=$(parse_yaml_value "$PATTERN_FILE" ".optional_features.portability_blueprints")
+    pat_fleet_instrument=$(parse_yaml_value "$PATTERN_FILE" ".optional_features.fleet_instrument")
     pat_critic_evaluator=$(parse_yaml_value "$PATTERN_FILE" ".optional_features.critic_evaluator")
 
     [[ -n "$pat_mobile_ci_cd" ]] && FEATURE_MOBILE_CI_CD="$pat_mobile_ci_cd"
@@ -1547,6 +1552,7 @@ ${doc_content}"
     [[ -n "$pat_semantic_release" ]] && FEATURE_SEMANTIC_RELEASE="$pat_semantic_release"
     [[ -n "$pat_onboarding_docs" ]] && FEATURE_ONBOARDING_DOCS="$pat_onboarding_docs"
     [[ -n "$pat_portability_blueprints" ]] && FEATURE_PORTABILITY_BLUEPRINTS="$pat_portability_blueprints"
+    [[ -n "$pat_fleet_instrument" ]] && FEATURE_FLEET_INSTRUMENT="$pat_fleet_instrument"
     [[ -n "$pat_critic_evaluator" ]] && FEATURE_CRITIC_EVALUATOR="$pat_critic_evaluator"
 
     # Deployment model + region (pattern defaults; init.yml project.* overrides win).
@@ -1628,6 +1634,7 @@ ${doc_content}"
   [[ -n "${cfg_semantic_release:-}" ]] && FEATURE_SEMANTIC_RELEASE="$cfg_semantic_release"
   [[ -n "${cfg_onboarding_docs:-}" ]] && FEATURE_ONBOARDING_DOCS="$cfg_onboarding_docs"
   [[ -n "${cfg_portability_blueprints:-}" ]] && FEATURE_PORTABILITY_BLUEPRINTS="$cfg_portability_blueprints"
+  [[ -n "${cfg_fleet_instrument:-}" ]] && FEATURE_FLEET_INSTRUMENT="$cfg_fleet_instrument"
   [[ -n "${cfg_critic_evaluator:-}" ]] && FEATURE_CRITIC_EVALUATOR="$cfg_critic_evaluator"
   [[ -n "${cfg_critic_scope_repos:-}" ]] && CRITIC_SCOPE_REPOS_RAW="$cfg_critic_scope_repos"
   [[ -n "${cfg_critic_scope_requirements:-}" ]] && CRITIC_SCOPE_REQUIREMENTS_RAW="$cfg_critic_scope_requirements"
@@ -1702,6 +1709,7 @@ FEATURE_RUNNER_SELF_HEAL=$(normalize_bool "$FEATURE_RUNNER_SELF_HEAL")
 FEATURE_SEMANTIC_RELEASE=$(normalize_bool "$FEATURE_SEMANTIC_RELEASE")
 FEATURE_ONBOARDING_DOCS=$(normalize_bool "$FEATURE_ONBOARDING_DOCS")
 FEATURE_PORTABILITY_BLUEPRINTS=$(normalize_bool "$FEATURE_PORTABILITY_BLUEPRINTS")
+FEATURE_FLEET_INSTRUMENT=$(normalize_bool "$FEATURE_FLEET_INSTRUMENT")
 FEATURE_CRITIC_EVALUATOR=$(normalize_bool "$FEATURE_CRITIC_EVALUATOR")
 
 require_bool "$FEATURE_MOBILE_CI_CD" "optional_features.mobile_ci_cd"
@@ -1709,6 +1717,7 @@ require_bool "$FEATURE_RUNNER_SELF_HEAL" "optional_features.runner_self_heal"
 require_bool "$FEATURE_SEMANTIC_RELEASE" "optional_features.semantic_release"
 require_bool "$FEATURE_ONBOARDING_DOCS" "optional_features.onboarding_docs"
 require_bool "$FEATURE_PORTABILITY_BLUEPRINTS" "optional_features.portability_blueprints"
+require_bool "$FEATURE_FLEET_INSTRUMENT" "optional_features.fleet_instrument"
 require_bool "$FEATURE_CRITIC_EVALUATOR" "optional_features.critic_evaluator"
 COPILOT_METRICS_ENFORCEMENT_MODE=$(normalize_metrics_enforcement_mode "${cfg_copilot_metrics_enforcement_mode:-}")
 require_metrics_enforcement_mode "$COPILOT_METRICS_ENFORCEMENT_MODE" "copilot_usage_metrics.enforcement_mode"
@@ -1721,6 +1730,7 @@ require_non_negative_integer "${cfg_copilot_metrics_retry_attempts:-}" "copilot_
 [[ -z "$FEATURE_SEMANTIC_RELEASE" ]] && FEATURE_SEMANTIC_RELEASE="false"
 [[ -z "$FEATURE_ONBOARDING_DOCS" ]] && FEATURE_ONBOARDING_DOCS="false"
 [[ -z "$FEATURE_PORTABILITY_BLUEPRINTS" ]] && FEATURE_PORTABILITY_BLUEPRINTS="false"
+[[ -z "$FEATURE_FLEET_INSTRUMENT" ]] && FEATURE_FLEET_INSTRUMENT="true"
 [[ -z "$FEATURE_CRITIC_EVALUATOR" ]] && FEATURE_CRITIC_EVALUATOR="true"
 
 build_critic_protocol_section
@@ -1783,6 +1793,7 @@ echo "    runner_self_heal: ${FEATURE_RUNNER_SELF_HEAL}"
 echo "    semantic_release: ${FEATURE_SEMANTIC_RELEASE}"
 echo "    onboarding_docs: ${FEATURE_ONBOARDING_DOCS}"
 echo "    portability_blueprints: ${FEATURE_PORTABILITY_BLUEPRINTS}"
+echo "    fleet_instrument: ${FEATURE_FLEET_INSTRUMENT}"
 echo "    critic_evaluator: ${FEATURE_CRITIC_EVALUATOR}"
 echo "  Critic scope (repos):"
 echo "${CRITIC_SCOPE_REPOS_PROMPT}"
@@ -2432,6 +2443,17 @@ write_orchestrator_instructions \
 
 log "✓ Created $ORCHESTRATOR_INSTRUCTIONS_REL (orchestrator)"
 
+# When the fleet_instrument feature is enabled, the orchestrator instructions above are
+# thin (delivery flow delegated); install the on-demand agent that carries the full protocol.
+if [[ "${FEATURE_FLEET_INSTRUMENT:-false}" == "true" ]]; then
+  write_fleet_instrument_agent \
+    "$CHILD_WORKFLOW_LIST" \
+    "$MCP_SECTION" \
+    "$USAGE_SCHEMA_SECTION" \
+    "$USAGE_QUALITY_SECTION"
+  log "✓ Created .github/agents/${PROJECT_NAME}-fleet-instrument.agent.md (on-demand delivery orchestrator)"
+fi
+
 # Once-read capabilities index so the orchestrator can orient without eager filesystem scans.
 write_capabilities_manifest
 log "✓ Created .copilot/capabilities.md (capabilities manifest)"
@@ -2539,6 +2561,11 @@ if [[ "$FEATURE_PORTABILITY_BLUEPRINTS" == "true" ]]; then
   echo "    .copilot/docs/portability-blueprint.md ✓ generated"
 else
   echo "    .copilot/docs/portability-blueprint.md · disabled by config"
+fi
+if [[ "$FEATURE_FLEET_INSTRUMENT" == "true" ]]; then
+  echo "    .github/agents/${PROJECT_NAME}-fleet-instrument.agent.md ✓ generated (thin instructions)"
+else
+  echo "    .github/agents/*-fleet-instrument.agent.md · disabled (delivery flow inline in instructions)"
 fi
 echo ""
 fi

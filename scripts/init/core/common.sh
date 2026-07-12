@@ -102,17 +102,71 @@ PYEOF
   rm -f "$tmp"
 }
 
-write_orchestrator_instructions() {
-  local output_path="$1" child_workflow_list="$2" mcp_section="$3" usage_schema_section="$4" usage_quality_section="$5"
-  TPL_FRAMEWORK_VERSION="$FRAMEWORK_VERSION" \
+# Render the heavy end-to-end delivery-flow block (Local Deployment, Your Protocol,
+# File Formats, MCP tables) from its single-source fragment. Used both inline (when the
+# fleet_instrument feature is off) and inside the fleet-instrument agent (when it is on).
+render_delivery_flow() {
+  local mcp_section="$1" usage_schema_section="$2" usage_quality_section="$3"
   TPL_PROJECT_NAME="$PROJECT_NAME" \
-  TPL_PROJECT_DESC="$PROJECT_DESC" \
-  TPL_CHILD_WORKFLOW_LIST="$child_workflow_list" \
   TPL_CRITIC_PROTOCOL_SECTION="$CRITIC_PROTOCOL_SECTION" \
   TPL_MCP_SECTION="$mcp_section" \
   TPL_USAGE_SCHEMA_SECTION="$usage_schema_section" \
   TPL_USAGE_QUALITY_SECTION="$usage_quality_section" \
+  render_template_stdout "$TEMPLATE_DIR/fragments/delivery-flow.md.tmpl"
+}
+
+# Thin, always-on pointer that replaces the heavy delivery-flow block when the
+# fleet_instrument feature is enabled. Keeps routine turns lean by delegating the
+# full orchestration protocol to the on-demand fleet-instrument agent.
+render_fleet_instrument_pointer() {
+  cat <<EOF
+## Delivery Flow (delegated)
+
+The full end-to-end delivery protocol — requirements → contracts → red-team → child dispatch (MCP) →
+critic gate → pre-deploy gate → \`azd\` deploy, plus the MCP tool tables and file formats — is
+encapsulated in the **\`${PROJECT_NAME}-fleet-instrument\`** agent
+(\`.github/agents/${PROJECT_NAME}-fleet-instrument.agent.md\`). It is loaded **on demand** so this
+always-on file stays lean.
+
+When the human asks you to plan, build, change, or ship work across the fleet, delegate to that agent:
+
+> Run the \`${PROJECT_NAME}-fleet-instrument\` agent for this request.
+
+Do not re-derive the delivery flow inline. This file retains only session orientation, scope
+boundaries, and guardrails (below); the agent owns the procedure.
+EOF
+}
+
+write_orchestrator_instructions() {
+  local output_path="$1" child_workflow_list="$2" mcp_section="$3" usage_schema_section="$4" usage_quality_section="$5"
+  local delivery_flow_section
+  if [[ "${FEATURE_FLEET_INSTRUMENT:-false}" == "true" ]]; then
+    delivery_flow_section="$(render_fleet_instrument_pointer)"
+  else
+    delivery_flow_section="$(render_delivery_flow "$mcp_section" "$usage_schema_section" "$usage_quality_section")"
+  fi
+  TPL_FRAMEWORK_VERSION="$FRAMEWORK_VERSION" \
+  TPL_PROJECT_NAME="$PROJECT_NAME" \
+  TPL_PROJECT_DESC="$PROJECT_DESC" \
+  TPL_CHILD_WORKFLOW_LIST="$child_workflow_list" \
+  TPL_DELIVERY_FLOW_SECTION="$delivery_flow_section" \
   write_from_template "instructions.md.tmpl" "$output_path"
+}
+
+# Write the on-demand fleet-instrument agent (parent .github/agents/). Carries the same
+# single-source delivery-flow block that the thin instructions now delegate to.
+write_fleet_instrument_agent() {
+  local child_workflow_list="$1" mcp_section="$2" usage_schema_section="$3" usage_quality_section="$4"
+  local out_dir="$TARGET_DIR/.github/agents"
+  local out_file="$out_dir/${PROJECT_NAME}-fleet-instrument.agent.md"
+  local delivery_flow_section
+  mkdir -p "$out_dir"
+  delivery_flow_section="$(render_delivery_flow "$mcp_section" "$usage_schema_section" "$usage_quality_section")"
+  TPL_PROJECT_NAME="$PROJECT_NAME" \
+  TPL_PROJECT_DESC="$PROJECT_DESC" \
+  TPL_CHILD_WORKFLOW_LIST="$child_workflow_list" \
+  TPL_DELIVERY_FLOW_SECTION="$delivery_flow_section" \
+  write_from_template "agents/fleet-instrument.agent.md.tmpl" "$out_file"
 }
 
 # Generate .copilot/capabilities.md — a once-read index of skills, agents, MCP tools, and child
@@ -122,6 +176,13 @@ write_capabilities_manifest() {
   local out_file="$TARGET_DIR/.copilot/capabilities.md"
   mkdir -p "$TARGET_DIR/.copilot"
 
+  # When fleet_instrument is enabled, the MCP tool tables live in the on-demand
+  # fleet-instrument agent (instructions are thin); otherwise they are inline.
+  local mcp_table_location="\`.github/copilot-instructions.md\`"
+  if [[ "${FEATURE_FLEET_INSTRUMENT:-false}" == "true" ]]; then
+    mcp_table_location="the \`${PROJECT_NAME}-fleet-instrument\` agent (\`.github/agents/${PROJECT_NAME}-fleet-instrument.agent.md\`)"
+  fi
+
   {
     echo "<!-- enterprise-copilot-fleet-controller v${FRAMEWORK_VERSION} -->"
     echo "# ${PROJECT_NAME} — Capabilities Manifest"
@@ -129,7 +190,7 @@ write_capabilities_manifest() {
     echo "Read this **once** at session start to learn what is available. It is the standing"
     echo "replacement for \"learn all instructions/skills/agents/tools first\" — do not eager-scan the"
     echo "repo to rediscover these. For per-tool detail see the \"MCP Tools\" table in"
-    echo "\`.github/copilot-instructions.md\`; for file locations/resource IDs see \`.copilot/topology.md\`;"
+    echo "${mcp_table_location}; for file locations/resource IDs see \`.copilot/topology.md\`;"
     echo "for the authoritative child repo list see \`.repo-index.yml\`."
     echo
     echo "## Child repos"
@@ -180,7 +241,7 @@ write_capabilities_manifest() {
         [[ -n "$server" ]] && echo "- \`${server}\`"
       done < <(python3 -c "import json,sys; d=json.load(open('$mcp_file')); print('\n'.join(sorted((d.get('mcpServers') or d.get('servers') or {}).keys())))" 2>/dev/null)
       echo
-      echo "See the \"MCP Tools\" table in \`.github/copilot-instructions.md\` for the tools each server exposes."
+      echo "See the \"MCP Tools\" table in ${mcp_table_location} for the tools each server exposes."
     else
       echo "- _(MCP disabled — dispatch/validation tools unavailable)_"
     fi
