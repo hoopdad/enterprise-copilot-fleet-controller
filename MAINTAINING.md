@@ -10,7 +10,7 @@
 | Run integration tests | `bash tests/test-init.sh` |
 | Run usage metrics scenarios | `bash tests/test-usage-metrics-scenarios.sh` |
 | Syntax-check scripts | `bash -n scripts/init.sh && bash -n scripts/upgrade.sh` |
-| Verify tools import | `for f in tools/*/server.py; do python3 -c "import importlib.util; s=importlib.util.spec_from_file_location('m','$f'); m=importlib.util.module_from_spec(s)"; done` |
+| Verify tools import | `for f in tools/*/server.py; do .venv/bin/python -c "import importlib.util; s=importlib.util.spec_from_file_location('m','$f'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)"; done` |
 
 ## Commit Conventions
 
@@ -43,6 +43,11 @@ If your change affects what `init.sh` generates into projects (.github/agents/*.
 3. Update the `tools_for_role()` function in `scripts/init-core.sh` if the tool should be scoped
 4. Update `tools/README.md`
 5. If adding a new tool, this is a **MINOR** bump (existing projects need migration to get new mcp.json entry)
+
+MCP servers must be launched with `.venv/bin/python`, including preflight and
+smoke tests. Bare `python3` may load incompatible user-site dependencies.
+Child processes spawned by MCP servers must set `stdin=subprocess.DEVNULL`;
+inheriting stdio can consume or hold open the JSON-RPC transport.
 
 ## When You Add/Change Skills
 

@@ -213,8 +213,8 @@ run_orchestration_preflight() {
     warn "Missing required executable: git"
     failures=$((failures + 1))
   fi
-  if [[ "${ENABLE_MCP:-false}" == "true" ]] && ! command -v python3 >/dev/null 2>&1; then
-    warn "Missing required executable for MCP tool servers: python3"
+  if [[ "${ENABLE_MCP:-false}" == "true" && ! -x "$FRAMEWORK_DIR/.venv/bin/python" ]]; then
+    warn "Missing required MCP interpreter: $FRAMEWORK_DIR/.venv/bin/python"
     failures=$((failures + 1))
   fi
 
@@ -248,18 +248,23 @@ run_orchestration_preflight() {
     # Smoke-test critical MCP servers: confirm they import and register tools.
     # A version-incompatible dependency (e.g. pydantic too old for mcp) crashes
     # servers on the @mcp.tool() decorator, silently exposing zero tools.
-    if command -v python3 >/dev/null 2>&1; then
-      while IFS= read -r server_script; do
+    if [[ -x "$FRAMEWORK_DIR/.venv/bin/python" ]]; then
+      while IFS=$'\t' read -r server_name server_command server_script; do
         [[ -z "$server_script" ]] && continue
-        smoke_out="$(PROJECT_DIR="$TARGET_DIR" PROJECT_NAME="${PROJECT_NAME:-}" timeout 20 python3 "$server_script" </dev/null 2>&1)"
+        if [[ "$server_command" != "$FRAMEWORK_DIR/.venv/bin/python" ]]; then
+          warn "MCP server '$server_name' uses inconsistent interpreter: $server_command"
+          failures=$((failures + 1))
+          continue
+        fi
+        smoke_out="$(PROJECT_DIR="$TARGET_DIR" PROJECT_NAME="${PROJECT_NAME:-}" timeout 20 "$server_command" "$server_script" </dev/null 2>&1)"
         if printf '%s' "$smoke_out" | grep -q "Traceback (most recent call last)"; then
-          warn "MCP server failed to start: ${server_script}"
+          warn "MCP server failed to start with configured interpreter: ${server_script}"
           warn "$(printf '%s' "$smoke_out" | grep -E 'Error|Traceback' | tail -n 1)"
           failures=$((failures + 1))
         else
-          log "Preflight debug: mcp_server_startup ok=${server_script}"
+          log "Preflight debug: mcp_server_startup ok=${server_script} interpreter=${server_command}"
         fi
-      done < <(python3 -c "
+      done < <("$FRAMEWORK_DIR/.venv/bin/python" -c "
 import json, sys
 try:
     cfg = json.load(open('$MCP_CONFIG_FILE'))
@@ -267,9 +272,10 @@ except Exception:
     sys.exit(0)
 for name in ('repo-index', 'child-agent-runner'):
     srv = cfg.get('mcpServers', {}).get(name, {})
+    command = srv.get('command') or ''
     args = srv.get('args') or []
     if args:
-        print(args[0])
+        print(f'{name}\t{command}\t{args[0]}')
 ")
     fi
   fi

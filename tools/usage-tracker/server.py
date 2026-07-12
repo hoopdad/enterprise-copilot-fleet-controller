@@ -25,6 +25,7 @@ _SENSITIVE_PATTERNS = (
     re.compile(r"(?i)\bgh[pousr]_[A-Za-z0-9_]{8,}\b"),
     re.compile(r"\b[A-Fa-f0-9]{32,}\b"),
 )
+DUPLICATE_BURST_WINDOW_SECONDS = 10
 
 
 def get_project_dir() -> Path:
@@ -367,31 +368,50 @@ def _build_quality_report(entries: list[dict], min_events: int) -> dict:
     low_confidence_events = sum(1 for score in outcome_confidences if score < 0.5)
     low_consistency_events = sum(1 for score in consistency_scores if score < 0.5)
     legacy_or_missing = total - sum(1 for e in entries if e.get("origin") in {"top_level", "nested"})
-    duplicate_counts: dict[tuple, int] = {}
     sorted_entries = sorted(
         [e for e in entries if _parse_iso_timestamp(e.get("ts", "")) is not None],
         key=lambda e: _parse_iso_timestamp(e.get("ts", "")).timestamp(),
     )
+    duplicate_sequences: dict[tuple, list[list[dict]]] = {}
     for entry in sorted_entries:
         key = (
+            entry.get("run_id", ""),
             entry.get("agent", ""),
             entry.get("action", ""),
             entry.get("tool", ""),
             entry.get("skill", ""),
             entry.get("detail", ""),
         )
-        duplicate_counts[key] = duplicate_counts.get(key, 0) + 1
+        sequences = duplicate_sequences.setdefault(key, [])
+        timestamp = _parse_iso_timestamp(entry.get("ts", ""))
+        if sequences:
+            previous = _parse_iso_timestamp(sequences[-1][-1].get("ts", ""))
+            if previous is not None and timestamp is not None:
+                if (timestamp - previous).total_seconds() <= DUPLICATE_BURST_WINDOW_SECONDS:
+                    sequences[-1].append(entry)
+                    continue
+        sequences.append([entry])
 
     duplicate_bursts = [
         {
-            "agent": key[0],
-            "action": key[1],
-            "tool": key[2],
-            "count": count,
+            "run_id": key[0],
+            "agent": key[1],
+            "action": key[2],
+            "tool": key[3],
+            "detail": _redact_text(key[5]),
+            "count": len(sequence),
+            "window_seconds": int(
+                (
+                    _parse_iso_timestamp(sequence[-1].get("ts", ""))
+                    - _parse_iso_timestamp(sequence[0].get("ts", ""))
+                ).total_seconds()
+            ),
         }
-        for key, count in sorted(duplicate_counts.items(), key=lambda item: (-item[1], item[0]))
-        if count >= 2
+        for key, sequences in duplicate_sequences.items()
+        for sequence in sequences
+        if len(sequence) >= 2
     ]
+    duplicate_bursts.sort(key=lambda item: (-item["count"], item["run_id"], item["tool"], item["detail"]))
 
     flags = []
     if total < min_events:
@@ -412,7 +432,10 @@ def _build_quality_report(entries: list[dict], min_events: int) -> dict:
     if duplicate_bursts:
         flags.append({
             "type": "duplicate_bursts",
-            "message": "Repeated identical calls suggest fan-out or retry loops.",
+            "message": (
+                f"Repeated identical calls within {DUPLICATE_BURST_WINDOW_SECONDS}s "
+                "suggest fan-out or retry loops."
+            ),
             "count": len(duplicate_bursts),
         })
     if outcome_events:

@@ -282,8 +282,14 @@ Tools handle mechanics so the LLM can focus on intelligence. MCP is opt-in (`pro
 ### Prerequisites
 
 ```bash
-pip install -r enterprise-copilot-fleet-controller/tools/requirements.txt
+python3 -m venv enterprise-copilot-fleet-controller/.venv
+enterprise-copilot-fleet-controller/.venv/bin/python -m pip install \
+  -r enterprise-copilot-fleet-controller/tools/requirements.txt
 ```
+
+Generated MCP launch configuration uses this virtual environment explicitly.
+Do not replace its interpreter with bare `python3`; user-site packages can be
+incompatible with the framework's pinned MCP dependencies.
 
 ## Versioning & Upgrades
 

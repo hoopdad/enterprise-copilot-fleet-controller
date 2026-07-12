@@ -491,6 +491,7 @@ if [[ -f "$PROJECT_DIR_MCP/.github/mcp.json" ]]; then
   assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "azure-resource-status"
   assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "git-pr-orchestrator"
   assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "usage quality/anomalies"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "$FRAMEWORK_DIR/.venv/bin/python"
   TESTS_RUN=$((TESTS_RUN + 1))
   if python3 - <<PYEOF
 import json, pathlib

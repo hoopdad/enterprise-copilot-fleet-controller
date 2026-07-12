@@ -6,7 +6,7 @@
 #
 # Usage: bash tests/test-mcp-tools.sh
 #
-# Prerequisites: python3, pip install -r tools/requirements.txt
+# Prerequisites: .venv/bin/python with tools/requirements.txt installed
 
 set -euo pipefail
 
@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRAMEWORK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TOOLS_DIR="$FRAMEWORK_DIR/tools"
 TEST_WORK_DIR="$FRAMEWORK_DIR/.test-work/mcp-tools"
+PYTHON_BIN="${MCP_PYTHON:-$FRAMEWORK_DIR/.venv/bin/python}"
 PASS=0
 FAIL=0
 TESTS_RUN=0
@@ -47,15 +48,15 @@ run_check() {
 echo "═══ MCP Tool Smoke Tests ═══"
 echo ""
 
-if ! command -v python3 &>/dev/null; then
-  echo "ERROR: python3 not found"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "ERROR: MCP virtual-environment interpreter not found: $PYTHON_BIN"
   exit 1
 fi
 
 # Verify mcp package available
-if ! python3 -c "import mcp" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import mcp" 2>/dev/null; then
   echo "Installing MCP dependencies..."
-  pip install -q -r "$TOOLS_DIR/requirements.txt"
+  "$PYTHON_BIN" -m pip install -q -r "$TOOLS_DIR/requirements.txt"
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ for server in "${SERVERS[@]}"; do
 
   # Test 2: Syntax valid
   rc=0
-  python3 -c "
+  "$PYTHON_BIN" -c "
 import sys, py_compile
 try:
     py_compile.compile('$SERVER_PY', doraise=True)
@@ -105,7 +106,7 @@ except py_compile.PyCompileError as e:
 
   # Test 3: Module imports without error
   rc=0
-  python3 -c "
+  "$PYTHON_BIN" -c "
 import sys, os
 os.environ.setdefault('PROJECT_DIR', '$TEST_WORK_DIR/import-${server}')
 sys.path.insert(0, '$TOOLS_DIR')
@@ -129,7 +130,7 @@ except Exception as e:
 
   # Test 4: Server has mcp instance
   rc=0
-  python3 -c "
+  "$PYTHON_BIN" -c "
 import sys, os
 os.environ.setdefault('PROJECT_DIR', '$TEST_WORK_DIR/mcp-${server}')
 sys.path.insert(0, '$TOOLS_DIR')
@@ -156,7 +157,7 @@ done
 echo ""
 echo "  Testing: shared/instrumentation"
 rc=0
-python3 -c "
+"$PYTHON_BIN" -c "
 import json
 import os
 import pathlib
@@ -181,6 +182,10 @@ def sample_tool(value: int) -> int:
 def failing_tool() -> None:
     raise RuntimeError('expected failure')
 
+@decorator
+def returned_error_tool() -> str:
+    return json.dumps({'ok': False, 'error': {'code': 'EXPECTED_ERROR', 'message': 'returned failure'}})
+
 assert sample_tool(1) == 2
 try:
     failing_tool()
@@ -188,6 +193,7 @@ except RuntimeError:
     pass
 else:
     raise AssertionError('Expected failure to be re-raised')
+assert json.loads(returned_error_tool())['ok'] is False
 
 log_usage_direct(
     agent='test',
@@ -212,7 +218,7 @@ log_usage_direct(
 )
 
 entries = [json.loads(line) for line in log_file.read_text().splitlines() if line.strip()]
-assert len(entries) >= 3, f'Expected >=3 usage entries, got {len(entries)}'
+assert len(entries) >= 4, f'Expected >=4 usage entries, got {len(entries)}'
 
 success = next(e for e in entries if e.get('detail') == 'sample_tool')
 assert success['status'] == 'success'
@@ -226,6 +232,11 @@ assert failure['status'] == 'failure'
 assert failure['error_type'] == 'RuntimeError'
 assert failure['error_message'] == 'expected failure'
 assert isinstance(failure.get('duration_ms'), int)
+
+returned_failure = next(e for e in entries if e.get('detail') == 'returned_error_tool')
+assert returned_failure['status'] == 'failure'
+assert returned_failure['error_type'] == 'EXPECTED_ERROR'
+assert returned_failure['error_message'] == 'returned failure'
 
 direct = next(e for e in entries if e.get('action') == 'direct')
 assert direct['task_id'] == 'task-123'
@@ -253,7 +264,7 @@ assert_pass $rc "shared/instrumentation: usage schema and wrapper behavior"
 # ─────────────────────────────────────────────────────────────
 echo "  Testing: shared/usage_client"
 rc=0
-python3 -c "
+"$PYTHON_BIN" -c "
 import sys, os
 os.environ['PROJECT_DIR'] = '$TEST_WORK_DIR/usage-client'
 sys.path.insert(0, '$TOOLS_DIR')
@@ -265,7 +276,7 @@ assert_pass $rc "shared/usage_client: direct invocation failed"
 
 echo "  Testing: usage-tracker/log_usage"
 rc=0
-python3 -c "
+"$PYTHON_BIN" -c "
 import json
 import os
 import pathlib
@@ -340,7 +351,7 @@ assert_pass $rc "usage-tracker/log_usage: structured fields failed"
 # ─────────────────────────────────────────────────────────────
 echo "  Testing: usage-tracker/get_usage_quality_report"
 rc=0
-python3 -c "
+"$PYTHON_BIN" -c "
 import json
 import os
 import pathlib

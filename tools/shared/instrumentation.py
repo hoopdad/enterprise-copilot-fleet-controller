@@ -67,6 +67,21 @@ def _normalize_origin(origin: Optional[str], parent_event_id: Optional[str]) -> 
     return "nested" if parent_event_id else "top_level"
 
 
+def _returned_error(result: object) -> tuple[Optional[str], Optional[str]]:
+    payload = result
+    if isinstance(result, str):
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            return None, None
+    if not isinstance(payload, dict) or payload.get("ok") is not False:
+        return None, None
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("code") or "TOOL_ERROR"), str(error.get("message") or "Tool returned ok=false")
+    return "TOOL_ERROR", str(error or "Tool returned ok=false")
+
+
 def _build_usage_entry(
     agent: str,
     action: str,
@@ -249,6 +264,7 @@ def track_usage(server_name: str):
             token = _CURRENT_EVENT_ID.set(event_id)
             try:
                 result = func(*args, **kwargs)
+                error_type, error_message = _returned_error(result)
                 _append_usage(_build_usage_entry(
                     agent="tool-auto",
                     action="tool_call",
@@ -259,8 +275,10 @@ def track_usage(server_name: str):
                     task_id=task_id,
                     parent_event_id=parent_event_id,
                     origin=origin,
-                    status="success",
+                    status="failure" if error_type else "success",
                     duration_ms=int((time.perf_counter() - start) * 1000),
+                    error_type=error_type,
+                    error_message=error_message,
                     inherit_parent=False,
                 ))
                 return result

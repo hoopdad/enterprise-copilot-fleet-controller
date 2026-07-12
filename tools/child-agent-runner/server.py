@@ -32,6 +32,7 @@ PROGRESS_ACTIVE_OUTPUT_WINDOW_SECONDS = 180
 TIMEOUT_EXTENSION_SECONDS = 600
 MAX_TIMEOUT_SECONDS = 7200
 DEFAULT_STOP_GRACE_SECONDS = 10
+LOCK_STARTUP_GRACE_SECONDS = 10
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
 ACTIVE_JOB_STATUSES = {"queued", "running", "cancel_requested"}
 
@@ -141,6 +142,15 @@ def _release_lock(lock_file: Path) -> None:
         pass
 
 
+def _lock_owner(lock_file: Path) -> tuple[int | None, float | None]:
+    try:
+        owner_pid = int(lock_file.read_text(encoding="utf-8").strip())
+        age_seconds = max(0.0, time.time() - lock_file.stat().st_mtime)
+        return owner_pid, age_seconds
+    except (OSError, TypeError, ValueError):
+        return None, None
+
+
 def _job_dir(project_dir: Path) -> Path:
     path = project_dir / ".metrics" / "child-agent-runner" / "jobs"
     path.mkdir(parents=True, exist_ok=True)
@@ -231,12 +241,30 @@ def _acquire_repo_lock(project_dir: Path, repo_name: str) -> tuple[bool, Path, d
         return True, lock_file, None
 
     running_job = _find_running_repo_job(project_dir, repo_name)
-    if running_job is None:
-        _release_lock(lock_file)
-        if _acquire_lock(lock_file):
-            return True, lock_file, None
+    if running_job is not None:
+        return False, lock_file, running_job
 
-    return False, lock_file, running_job
+    owner_pid, age_seconds = _lock_owner(lock_file)
+    if (
+        owner_pid is not None
+        and _is_pid_alive(owner_pid)
+        and age_seconds is not None
+        and age_seconds <= LOCK_STARTUP_GRACE_SECONDS
+    ):
+        return (
+            False,
+            lock_file,
+            {
+                "status": "starting",
+                "worker_pid": owner_pid,
+                "lock_age_seconds": round(age_seconds, 3),
+            },
+        )
+
+    _release_lock(lock_file)
+    if _acquire_lock(lock_file):
+        return True, lock_file, None
+    return False, lock_file, None
 
 
 def _build_prompt(repo_name: str, repo_role: str, request_file: Path, phase: str = "specialist") -> str:
@@ -419,6 +447,7 @@ def _run_copilot_with_progress(
     proc = subprocess.Popen(
         command,
         cwd=str(repo_dir),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -683,6 +712,9 @@ def _resolve_job_setup(
         if running_job is not None:
             details["job_id"] = running_job.get("job_id")
             details["worker_pid"] = running_job.get("worker_pid")
+            details["status"] = running_job.get("status")
+            if running_job.get("lock_age_seconds") is not None:
+                details["lock_age_seconds"] = running_job["lock_age_seconds"]
         return {
             "ok": False,
             "error": {
@@ -775,6 +807,7 @@ def _start_child_agent_job(
         proc = subprocess.Popen(
             worker_cmd,
             cwd=str(project_dir),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -786,12 +819,40 @@ def _start_child_agent_job(
         job_payload["finished_at"] = _now_iso()
         job_payload["error"] = {"code": "WORKER_START_FAILED", "message": str(exc)}
         _save_job(project_dir, job_id, job_payload)
-        return {"ok": False, "error": {"code": "WORKER_START_FAILED", "message": str(exc)}}
+        return {
+            "ok": False,
+            "job_id": job_id,
+            "status": "failed",
+            "error": {
+                "code": "WORKER_START_FAILED",
+                "message": str(exc),
+                "details": {"job_file": str(_job_path(project_dir, job_id))},
+            },
+        }
 
-    job_payload["status"] = "running"
-    job_payload["worker_pid"] = proc.pid
-    job_payload["started_at"] = _now_iso()
-    _save_job(project_dir, job_id, job_payload)
+    latest_job = _load_job(project_dir, job_id) or job_payload
+    if str(latest_job.get("status", "")) not in TERMINAL_JOB_STATUSES:
+        latest_job["status"] = "running"
+        latest_job["worker_pid"] = proc.pid
+        latest_job["started_at"] = latest_job.get("started_at") or _now_iso()
+        _save_job(project_dir, job_id, latest_job)
+
+    status = str(latest_job.get("status", "running"))
+    if status in TERMINAL_JOB_STATUSES:
+        result = {
+            "ok": bool(latest_job.get("ok")),
+            "status": status,
+            "job_id": job_id,
+            "repo": setup["repo"],
+            "role": setup["role"],
+            "repo_path": str(setup["repo_dir"]),
+            "request_file": setup["request_file"],
+            "queue_depth_before": setup["queue_depth_before"],
+            "worker_pid": proc.pid,
+        }
+        if latest_job.get("error"):
+            result["error"] = latest_job["error"]
+        return result
 
     return {
         "ok": True,
@@ -1280,7 +1341,14 @@ def get_child_agent_job(
     project_dir = _workspace_root()
     job = _load_job(project_dir, job_id.strip())
     if job is None:
-        return _error_payload("JOB_NOT_FOUND", f"job_id '{job_id}' was not found")
+        return _error_payload(
+            "JOB_NOT_FOUND",
+            f"job_id '{job_id}' was not found",
+            {
+                "jobs_dir": str(_job_dir(project_dir)),
+                "hint": "Poll with the exact job_id returned by start_child_agent or start_child_agents_batch.",
+            },
+        )
     refreshed = _refresh_job_state(job)
     return json.dumps(
         {

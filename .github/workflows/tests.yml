@@ -12,6 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up MCP virtual environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r tools/requirements.txt
+
       - name: Syntax check all bash scripts
         run: |
           find scripts/ -name "*.sh" -exec bash -n {} \;
@@ -31,8 +41,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install -r tools/requirements.txt
+      - name: Set up MCP virtual environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r tools/requirements.txt
 
       - name: Run MCP tool smoke tests
         run: bash tests/test-mcp-tools.sh
