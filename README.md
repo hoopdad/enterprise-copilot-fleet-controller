@@ -104,7 +104,7 @@ so children cannot dispatch or index the fleet.
 ## How Coordinator Workflow Works
 
 1. **Coordinator** (parent repo) reads `.github/copilot-instructions.md`, writes `.requirements/.contracts`, and creates per-repo request files in child `work/todo/`.
-   - MCP-first orchestration is mandatory for child execution: use `check_repo_index` + `check_repo_queues` + async child-agent-runner dispatch tools (`start_child_agents_batch`/`start_child_agent`) with polling (`get_child_agent_job`/`list_child_agent_jobs`), not background sub-agents or `task`.
+   - MCP-first orchestration is mandatory for child execution: use `check_repo_index` + `check_repo_queues` + async child-agent-runner dispatch tools (`start_child_agents_batch`/`start_child_agent`), then block on completion with `wait_for_child_agent_jobs` (event-driven) rather than scheduled polling or background sub-agents/`task`. Remediation reuses the child's `session_id` via `resume_session_id` instead of cold-starting.
    - Init runs a deterministic preflight before Phase 6 to validate executable/tooling and expected child repo paths (`repo_dir`, `.github/agents`, and `work/*` queues).
    - During init-time parent Copilot phases, child access is scoped from `.repo-index.yml` to `<child>/work` and `<child>/.github/agents` (not full child repo roots), so queue/agent files are readable without broad discovery scans. The exceptions are Phase 1 (the orchestrator scaffolds each child folder from the pattern definition) and Phase 6 (child work execution), where the full child repo root is granted.
 2. **Specialist** (child repo cwd) processes one request, implements + validates, then moves it to `work/ready-for-review/`.
@@ -150,6 +150,28 @@ copilot -p "Process the next work/todo request as specialist or critic" --allow-
 ```
 
 Parent orchestrator runs should stay MCP-first for child work; background sub-agents are the wrong path for child execution.
+
+## Scenario: A cross-repo enhancement across 6 repos
+
+You have an app split across six repos — say `web`, `api`, `auth`, `worker`, `infra`, and `shared` — and a single enhancement (e.g. "add tenant-scoped API keys") that touches several of them. Instead of hand-walking each repo, you give the coordinator one prompt and it fans the work out to per-repo child agents, waits for them event-driven, and validates their verdicts.
+
+Run from the **parent** repo:
+
+```bash
+copilot --allow-all-tools --autopilot --no-ask-user --add-dir "$(pwd)" -p "\
+You are the scrum master: delegate all child-repo implementation via the child-agent-runner MCP tools; only touch parent contracts/requirements yourself.
+
+Enhancement: add tenant-scoped API keys spanning web, api, auth, worker, and shared.
+
+1. Read .copilot/capabilities.md, .copilot/topology.md, and .repo-index.yml once (no broad discovery scans).
+2. Write the cross-repo contract to .contracts/ and per-repo requirements, then drop one request into each affected child's work/todo/.
+3. Dispatch with start_child_agents_batch, then block on wait_for_child_agent_jobs (event-driven — do not poll on a timer).
+4. For each returned run, check the PASS|FAIL|BLOCKED verdict and record its session_id and token usage.
+5. For any FAIL/BLOCKED, re-dispatch remediation with resume_session_id set to that child's session_id (reuse the session, don't cold-start).
+6. Only accept work/done items that satisfy the acceptance criteria in the contract."
+```
+
+What the coordinator does under the hood: `check_repo_index` → write contract + per-repo `work/todo` requests → `start_child_agents_batch` (parallel, one scoped Copilot session per repo) → `wait_for_child_agent_jobs` (returns when they finish) → inspect each verdict/`usage`/`session_id` → `resume_session_id` remediation for any non-PASS → validate `work/done` against acceptance criteria. Independent repos run in parallel; token spend and pass/fail are captured per child instead of being invisible.
 
 ## init.yml Format
 
@@ -254,7 +276,7 @@ Tools handle mechanics so the LLM can focus on intelligence. MCP is opt-in (`pro
 | Tool | Purpose | Scoped To |
 |------|---------|-----------|
 | `repo-index` | Validate/inspect `.repo-index.yml`, local repo health, and child queue state (`check_repo_queues`) | Orchestrator |
-| `child-agent-runner` | Control scoped async child-repo Copilot sessions: start, compact status/polling, runner health, and graceful/forced stop for individual or selected batch jobs | Orchestrator |
+| `child-agent-runner` | Control scoped async child-repo Copilot sessions: start (batch or single), block on completion with `wait_for_child_agent_jobs` (event-driven, no scheduled polling), reuse a session for remediation via `resume_session_id`, and read back per-run `session_id`, token `usage`, and a machine-readable `PASS\|FAIL\|BLOCKED` verdict; plus runner health and graceful/forced stop | Orchestrator |
 | `contract-compliance` | Compare implemented routes to `.contracts/*.yml` endpoint definitions | Orchestrator + backend specialists |
 | `scaffold-generator` | Generate non-overwriting FastAPI/TypeScript stubs from contracts | backend specialists |
 | `azure-inspector` | Read Container Apps, Cosmos DB, and ACR state via Azure CLI | infra specialists |

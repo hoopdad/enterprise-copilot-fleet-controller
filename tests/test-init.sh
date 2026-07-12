@@ -350,6 +350,18 @@ if [[ -f "$PROJECT_DIR/.github/copilot-instructions.md" ]]; then
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Anti-Patterns"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Critic Gate"
   assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "Accept only PASS"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "capabilities.md"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "unless the human explicitly scopes"
+  assert_file_contains "$PROJECT_DIR/.github/copilot-instructions.md" "built-in \`/fleet\` command"
+fi
+
+# Verify capabilities manifest (once-read index)
+assert_file_exists "$PROJECT_DIR/.copilot/capabilities.md"
+if [[ -f "$PROJECT_DIR/.copilot/capabilities.md" ]]; then
+  assert_file_contains "$PROJECT_DIR/.copilot/capabilities.md" "Capabilities Manifest"
+  assert_file_contains "$PROJECT_DIR/.copilot/capabilities.md" "test-api"
+  assert_file_contains "$PROJECT_DIR/.copilot/capabilities.md" "test-web"
+  assert_file_contains "$PROJECT_DIR/.copilot/capabilities.md" "test-api-specialist"
 fi
 
 # Verify MCP config is OFF by default

@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import select
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -20,7 +22,7 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared.instrumentation import track_usage
+from shared.instrumentation import track_usage, log_usage_direct
 
 mcp = FastMCP("child-agent-runner")
 
@@ -51,6 +53,104 @@ def _error_payload(code: str, message: str, details: dict[str, Any] | None = Non
     if details:
         payload["error"]["details"] = details
     return json.dumps(payload)
+
+
+def _session_store_path() -> Path:
+    """Locate the Copilot CLI session store that records per-session token/AIU usage."""
+    override = os.environ.get("COPILOT_SESSION_STORE")
+    if override:
+        return Path(override)
+    home = os.environ.get("COPILOT_HOME")
+    base = Path(home) if home else Path.home() / ".copilot"
+    return base / "session-store.db"
+
+
+def _read_session_usage(session_id: str) -> dict[str, int] | None:
+    """Sum token/cost usage for one Copilot session from assistant_usage_events.
+
+    Returns prompt/completion/total tokens plus cache, reasoning, and AI-unit cost, or None when
+    the store is unavailable (the child run still succeeds; telemetry is best-effort).
+    """
+    if not session_id:
+        return None
+    store = _session_store_path()
+    if not store.is_file():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{store}?mode=ro", uri=True, timeout=5)
+        try:
+            row = con.execute(
+                """
+                SELECT COALESCE(SUM(input_tokens), 0),
+                       COALESCE(SUM(output_tokens), 0),
+                       COALESCE(SUM(cache_read_tokens), 0),
+                       COALESCE(SUM(cache_write_tokens), 0),
+                       COALESCE(SUM(reasoning_tokens), 0),
+                       COALESCE(SUM(total_nano_aiu), 0),
+                       COUNT(*)
+                FROM assistant_usage_events
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return None
+    if not row or int(row[6]) == 0:
+        return None
+    prompt_tokens = int(row[0])
+    completion_tokens = int(row[1])
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+        "cache_read_tokens": int(row[2]),
+        "cache_write_tokens": int(row[3]),
+        "reasoning_tokens": int(row[4]),
+        "total_nano_aiu": int(row[5]),
+        "usage_event_count": int(row[6]),
+    }
+
+
+_RESULT_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_STATUS_LINE_RE = re.compile(r"^STATUS:\s*(PASS|FAIL|BLOCKED)\b", re.IGNORECASE | re.MULTILINE)
+_VALID_VERDICTS = {"PASS", "FAIL", "BLOCKED"}
+
+
+def _parse_child_result(output: str) -> dict[str, Any] | None:
+    """Extract a machine-readable verdict from child output.
+
+    Prefers a fenced JSON RESULT block ({"verdict","evidence","blocker","changed_commit",
+    "next_action"}); falls back to a trailing `STATUS: PASS|FAIL|BLOCKED` line. Returns None when
+    the child emitted no recognizable verdict.
+    """
+    if not output:
+        return None
+    for match in reversed(list(_RESULT_BLOCK_RE.finditer(output))):
+        try:
+            payload = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        verdict = str(payload.get("verdict") or payload.get("status") or "").strip().upper()
+        if verdict in _VALID_VERDICTS:
+            return {
+                "verdict": verdict,
+                "evidence": payload.get("evidence"),
+                "blocker": payload.get("blocker"),
+                "changed_commit": payload.get("changed_commit"),
+                "next_action": payload.get("next_action"),
+                "source": "result_block",
+            }
+    status_match = None
+    for status_match in _STATUS_LINE_RE.finditer(output):
+        pass
+    if status_match is not None:
+        return {"verdict": status_match.group(1).upper(), "source": "status_line"}
+    return None
+
 
 
 def _repo_index_path(project_dir: Path) -> Path:
@@ -656,6 +756,7 @@ def _resolve_job_setup(
     timeout_seconds: int,
     max_output_chars: int,
     phase: str = "specialist",
+    resume_session_id: str | None = None,
 ) -> dict[str, Any]:
     if not repo or not repo.strip():
         return {"ok": False, "error": {"code": "INVALID_REPO", "message": "repo must be a non-empty string"}}
@@ -725,6 +826,8 @@ def _resolve_job_setup(
         }
 
     prompt = _build_prompt(repo_name, repo_role, request_file.relative_to(repo_dir), phase=phase)
+    resume = str(resume_session_id or "").strip()
+    session_id = resume or str(uuid4())
     command = [
         "copilot",
         "-p",
@@ -739,6 +842,8 @@ def _resolve_job_setup(
         "none",
         "--model",
         "auto",
+        "--session-id",
+        session_id,
         "--add-dir",
         str(repo_dir),
     ]
@@ -759,6 +864,8 @@ def _resolve_job_setup(
         "role": repo_role,
         "repo_dir": repo_dir,
         "phase": phase,
+        "session_id": session_id,
+        "resumed_session": bool(resume),
         "queue_depth_before": len(queue),
         "request_file": str(request_file.relative_to(repo_dir)),
         "prompt": prompt,
@@ -774,8 +881,15 @@ def _start_child_agent_job(
     timeout_seconds: int,
     max_output_chars: int,
     phase: str = "specialist",
+    resume_session_id: str | None = None,
 ) -> dict[str, Any]:
-    setup = _resolve_job_setup(repo=repo, timeout_seconds=timeout_seconds, max_output_chars=max_output_chars, phase=phase)
+    setup = _resolve_job_setup(
+        repo=repo,
+        timeout_seconds=timeout_seconds,
+        max_output_chars=max_output_chars,
+        phase=phase,
+        resume_session_id=resume_session_id,
+    )
     if not setup.get("ok"):
         return setup
     if setup.get("status") == "no_work":
@@ -794,6 +908,8 @@ def _start_child_agent_job(
         "repo_path": str(setup["repo_dir"]),
         "request_file": setup["request_file"],
         "queue_depth_before": setup["queue_depth_before"],
+        "session_id": setup.get("session_id", ""),
+        "resumed_session": setup.get("resumed_session", False),
         "timeout_seconds": setup["timeout_seconds"],
         "max_output_chars": setup["max_output_chars"],
         "lock_file": setup["lock_file"],
@@ -940,6 +1056,16 @@ def _run_worker(job_id: str) -> int:
     job["status"] = "cancelled" if cancelled else ("completed" if job["ok"] else "failed")
     if cancelled:
         job["cancelled_at"] = job["finished_at"]
+    if not cancelled:
+        _attach_usage_and_verdict(
+            job,
+            session_id=str(job.get("session_id", "")),
+            resumed=bool(job.get("resumed_session")),
+            output=output,
+            repo_name=repo_name,
+            phase=str(job.get("phase", "specialist")),
+            duration_ms=duration_ms,
+        )
     if error is not None:
         error.setdefault("details", {})
         error["details"]["repo"] = repo_name
@@ -960,6 +1086,7 @@ def run_child_agent(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     max_output_chars: int = 12000,
     phase: str = "specialist",
+    resume_session_id: str = "",
 ) -> str:
     """Spawn a scoped Copilot run in one child repo using .repo-index.yml allowlist.
 
@@ -968,14 +1095,67 @@ def run_child_agent(
         timeout_seconds: Max execution time (30-7200)
         max_output_chars: Max output to capture
         phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review, 'full' processes all todo items with integrated specialist+critic loop (up to 3 retries per item)
+        resume_session_id: Reuse a prior child session (from a previous run's `session_id`) instead of cold-starting — use for critic remediation to avoid re-ingesting full instructions
     """
     payload = _run_child_agent_core(
         repo=repo,
         timeout_seconds=timeout_seconds,
+        resume_session_id=resume_session_id or None,
         max_output_chars=max_output_chars,
         phase=phase,
     )
     return json.dumps(payload)
+
+
+def _attach_usage_and_verdict(
+    payload: dict[str, Any],
+    *,
+    session_id: str,
+    resumed: bool,
+    output: str,
+    repo_name: str,
+    phase: str,
+    duration_ms: int,
+) -> dict[str, Any]:
+    """Enrich a result/job payload with the child session's token/AIU usage and parsed verdict.
+
+    Also emits an enriched usage event so per-child token cost is recorded (previously unmeasured).
+    All steps are best-effort: telemetry gaps never fail the run.
+    """
+    if session_id:
+        payload["session_id"] = session_id
+        payload["resumed_session"] = bool(resumed)
+    verdict = _parse_child_result(output)
+    if verdict is not None:
+        payload["result"] = verdict
+    usage = _read_session_usage(session_id)
+    if usage is not None:
+        payload["usage"] = usage
+    try:
+        log_usage_direct(
+            agent=f"child-agent-runner/{repo_name}",
+            action="child_run_complete",
+            tool="child-agent-runner",
+            detail=f"{phase}:{(verdict or {}).get('verdict', 'NONE')}",
+            status="success" if payload.get("ok") else "failure",
+            duration_ms=duration_ms,
+            origin="nested",
+            prompt_tokens=(usage or {}).get("prompt_tokens"),
+            completion_tokens=(usage or {}).get("completion_tokens"),
+            total_tokens=(usage or {}).get("total_tokens"),
+        )
+    except Exception:
+        pass
+    return payload
+
+
+def _tally_verdicts(results: list[dict[str, Any]]) -> dict[str, int]:
+    """Count PASS/FAIL/BLOCKED/none verdicts across a batch of result payloads."""
+    tally = {"PASS": 0, "FAIL": 0, "BLOCKED": 0, "none": 0}
+    for item in results:
+        verdict = str((item.get("result") or {}).get("verdict", "")).upper()
+        tally[verdict if verdict in _VALID_VERDICTS else "none"] += 1
+    return tally
 
 
 def _run_child_agent_core(
@@ -983,8 +1163,15 @@ def _run_child_agent_core(
     timeout_seconds: int,
     max_output_chars: int,
     phase: str = "specialist",
+    resume_session_id: str | None = None,
 ) -> dict[str, Any]:
-    setup = _resolve_job_setup(repo=repo, timeout_seconds=timeout_seconds, max_output_chars=max_output_chars, phase=phase)
+    setup = _resolve_job_setup(
+        repo=repo,
+        timeout_seconds=timeout_seconds,
+        max_output_chars=max_output_chars,
+        phase=phase,
+        resume_session_id=resume_session_id,
+    )
     if not setup.get("ok") or setup.get("status") == "no_work":
         return setup
 
@@ -996,6 +1183,8 @@ def _run_child_agent_core(
     prompt = str(setup["prompt"])
     command = list(setup["command"])
     lock_file = Path(str(setup["lock_file"]))
+    session_id = str(setup.get("session_id", ""))
+    resumed = bool(setup.get("resumed_session"))
 
     start = time.perf_counter()
     rc = 1
@@ -1054,6 +1243,15 @@ def _run_child_agent_core(
         "log_file": str(log_file),
         "output": output,
     }
+    _attach_usage_and_verdict(
+        result_payload,
+        session_id=session_id,
+        resumed=resumed,
+        output=output,
+        repo_name=repo_name,
+        phase=phase,
+        duration_ms=duration_ms,
+    )
     if error is not None:
         error.setdefault("details", {})
         error["details"].setdefault("repo", repo_name)
@@ -1182,6 +1380,7 @@ def run_child_agents_batch(
                 "failed": failed,
                 "blocked": blocked,
                 "no_work": no_work,
+                "verdicts": _tally_verdicts(ordered_results),
             },
         }
     )
@@ -1194,6 +1393,7 @@ def start_child_agent(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     max_output_chars: int = 12000,
     phase: str = "specialist",
+    resume_session_id: str = "",
 ) -> str:
     """Start one child-repo run asynchronously and return a job id immediately.
 
@@ -1202,6 +1402,7 @@ def start_child_agent(
         timeout_seconds: Max execution time (30-7200)
         max_output_chars: Max output to capture
         phase: 'specialist' picks from work/todo, 'critic' picks from work/ready-for-review, 'full' processes all todo items with integrated specialist+critic loop (up to 3 retries per item)
+        resume_session_id: Reuse a prior child session (from a previous run's `session_id`) instead of cold-starting — use for critic remediation to avoid re-ingesting full instructions
     """
     return json.dumps(
         _start_child_agent_job(
@@ -1209,6 +1410,7 @@ def start_child_agent(
             timeout_seconds=timeout_seconds,
             max_output_chars=max_output_chars,
             phase=phase,
+            resume_session_id=resume_session_id or None,
         )
     )
 
@@ -1313,6 +1515,103 @@ def start_child_agents_batch(
                 "blocked": blocked_count,
                 "failed_to_start": failed_count,
                 "deferred_capacity": len(deferred),
+            },
+        }
+    )
+
+
+@mcp.tool()
+@track_usage("child-agent-runner")
+def wait_for_child_agent_jobs(
+    job_ids: list[str] | None = None,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    poll_interval_seconds: float = 3.0,
+    include_output: bool = False,
+    max_output_chars: int = 12000,
+) -> str:
+    """Block until the given async jobs reach terminal state, then return their results.
+
+    Event-driven alternative to repeated get_child_agent_job/list_child_agent_jobs polling from the
+    orchestrator: this waits inside a single MCP call (cheap internal polling, no extra model turns)
+    and returns once all jobs finish or the timeout elapses. Prefer this over scheduled polling.
+
+    Args:
+        job_ids: Job ids to wait on (defaults to all currently active jobs)
+        timeout_seconds: Max time to wait for all jobs (30-7200)
+        poll_interval_seconds: Internal check cadence (0.5-30)
+        include_output: Include captured child output in returned job records
+        max_output_chars: Per-job captured output limit when include_output is true
+    """
+    if timeout_seconds < 30 or timeout_seconds > 7200:
+        return _error_payload("INVALID_TIMEOUT", "timeout_seconds must be between 30 and 7200")
+    if poll_interval_seconds < 0.5 or poll_interval_seconds > 30:
+        return _error_payload("INVALID_POLL_INTERVAL", "poll_interval_seconds must be between 0.5 and 30")
+    if max_output_chars < 200 or max_output_chars > 200000:
+        return _error_payload("INVALID_OUTPUT_LIMIT", "max_output_chars must be between 200 and 200000")
+
+    project_dir = _workspace_root()
+
+    if job_ids is not None:
+        if not isinstance(job_ids, list) or any(not isinstance(j, str) or not j.strip() for j in job_ids):
+            return _error_payload("INVALID_JOB_IDS", "job_ids must be a list of non-empty job id strings")
+        target_ids = [j.strip() for j in job_ids]
+    else:
+        target_ids = [
+            str(job.get("job_id"))
+            for job in _list_jobs(project_dir)
+            if str(job.get("status")) in ACTIVE_JOB_STATUSES
+        ]
+
+    if not target_ids:
+        return json.dumps(
+            {"ok": True, "status": "no_jobs", "timed_out": False, "jobs": [], "summary": {"total": 0}}
+        )
+
+    deadline = time.monotonic() + timeout_seconds
+    missing: list[str] = []
+    while True:
+        jobs: dict[str, dict[str, Any]] = {}
+        missing = []
+        pending = 0
+        for job_id in target_ids:
+            job = _load_job(project_dir, job_id)
+            if job is None:
+                missing.append(job_id)
+                continue
+            job = _refresh_job_state(job)
+            jobs[job_id] = job
+            if str(job.get("status")) not in TERMINAL_JOB_STATUSES:
+                pending += 1
+        if pending == 0 or time.monotonic() >= deadline:
+            break
+        time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+
+    ordered = [jobs[j] for j in target_ids if j in jobs]
+    compact_jobs = [
+        _compact_job(job, include_output=include_output, include_details=False, max_output_chars=max_output_chars)
+        for job in ordered
+    ]
+    completed = sum(1 for j in ordered if str(j.get("status")) == "completed")
+    failed = sum(1 for j in ordered if str(j.get("status")) == "failed")
+    cancelled = sum(1 for j in ordered if str(j.get("status")) == "cancelled")
+    still_running = sum(1 for j in ordered if str(j.get("status")) not in TERMINAL_JOB_STATUSES)
+    timed_out = still_running > 0
+
+    return json.dumps(
+        {
+            "ok": not timed_out and not missing,
+            "status": "timed_out" if timed_out else "all_terminal",
+            "timed_out": timed_out,
+            "missing_job_ids": missing,
+            "jobs": compact_jobs,
+            "summary": {
+                "total": len(target_ids),
+                "completed": completed,
+                "failed": failed,
+                "cancelled": cancelled,
+                "still_running": still_running,
+                "missing": len(missing),
+                "verdicts": _tally_verdicts(ordered),
             },
         }
     )

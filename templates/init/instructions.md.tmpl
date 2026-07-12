@@ -4,17 +4,35 @@
 __PROJECT_DESC__
 
 ## Session Init Checklist
-- First action in any orchestrator session: call `tool_search_tool_regex` with pattern
-  `child-agent|repo-index|contract` to discover the available MCP tool prefixes.
+Orient from **precomputed indexes**, read ONCE at session start — do not eager-scan the repo or
+rediscover with `find`/`grep`/directory listings (that wastes tokens, floods context, and invites drift):
+1. `.copilot/capabilities.md` — the one-line index of available skills, agents, MCP tools, and child
+   repos/roles. **Read this instead of enumerating them.** It is the standing replacement for
+   "learn all instructions/skills/agents/tools first."
+2. `.copilot/topology.md` — file locations, resource IDs, Entra config, and the request flow.
+3. `.repo-index.yml` — the definitive source of child repo names, roles, and local paths.
+- Then, before any child dispatch, make a direct MCP tool call to `check_repo_index` (not a shell probe).
 - Never assume MCP tools are unavailable without a direct tool call attempt.
-- Consult `.copilot/topology.md` FIRST for file locations, resource IDs, Entra config, and the
-  request flow — do not rediscover them with `find`/`grep`.
+- Load deeper playbooks (per-phase how-tos, skills, agent files) **lazily, on demand** — not up front.
 
 ## Architecture
 
 This is a multi-repo project managed by the enterprise-copilot-fleet-controller. You are the orchestrator.
+
+You **delegate** all child-repo implementation and review to specialists and critics — you do **not**
+write implementation code in this parent workspace **unless the human explicitly scopes a task to you**
+(e.g., "you do X directly"). Absent that explicit scoping, your job is to plan, write requirement/
+contract/work-request files, dispatch child agents, and validate results.
+
 Do not modify implementation code in child repos from this parent workspace.
 All child-repo implementation/review work must run in a NEW Copilot CLI invocation with cwd set to the child repo.
+
+### Child execution: use MCP dispatch, not native `/fleet`
+Dispatch child work **only** through the MCP `child-agent-runner` tools
+(`start_child_agents_batch` / `start_child_agent` + job tools). Do **not** use the built-in `/fleet`
+command or any runtime background sub-agent for child implementation/review — native subagents run
+outside this framework's repo-scoped, queue-based, critic-gated contract. `/fleet` parallelism is
+superseded here by `start_child_agents_batch` (parallel) + event-driven job waiting.
 
 ## Project Guardrails
 
@@ -68,7 +86,8 @@ MCP tools) and confirm a clean, pushed, tagged state before invoking `azd`.
    - First dispatch action must be a direct MCP tool call to `check_repo_index` (not shell discovery/probing commands).
    - Ensure the parent `.github/` directory is in scope so `.github/mcp.json` can load the MCP servers before dispatch.
    - Use `check_repo_queues` for child queue visibility from parent context; do not shell `ls` child queue paths.
-   - Prefer async dispatch: `start_child_agents_batch` for parallel starts (default to `max_parallel=4`, `timeout_seconds=1800`), `get_child_agent_job`/`list_child_agent_jobs` for polling, and `start_child_agent` for targeted single-repo retries.
+   - Prefer async dispatch: `start_child_agents_batch` for parallel starts (default to `max_parallel=4`, `timeout_seconds=1800`), then **`wait_for_child_agent_jobs` (event-driven)** to block until jobs finish — do NOT schedule repeated `get_child_agent_job`/`list_child_agent_jobs` polling (that wastes turns/tokens; reserve those tools for a one-off status check). Use `start_child_agent` for targeted single-repo retries, and pass `resume_session_id=<prior session_id>` on critic remediation so the child resumes instead of cold-starting.
+   - Each completed run returns `session_id`, `usage` (prompt/completion/total tokens + AI-unit cost), and a machine-readable `result` verdict (`PASS`/`FAIL`/`BLOCKED`); use the verdict to drive remediation, not raw output text.
    - Avoid long blocking MCP calls for child execution (`run_child_agent`/`run_child_agents_batch`) when queue items are substantial; use async job tools instead.
    - Do not run shell checks like `command -v check_repo_index`/`run_child_agent`; these are MCP tool calls, not shell binaries.
    - Treat MCP unavailability as real only when a direct MCP tool call returns a tool error.
@@ -76,7 +95,7 @@ MCP tools) and confirm a clean, pushed, tagged state before invoking `azd`.
    - Do not use `task`, background sub-agents, or any flow that yields `Agent started in background with agent_id ...` for child execution.
    - Continue dispatching child work until `work/todo` queues are drained or blocked.
    - Use `log_usage` for each dispatch/result and `get_usage_quality_report` when loops/failures appear.
-   - In status updates, include explicit evidence lines of MCP usage (for example `MCP_CALL: check_repo_index`, `MCP_CALL: check_repo_queues`, `MCP_CALL: start_child_agents_batch ...`, and `MCP_CALL: get_child_agent_job ...`) plus a final `MCP_SUMMARY`.
+   - In status updates, include explicit evidence lines of MCP usage (for example `MCP_CALL: check_repo_index`, `MCP_CALL: check_repo_queues`, `MCP_CALL: start_child_agents_batch ...`, and `MCP_CALL: wait_for_child_agent_jobs ...`) plus a final `MCP_SUMMARY`.
 8. **Wait for critic-approved completion** in child repo `work/done/` (critic iterates with specialist via `work/ready-for-review/`)
 9. **Validate done items** against acceptance criteria, then log novel decisions to .decisions/log.md
 __CRITIC_PROTOCOL_SECTION__
@@ -134,11 +153,11 @@ __USAGE_QUALITY_SECTION__
 
 ## Anti-Patterns
 
-- Never write implementation code directly (delegate to specialists)
+- Never write implementation code directly unless the human explicitly scopes the task to you — otherwise delegate to specialists
 - Never give only prose instructions to specialists — write request files under child `work/todo/` (orchestrator-approved work)
 - Never skip the red team review for non-trivial changes
 - Never run child implementation/review in parent cwd; always launch a new call from the child repo
-- Never launch child implementation/review from the parent via runtime background agents; use MCP child-agent-runner dispatch tools only (prefer `start_child_agents_batch`/`start_child_agent` + polling)
+- Never launch child implementation/review from the parent via runtime background agents or the built-in `/fleet` command; use MCP child-agent-runner dispatch tools only (prefer `start_child_agents_batch`/`start_child_agent`)
 - **NEVER** probe child repo existence with shell commands (`ls ../`, `find ../`, `cd .. && ls`, etc.) — child repo paths are definitive in `.repo-index.yml`
 - **NEVER** call non-existent tools with server-prefixed names like `usage_tracker_log_usage` or `repo_index_check_repo_index` — use the exact tool name (e.g., `log_usage`, `check_repo_index`)
 - **Never deploy without the pre-deploy gate** — every repo must be committed, pushed, and version-tagged first

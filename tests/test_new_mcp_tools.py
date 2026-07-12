@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -248,13 +249,22 @@ def test_child_runner_launches_scoped_copilot(child_runner_module, monkeypatch):
 
     seen: dict[str, object] = {}
 
-    def fake_run(command, cwd, capture_output, text, timeout):
+    def fake_popen(command, cwd, **kwargs):
         seen["command"] = command
         seen["cwd"] = cwd
-        seen["timeout"] = timeout
-        return SimpleNamespace(returncode=0, stdout="done", stderr="")
+        # No stdout/stderr streams: the progress loop takes the sleep path,
+        # then poll() reports a clean exit and communicate() yields the tail.
+        return SimpleNamespace(
+            pid=4321,
+            stdout=None,
+            stderr=None,
+            poll=lambda: 0,
+            communicate=lambda timeout=None: ("done", ""),
+            kill=lambda: None,
+            wait=lambda timeout=None: 0,
+        )
 
-    monkeypatch.setattr(child_runner_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(child_runner_module.subprocess, "Popen", fake_popen)
 
     payload = json.loads(child_runner_module.run_child_agent(repo="api-success", timeout_seconds=90))
     assert payload["ok"] is True
@@ -269,9 +279,9 @@ def test_child_runner_launches_scoped_copilot(child_runner_module, monkeypatch):
     assert "--autopilot" in command
     assert "--no-ask-user" in command
     assert "--add-dir" in command
+    assert "--session-id" in command
     assert str(child_dir.resolve()) in command
     assert seen["cwd"] == str(child_dir.resolve())
-    assert seen["timeout"] == 90
 
 
 def test_child_runner_reports_lock(child_runner_module, monkeypatch):
@@ -409,6 +419,9 @@ def test_child_runner_start_async_returns_job(child_runner_module, monkeypatch):
 
 def test_child_runner_async_batch_start(child_runner_module, monkeypatch):
     project_dir = ROOT / ".test-work" / "child-runner-async-batch" / "parent"
+    # Clean any leftover job state: this test stubs _is_pid_alive to always-True,
+    # so stale job records from a prior run would otherwise consume all slots.
+    shutil.rmtree(project_dir.parent, ignore_errors=True)
     api_dir = project_dir.parent / "api-async-batch"
     web_dir = project_dir.parent / "web-async-batch"
     (api_dir / "work" / "todo").mkdir(parents=True, exist_ok=True)

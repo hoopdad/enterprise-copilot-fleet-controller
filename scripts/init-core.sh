@@ -2381,7 +2381,9 @@ if [[ "${ENABLE_MCP:-false}" == "true" ]]; then
 | `check_all_contracts` | Before deploy to catch contract drift across all providers |
 | `check_contract_compliance` | Validate one provider repo against one contract's routes |
 | `run_local_lint` | Fast local lint pass before test/build or before delegating a fix back |
-| `start_child_agent` / `start_child_agents_batch` / `get_child_agent_job` / `list_child_agent_jobs` | Start async child-repo Copilot runs and poll status/results without long blocking MCP calls |
+| `start_child_agent` / `start_child_agents_batch` | Start async child-repo Copilot runs; pass `resume_session_id` to reuse a prior session for critic remediation instead of cold-starting |
+| `wait_for_child_agent_jobs` | Event-driven wait that blocks until dispatched jobs reach terminal state — prefer this over repeated `get_child_agent_job`/`list_child_agent_jobs` polling |
+| `get_child_agent_job` / `list_child_agent_jobs` | One-off status/result checks (each run returns `session_id`, token/AIU `usage`, and a `PASS`/`FAIL`/`BLOCKED` `result` verdict) |
 | `terraform_fmt_check` / `terraform_init_validate` / `terraform_plan_check` | Infra changes: formatting, validation, and plan safety checks before deploy |
 | `list_azure_resources` / `get_azure_status` / `find_error` | Infra incidents: inspect Azure inventory, runtime status, and recent failure events |
 | `inspect_container_app` / `inspect_cosmos` / `inspect_acr` | Deep Azure diagnostics when one service needs focused investigation |
@@ -2429,6 +2431,10 @@ write_orchestrator_instructions \
   "$USAGE_QUALITY_SECTION"
 
 log "✓ Created $ORCHESTRATOR_INSTRUCTIONS_REL (orchestrator)"
+
+# Once-read capabilities index so the orchestrator can orient without eager filesystem scans.
+write_capabilities_manifest
+log "✓ Created .copilot/capabilities.md (capabilities manifest)"
 
 fi  # end Phase 3
 

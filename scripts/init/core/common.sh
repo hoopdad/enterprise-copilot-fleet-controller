@@ -115,6 +115,78 @@ write_orchestrator_instructions() {
   write_from_template "instructions.md.tmpl" "$output_path"
 }
 
+# Generate .copilot/capabilities.md — a once-read index of skills, agents, MCP tools, and child
+# repos/roles. The orchestrator reads this instead of eager-scanning the filesystem, which keeps
+# session context lean (fewer tokens, less wandering) while still being fully oriented.
+write_capabilities_manifest() {
+  local out_file="$TARGET_DIR/.copilot/capabilities.md"
+  mkdir -p "$TARGET_DIR/.copilot"
+
+  {
+    echo "<!-- enterprise-copilot-fleet-controller v${FRAMEWORK_VERSION} -->"
+    echo "# ${PROJECT_NAME} — Capabilities Manifest"
+    echo
+    echo "Read this **once** at session start to learn what is available. It is the standing"
+    echo "replacement for \"learn all instructions/skills/agents/tools first\" — do not eager-scan the"
+    echo "repo to rediscover these. For per-tool detail see the \"MCP Tools\" table in"
+    echo "\`.github/copilot-instructions.md\`; for file locations/resource IDs see \`.copilot/topology.md\`;"
+    echo "for the authoritative child repo list see \`.repo-index.yml\`."
+    echo
+    echo "## Child repos"
+    echo
+    echo "| Repo | Role | Path | Specialist | Critic |"
+    echo "|------|------|------|-----------|--------|"
+    local i
+    for ((i=0; i<CHILD_COUNT; i++)); do
+      echo "| ${CHILD_NAMES[$i]} | ${CHILD_ROLES[$i]} | ${CHILD_LOCAL_PATHS[$i]} | \`${CHILD_NAMES[$i]}-specialist\` | \`${CHILD_NAMES[$i]}-critic\` |"
+    done
+    echo
+    echo "Specialist/critic agents live in each child repo under \`.github/agents/\` and run only inside"
+    echo "a child Copilot invocation (cwd = child repo)."
+    echo
+
+    echo "## Skills (parent \`.github/skills/\`)"
+    echo
+    local skills_dir="$TARGET_DIR/.github/skills" sk desc name
+    if [[ -d "$skills_dir" ]] && compgen -G "$skills_dir/*/SKILL.md" > /dev/null; then
+      for sk in "$skills_dir"/*/SKILL.md; do
+        name="$(basename "$(dirname "$sk")")"
+        desc="$(grep -m1 -E '^description:' "$sk" 2>/dev/null | sed 's/^description:[[:space:]]*//')"
+        desc="${desc%%. *}"
+        [[ -n "$desc" ]] && echo "- \`${name}\` — ${desc}" || echo "- \`${name}\`"
+      done
+    else
+      echo "- _(none installed for the parent)_"
+    fi
+    echo
+
+    echo "## Orchestrator agents (parent \`.github/agents/\`)"
+    echo
+    local agents_dir="$TARGET_DIR/.github/agents" ag
+    if [[ -d "$agents_dir" ]] && compgen -G "$agents_dir/*.agent.md" > /dev/null; then
+      for ag in "$agents_dir"/*.agent.md; do
+        echo "- \`$(basename "$ag" .agent.md)\`"
+      done
+    else
+      echo "- _(none)_"
+    fi
+    echo
+
+    echo "## MCP servers (\`.github/mcp.json\`)"
+    echo
+    local mcp_file="$TARGET_DIR/.github/mcp.json" server
+    if [[ "${ENABLE_MCP:-false}" == "true" && -f "$mcp_file" ]] && command -v python3 > /dev/null 2>&1; then
+      while IFS= read -r server; do
+        [[ -n "$server" ]] && echo "- \`${server}\`"
+      done < <(python3 -c "import json,sys; d=json.load(open('$mcp_file')); print('\n'.join(sorted((d.get('mcpServers') or d.get('servers') or {}).keys())))" 2>/dev/null)
+      echo
+      echo "See the \"MCP Tools\" table in \`.github/copilot-instructions.md\` for the tools each server exposes."
+    else
+      echo "- _(MCP disabled — dispatch/validation tools unavailable)_"
+    fi
+  } > "$out_file"
+}
+
 append_copilot_allow_urls() {
   local -n args_ref="$1"
   local allowlist="$TEMPLATE_DIR/copilot-allow-urls.txt"

@@ -266,6 +266,91 @@ class ChildAgentRunnerTests(unittest.TestCase):
             self.assertIn(str(project_dir / ".copilot" / "guardrails"), added_dirs)
             runner._release_lock(Path(setup["lock_file"]))
 
+    def _make_repo(self, temp_dir: str) -> Path:
+        project_dir = Path(temp_dir)
+        repo_dir = project_dir / "child"
+        (repo_dir / "work" / "todo").mkdir(parents=True)
+        (repo_dir / "work" / "todo" / "request.md").write_text("work", encoding="utf-8")
+        (project_dir / ".repo-index.yml").write_text(
+            "repos:\n  - name: child\n    role: backend\n    local_path: child\n",
+            encoding="utf-8",
+        )
+        return project_dir
+
+    def test_setup_assigns_session_id_and_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = self._make_repo(temp_dir)
+            with patch.dict(os.environ, {"PROJECT_DIR": str(project_dir)}):
+                setup = runner._resolve_job_setup("child", 60, 1000, "specialist")
+            self.assertTrue(setup["ok"])
+            session_id = setup["session_id"]
+            self.assertTrue(session_id)
+            self.assertFalse(setup["resumed_session"])
+            command = setup["command"]
+            self.assertIn("--session-id", command)
+            self.assertEqual(command[command.index("--session-id") + 1], session_id)
+            runner._release_lock(Path(setup["lock_file"]))
+
+    def test_setup_reuses_resume_session_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = self._make_repo(temp_dir)
+            with patch.dict(os.environ, {"PROJECT_DIR": str(project_dir)}):
+                setup = runner._resolve_job_setup("child", 60, 1000, "specialist", resume_session_id="prior-123")
+            self.assertEqual(setup["session_id"], "prior-123")
+            self.assertTrue(setup["resumed_session"])
+            runner._release_lock(Path(setup["lock_file"]))
+
+    def test_parse_child_result_status_line(self) -> None:
+        self.assertEqual(runner._parse_child_result("noise\nSTATUS: PASS\nmore")["verdict"], "PASS")
+        self.assertEqual(runner._parse_child_result("STATUS: blocked")["verdict"], "BLOCKED")
+        self.assertIsNone(runner._parse_child_result("no verdict here"))
+
+    def test_parse_child_result_json_block_wins(self) -> None:
+        output = (
+            "prose\n```json\n"
+            '{"verdict": "FAIL", "blocker": "tests red", "changed_commit": "abc123", "next_action": "fix"}\n'
+            "```\ntrailing STATUS: PASS"
+        )
+        result = runner._parse_child_result(output)
+        self.assertEqual(result["verdict"], "FAIL")
+        self.assertEqual(result["blocker"], "tests red")
+        self.assertEqual(result["changed_commit"], "abc123")
+        self.assertEqual(result["source"], "result_block")
+
+    def test_read_session_usage_sums_events(self) -> None:
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = Path(temp_dir) / "session-store.db"
+            con = sqlite3.connect(store)
+            con.execute(
+                "CREATE TABLE assistant_usage_events (session_id TEXT, input_tokens INT, output_tokens INT, "
+                "cache_read_tokens INT, cache_write_tokens INT, reasoning_tokens INT, total_nano_aiu INT)"
+            )
+            con.executemany(
+                "INSERT INTO assistant_usage_events VALUES (?,?,?,?,?,?,?)",
+                [("sess-A", 100, 10, 5, 1, 2, 500), ("sess-A", 200, 20, 0, 0, 3, 700), ("sess-B", 999, 9, 0, 0, 0, 9)],
+            )
+            con.commit()
+            con.close()
+            with patch.dict(os.environ, {"COPILOT_SESSION_STORE": str(store)}):
+                usage = runner._read_session_usage("sess-A")
+                self.assertEqual(usage["prompt_tokens"], 300)
+                self.assertEqual(usage["completion_tokens"], 30)
+                self.assertEqual(usage["total_tokens"], 330)
+                self.assertEqual(usage["total_nano_aiu"], 1200)
+                self.assertEqual(usage["usage_event_count"], 2)
+                self.assertIsNone(runner._read_session_usage("sess-missing"))
+
+    def test_tally_verdicts(self) -> None:
+        results = [
+            {"result": {"verdict": "PASS"}},
+            {"result": {"verdict": "FAIL"}},
+            {"status": "no_work"},
+        ]
+        tally = runner._tally_verdicts(results)
+        self.assertEqual(tally, {"PASS": 1, "FAIL": 1, "BLOCKED": 0, "none": 1})
+
 
 if __name__ == "__main__":
     unittest.main()
