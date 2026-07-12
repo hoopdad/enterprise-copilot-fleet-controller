@@ -31,6 +31,23 @@ Run this workflow only from the child repo root via a NEW Copilot CLI invocation
 > access, WAF `min_replicas=1`, non-AVM VNet) is NOT a FAIL when it matches the documented exception.
 > Anything outside the documented exceptions is a FAIL.
 
+## Final Output Contract (machine-readable)
+End your run with a `STATUS:` line and a fenced JSON `RESULT` block so the orchestrator's
+child-agent-runner can record the review verdict without parsing prose. Emit these LAST:
+
+```
+STATUS: PASS
+```
+
+```json
+{"verdict": "PASS", "evidence": "all hard gates met; moved request to work/done/", "blocker": null, "changed_commit": "<git short sha>", "next_action": "coordinator acceptance"}
+```
+
+- `PASS` — every hard gate met; request moved to `work/done/`.
+- `FAIL` — a hard gate failed; set `blocker` to the failing check. You have moved the request back to
+  `work/todo/` for the specialist.
+- `BLOCKED` — cannot review (missing evidence, unresolved dependency); set `blocker` and `next_action`.
+
 ## Anti-Patterns
 - Never implement feature code yourself unless the request explicitly requires critic-authored patching
 - Never approve without evidence (validation output or concrete checks)

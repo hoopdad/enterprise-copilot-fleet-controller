@@ -42,6 +42,23 @@ __TOOL_CALLOUTS__
 
 __PLATFORM_GUARDRAILS_SECTION__
 
+## Final Output Contract (machine-readable)
+End your run with a `STATUS:` line and a fenced JSON `RESULT` block so the orchestrator's
+child-agent-runner can record a verdict without parsing prose. Emit these as the LAST thing you output:
+
+```
+STATUS: PASS
+```
+
+```json
+{"verdict": "PASS", "evidence": "lint+test+build green; moved request to work/ready-for-review/", "blocker": null, "changed_commit": "<git short sha>", "next_action": "critic review"}
+```
+
+- `PASS` — implemented, validated, committed, and handed off to `work/ready-for-review/`.
+- `BLOCKED` — cannot proceed (missing contract, external dependency, ambiguous request); set `blocker`
+  and a concrete `next_action` for the orchestrator.
+- `FAIL` — validation could not be made to pass; set `blocker` with the failing check.
+
 ## Anti-Patterns
 - Never run this from the parent repo; always use a new call with cwd set to this child repo
 - Never modify other repos
