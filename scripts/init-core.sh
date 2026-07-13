@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRAMEWORK_DIR="${INIT_FRAMEWORK_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 TEMPLATE_DIR="$FRAMEWORK_DIR/templates/init"
 INIT_HELPERS_PY="$SCRIPT_DIR/init/helpers.py"
+INIT_ENVINFO_PY="$SCRIPT_DIR/init/envinfo.py"
 TARGET_DIR="$(pwd)"
 HARNESS_DIR="$TARGET_DIR"
 FRAMEWORK_VERSION="$(cat "$FRAMEWORK_DIR/VERSION" 2>/dev/null || echo "0.0.0")"
@@ -200,6 +201,9 @@ run_orchestration_preflight() {
   local failures=0
   local i repo_name repo_path repo_dir specialist_file critic_file path
   local has_repo_index_server has_child_runner_server has_usage_tracker_server
+  # OS-aware venv interpreter (POSIX: .venv/bin/python, Windows: .venv/Scripts/python.exe).
+  local venv_python
+  venv_python="$(framework_venv_python)"
 
   log "Running orchestration preflight checks..."
   log "Preflight debug: shell_cwd=$(pwd)"
@@ -214,8 +218,8 @@ run_orchestration_preflight() {
     warn "Missing required executable: git"
     failures=$((failures + 1))
   fi
-  if [[ "${ENABLE_MCP:-false}" == "true" && ! -x "$FRAMEWORK_DIR/.venv/bin/python" ]]; then
-    warn "Missing required MCP interpreter: $FRAMEWORK_DIR/.venv/bin/python"
+  if [[ "${ENABLE_MCP:-false}" == "true" && ! -x "$venv_python" ]]; then
+    warn "Missing required MCP interpreter: $venv_python"
     failures=$((failures + 1))
   fi
 
@@ -249,10 +253,10 @@ run_orchestration_preflight() {
     # Smoke-test critical MCP servers: confirm they import and register tools.
     # A version-incompatible dependency (e.g. pydantic too old for mcp) crashes
     # servers on the @mcp.tool() decorator, silently exposing zero tools.
-    if [[ -x "$FRAMEWORK_DIR/.venv/bin/python" ]]; then
+    if [[ -x "$venv_python" ]]; then
       while IFS=$'\t' read -r server_name server_command server_script; do
         [[ -z "$server_script" ]] && continue
-        if [[ "$server_command" != "$FRAMEWORK_DIR/.venv/bin/python" ]]; then
+        if [[ "$server_command" != "$venv_python" ]]; then
           warn "MCP server '$server_name' uses inconsistent interpreter: $server_command"
           failures=$((failures + 1))
           continue
@@ -265,7 +269,7 @@ run_orchestration_preflight() {
         else
           log "Preflight debug: mcp_server_startup ok=${server_script} interpreter=${server_command}"
         fi
-      done < <("$FRAMEWORK_DIR/.venv/bin/python" -c "
+      done < <("$venv_python" -c "
 import json, sys
 try:
     cfg = json.load(open('$MCP_CONFIG_FILE'))

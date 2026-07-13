@@ -64,12 +64,29 @@ append_template_file() {
   cat "$template_path" >> "$output_path"
 }
 
+# Resolve the venv interpreter path for the current OS via the single-source
+# envinfo module (POSIX: .venv/bin/python, Windows: .venv/Scripts/python.exe).
+framework_venv_python() {
+  local envinfo="${INIT_ENVINFO_PY:-$FRAMEWORK_DIR/scripts/init/envinfo.py}"
+  local py=""
+  command -v python3 >/dev/null 2>&1 && py="python3"
+  [[ -z "$py" ]] && command -v python >/dev/null 2>&1 && py="python"
+  if [[ -f "$envinfo" && -n "$py" ]]; then
+    "$py" "$envinfo" venv-python --framework-dir "$FRAMEWORK_DIR" 2>/dev/null && return 0
+  fi
+  # Fallback to POSIX layout if the helper is unavailable.
+  echo "$FRAMEWORK_DIR/.venv/bin/python"
+}
+
 write_mcp_config() {
   local output_path="$1"
+  local venv_python
+  venv_python="$(framework_venv_python)"
   TPL_FRAMEWORK_VERSION="$FRAMEWORK_VERSION" \
   TPL_FRAMEWORK_DIR="$FRAMEWORK_DIR" \
   TPL_TARGET_DIR="$TARGET_DIR" \
   TPL_PROJECT_NAME="$PROJECT_NAME" \
+  TPL_VENV_PYTHON="$venv_python" \
   write_from_template "mcp.json.tmpl" "$output_path"
 }
 

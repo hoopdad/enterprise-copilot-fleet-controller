@@ -517,7 +517,8 @@ if [[ -f "$PROJECT_DIR_MCP/.github/mcp.json" ]]; then
   assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "azure-resource-status"
   assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "git-pr-orchestrator"
   assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "usage quality/anomalies"
-  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "$FRAMEWORK_DIR/.venv/bin/python"
+  EXPECTED_VENV_PYTHON="$(python3 "$FRAMEWORK_DIR/scripts/init/envinfo.py" venv-python --framework-dir "$FRAMEWORK_DIR" 2>/dev/null || echo "$FRAMEWORK_DIR/.venv/bin/python")"
+  assert_file_contains "$PROJECT_DIR_MCP/.github/mcp.json" "$EXPECTED_VENV_PYTHON"
   TESTS_RUN=$((TESTS_RUN + 1))
   if python3 - <<PYEOF
 import json, pathlib

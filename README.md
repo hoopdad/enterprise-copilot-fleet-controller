@@ -131,13 +131,61 @@ cd ~/projects/existing-project
 python3 ../enterprise-copilot-fleet-controller/scripts/init.py --config init.yml
 bash ../enterprise-copilot-fleet-controller/scripts/init-core.sh --config init.yml
 
+# Windows / PowerShell (delegates to the same engine via Git Bash):
+..\enterprise-copilot-fleet-controller\scripts\init.ps1 --config init.yml
+
 # Upgrade from v1.x:
 cd ~/projects/my-app
-../enterprise-copilot-fleet-controller/scripts/upgrade.sh
+../enterprise-copilot-fleet-controller/scripts/upgrade.sh          # bash
+..\enterprise-copilot-fleet-controller\scripts\upgrade.ps1         # PowerShell
 
 # Preview upgrade without applying:
 ../enterprise-copilot-fleet-controller/scripts/upgrade.sh --dry-run
 ```
+
+## Cross-platform (bash + PowerShell)
+
+The framework runs on **Linux/macOS (bash)** and **Windows (PowerShell)**. Shared logic lives in
+Python (`scripts/init/envinfo.py` is the single source for host/venv detection), and each bash
+entrypoint has a `.ps1` sibling that detects the environment and delegates to the same engine.
+
+| Task | bash | PowerShell |
+|------|------|-----------|
+| Install / bootstrap venv | `scripts/setup.sh` | `scripts\setup.ps1` |
+| Initialize a project | `scripts/init.sh` | `scripts\init.ps1` |
+| Upgrade a project | `scripts/upgrade.sh` | `scripts\upgrade.ps1` |
+| Adapt a cloned project | `scripts/adapt-env.sh` | `scripts\adapt-env.ps1` |
+
+**One-time setup** (either OS) creates `.venv` with the correct interpreter layout
+(`.venv/bin/python` on POSIX, `.venv/Scripts/python.exe` on Windows) and installs the MCP deps:
+
+```bash
+python scripts/setup.py            # or scripts/setup.sh / scripts\setup.ps1
+```
+
+Generated `.github/mcp.json` files always reference the venv interpreter for the OS they were
+generated on.
+
+### Cloning a project across OSes (the `adapt-env` fixup)
+
+A project initialized on Linux stores absolute, Linux-style interpreter paths in its
+`.github/mcp.json` (e.g. `.venv/bin/python`). When that project is cloned onto Windows, run
+**one** script to re-root every MCP server entry at the local framework checkout and this OS's
+interpreter (`.venv/Scripts/python.exe`) — parent and child repos alike:
+
+```powershell
+# From the cloned project root (Windows/PowerShell):
+..\enterprise-copilot-fleet-controller\scripts\adapt-env.ps1
+
+# ...or bash, or directly:
+python ../enterprise-copilot-fleet-controller/scripts/adapt-env.py --project-dir .
+```
+
+`adapt-env` is idempotent, supports `--dry-run` and `--check` (non-zero exit if anything is stale,
+handy in CI), and matches framework tool paths by their `tools/<name>/server.py` suffix so the old
+absolute path and OS separators don't matter. On Windows the init engine still runs through
+**Git Bash** (Git for Windows); set the `FLEET_BASH` environment variable to point at a specific
+`bash.exe` if it isn't auto-detected.
 
 ## After Init
 
@@ -352,15 +400,26 @@ Tools handle mechanics so the LLM can focus on intelligence. MCP is opt-in (`pro
 
 ### Prerequisites
 
+Bootstrap the virtual environment on either OS (creates `.venv` with the correct interpreter
+layout and installs the tool dependencies):
+
+```bash
+python scripts/setup.py            # bash: scripts/setup.sh | PowerShell: scripts\setup.ps1
+```
+
+This is equivalent to, on POSIX:
+
 ```bash
 python3 -m venv enterprise-copilot-fleet-controller/.venv
 enterprise-copilot-fleet-controller/.venv/bin/python -m pip install \
   -r enterprise-copilot-fleet-controller/tools/requirements.txt
 ```
 
-Generated MCP launch configuration uses this virtual environment explicitly.
-Do not replace its interpreter with bare `python3`; user-site packages can be
-incompatible with the framework's pinned MCP dependencies.
+Generated MCP launch configuration uses this virtual environment explicitly (`.venv/bin/python`
+on POSIX, `.venv/Scripts/python.exe` on Windows). Do not replace its interpreter with bare
+`python3`; user-site packages can be incompatible with the framework's pinned MCP dependencies.
+If you clone a project that was initialized on a different OS, run `scripts/adapt-env.py` once to
+re-point its `.github/mcp.json` files at this environment.
 
 ## Versioning & Upgrades
 

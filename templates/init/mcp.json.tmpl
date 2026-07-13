@@ -3,13 +3,13 @@
   "mcpServers": {
     "repo-index": {
       "description": "Validate and inspect external child-repo references from .repo-index.yml.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/repo-index/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "child-agent-runner": {
       "description": "Spawn scoped child-repo Copilot runs for one queued work/todo item.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/child-agent-runner/server.py"],
       "env": {
         "PROJECT_DIR": "__TARGET_DIR__",
@@ -18,85 +18,85 @@
     },
     "contract-compliance": {
       "description": "Compare implemented routes to .contracts/*.yml endpoint definitions.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/contract-compliance/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "scaffold-generator": {
       "description": "Generate non-overwriting FastAPI/TypeScript stubs from contracts.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/scaffold-generator/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "azure-inspector": {
       "description": "Read Container Apps, Cosmos DB, and ACR state via Azure CLI.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/azure-inspector/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "container-app-diagnostics": {
       "description": "Deep troubleshooting for Container Apps — diagnose activation failures, pull logs, inspect revisions/replicas, verify image pulls, compare app configs.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/container-app-diagnostics/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "azure-resource-status": {
       "description": "Inventory Azure resources and inspect status/error events for troubleshooting.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/azure-resource-status/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "ci-monitor": {
       "description": "Summarize recent GitHub Actions runs and key failure hints.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/ci-monitor/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "deploy-verifier": {
       "description": "Probe service endpoints like /health and /version after deploy.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/deploy-verifier/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "deploy-local": {
       "description": "Deploy __PROJECT_NAME__ services locally via azd and custom scripts (no GitHub Actions).",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/deploy-local/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "quick-deploy": {
       "description": "Commit, build image, deploy container app, and verify health for a single service in one call.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/quick-deploy/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "security-scanner": {
       "description": "Run available scanners and normalize findings into one report.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/security-scanner/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "lint-local": {
       "description": "Run safe local lint commands (ruff/eslint/golangci-lint/shellcheck).",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/lint-local/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "terraform-local": {
       "description": "Run deterministic local terraform fmt/init/validate/plan checks.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/terraform-local/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     },
     "usage-tracker": {
       "description": "Append usage events, summarize recent workflow activity, and report usage quality/anomalies.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/usage-tracker/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__", "PROJECT_NAME": "__PROJECT_NAME__" }
     },
     "git-pr-orchestrator": {
       "description": "Automate multi-repo releases: commit → push → PR → CI monitor → auto-merge.",
-      "command": "__FRAMEWORK_DIR__/.venv/bin/python",
+      "command": "__VENV_PYTHON__",
       "args": ["__FRAMEWORK_DIR__/tools/git-pr-orchestrator/server.py"],
       "env": { "PROJECT_DIR": "__TARGET_DIR__" }
     }

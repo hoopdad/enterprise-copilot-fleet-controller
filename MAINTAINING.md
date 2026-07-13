@@ -5,6 +5,9 @@
 | Task | Command |
 |------|---------|
 | Bump version manually | `scripts/bump-version.sh [major\|minor\|patch]` |
+| Bootstrap venv (any OS) | `python scripts/setup.py` (bash: `scripts/setup.sh`, PowerShell: `scripts\setup.ps1`) |
+| Adapt a cloned project's mcp.json | `python scripts/adapt-env.py --project-dir <proj>` |
+| Host/venv detection facts | `python scripts/init/envinfo.py detect` |
 | Test init on a new project | `cd ./scratch/test && ../enterprise-copilot-fleet-controller/scripts/init.sh --config init.yml` |
 | Test upgrade path | `scripts/upgrade.sh --dry-run` (from a project dir) |
 | Run integration tests | `bash tests/test-init.sh` |
@@ -39,14 +42,17 @@ If your change affects what `init.sh` generates into projects (.github/agents/*.
 ## When You Add/Change MCP Tools
 
 1. Update/create `tools/<name>/server.py`
-2. Update `templates/init/mcp.json.tmpl`
+2. Update `templates/init/mcp.json.tmpl` — new server entries must use `"command": "__VENV_PYTHON__"` (the OS-aware interpreter placeholder) and `__FRAMEWORK_DIR__/tools/<name>/server.py` for args
 3. Update the `tools_for_role()` function in `scripts/init-core.sh` if the tool should be scoped
 4. Update `tools/README.md`
 5. If adding a new tool, this is a **MINOR** bump (existing projects need migration to get new mcp.json entry)
 
-MCP servers must be launched with `.venv/bin/python`, including preflight and
-smoke tests. Bare `python3` may load incompatible user-site dependencies.
-Child processes spawned by MCP servers must set `stdin=subprocess.DEVNULL`;
+MCP servers must be launched with the framework venv interpreter (`.venv/bin/python` on
+POSIX, `.venv/Scripts/python.exe` on Windows), including preflight and smoke tests. Resolve
+it via the single source `scripts/init/envinfo.py` (`venv-python`) rather than hardcoding the
+path, so bash, PowerShell, and generated `mcp.json` never drift. Bare `python3` may load
+incompatible user-site dependencies. Child processes spawned by MCP servers must set
+`stdin=subprocess.DEVNULL`;
 inheriting stdio can consume or hold open the JSON-RPC transport.
 
 ## When You Add/Change Skills

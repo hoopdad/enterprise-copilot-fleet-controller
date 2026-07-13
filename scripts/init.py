@@ -12,6 +12,59 @@ import tempfile
 from pathlib import Path
 
 
+def resolve_bash() -> str:
+    """Locate a bash interpreter suitable for running the shell engine.
+
+    The engine uses Windows-style framework paths (e.g. ``C:/...``). Git Bash
+    (MSYS2) accepts those directly, whereas WSL bash sees ``/mnt/c`` and would
+    mistranslate them. So on Windows we prefer Git Bash and only fall back to a
+    generic ``bash`` on PATH (which may be WSL) with a warning.
+    """
+    if os.name != "nt":
+        return "bash"
+
+    def _is_wsl_launcher(path: str) -> bool:
+        # System32\bash.exe and the WindowsApps Store alias both launch WSL,
+        # which sees Windows paths as /mnt/c and mistranslates them.
+        low = path.lower()
+        return "system32" in low or "windowsapps" in low
+
+    # Prefer a real Git Bash (MSYS2) install, which accepts C:/ paths directly.
+    explicit = [
+        os.environ.get("FLEET_BASH", ""),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Git\bin\bash.exe"),
+    ]
+    for candidate in explicit:
+        if candidate and Path(candidate).exists() and not _is_wsl_launcher(candidate):
+            return candidate
+
+    # Derive Git Bash from a git.exe on PATH (…\Git\cmd\git.exe → …\Git\bin\bash.exe).
+    git_exe = shutil.which("git")
+    if git_exe:
+        git_bash = Path(git_exe).resolve().parents[1] / "bin" / "bash.exe"
+        if git_bash.exists():
+            return str(git_bash)
+
+    # Last resort: a bash on PATH that is not a WSL launcher.
+    on_path = shutil.which("bash.exe") or shutil.which("bash")
+    if on_path and not _is_wsl_launcher(on_path):
+        return on_path
+    if on_path:
+        print(
+            "WARNING: only a WSL bash launcher was found on PATH. The init engine uses Windows "
+            "paths that WSL mistranslates. Install Git for Windows (Git Bash) or set FLEET_BASH.",
+            file=sys.stderr,
+        )
+        return on_path
+    print(
+        "ERROR: no bash interpreter found. Install Git for Windows (Git Bash) or set FLEET_BASH.",
+        file=sys.stderr,
+    )
+    return "bash"
+
+
 def resolve_shell_engine() -> Path:
     script_dir = Path(__file__).resolve().parent
     return script_dir / "init-core.sh"
@@ -58,7 +111,7 @@ def run_shell_engine(args: argparse.Namespace) -> int:
     framework_dir = shell_engine.parent.parent
     snapshot_engine, snapshot_root = snapshot_shell_engine(shell_engine)
     try:
-        cmd = ["bash", str(snapshot_engine), "--start-phase", str(args.start_phase), "--end-phase", str(args.end_phase)]
+        cmd = [resolve_bash(), str(snapshot_engine), "--start-phase", str(args.start_phase), "--end-phase", str(args.end_phase)]
         if args.config:
             cmd.extend(["--config", args.config])
         if args.auto_delete:

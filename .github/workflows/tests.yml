@@ -28,6 +28,11 @@ jobs:
           find migrations/ -name "*.sh" -exec bash -n {} \;
           find tests/ -name "*.sh" -exec bash -n {} \;
 
+      - name: Verify env-detection / adapt-env unit tests
+        run: |
+          .venv/bin/python -m pip install pytest
+          .venv/bin/python -m pytest tests/test_env_adapt.py -q
+
       - name: Run init/upgrade integration tests
         run: bash tests/test-init.sh
 
