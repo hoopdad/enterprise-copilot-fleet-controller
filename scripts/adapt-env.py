@@ -18,18 +18,25 @@ Usage::
 
     python scripts/adapt-env.py                 # fix ./.github/mcp.json (+ children)
     python scripts/adapt-env.py --project-dir /path/to/project
+    python scripts/adapt-env.py --commit        # fix, then commit each repo
     python scripts/adapt-env.py --dry-run       # show changes, write nothing
     python scripts/adapt-env.py --check         # exit 1 if anything would change
 
 The re-rooting matches each server-script argument by its ``tools/<name>/...``
 suffix, so it works regardless of the old absolute path or OS separators.
+
+Parent and child repos are *separate* git repositories. Writing the files is not
+enough — each repo must be committed on its own. Pass ``--commit`` to do this, or
+heed the per-repo reminder printed after a plain run.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "init"))
@@ -39,6 +46,26 @@ from envinfo import venv_python  # noqa: E402
 def _framework_dir() -> Path:
     # adapt-env.py lives at <framework>/scripts/adapt-env.py
     return Path(__file__).resolve().parents[1]
+
+
+def _git_toplevel(path: Path) -> Path | None:
+    """Return the git repository root that contains ``path``, or None.
+
+    Child repos in a fleet-controller project are *separate* git repositories, so
+    a commit in the parent repo does NOT capture changes written into a child's
+    ``.github/mcp.json``. This lets us group written files by their owning repo.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    top = out.stdout.strip()
+    return Path(top).resolve() if top else None
 
 
 def _reroot_tool_arg(arg: str, framework_dir: Path) -> str:
@@ -130,6 +157,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Show changes but do not write")
     parser.add_argument("--check", action="store_true", help="Exit non-zero if anything would change (implies dry-run)")
     parser.add_argument("--no-children", action="store_true", help="Do not adapt child-repo mcp.json files")
+    parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="git-commit each written mcp.json in its OWN repo (parent and each child are separate repos)",
+    )
     args = parser.parse_args(argv)
 
     framework_dir = (args.framework_dir or _framework_dir()).resolve()
@@ -154,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     print("")
 
     any_changed = False
+    written: list[Path] = []
     for cfg_path, proj in targets:
         try:
             new_cfg, changed = adapt_mcp_config(cfg_path, framework_dir, proj, interpreter)
@@ -167,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  [would update] {rel}")
             else:
                 cfg_path.write_text(json.dumps(new_cfg, indent=2) + "\n", encoding="utf-8")
+                written.append(cfg_path)
                 print(f"  [updated] {rel}")
         else:
             print(f"  [ok] {rel}")
@@ -176,9 +210,63 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if not any_changed:
         print("\nAll MCP configs already match this environment.")
-    elif not dry_run:
-        print("\nDone. MCP servers now point at this framework + this OS interpreter.")
+        return 0
+    if dry_run:
+        return 0
+
+    print("\nDone. MCP servers now point at this framework + this OS interpreter.")
+    _finalize_written(written, commit=args.commit)
     return 0
+
+
+def _finalize_written(written: list[Path], commit: bool) -> None:
+    """Commit each written mcp.json in its own repo, or remind the operator to.
+
+    Child repos are independent git repositories, so a single parent-repo commit
+    never captures their changes. Without this, adapting an environment leaves
+    child mcp.json files modified-but-uncommitted, which looks like "nothing was
+    updated" once the working tree is inspected or reset.
+    """
+    if not written:
+        return
+
+    by_repo: dict[Path | None, list[Path]] = defaultdict(list)
+    for path in written:
+        by_repo[_git_toplevel(path)].append(path)
+
+    tracked = {repo: paths for repo, paths in by_repo.items() if repo is not None}
+    untracked = by_repo.get(None, [])
+
+    if commit:
+        print("\nCommitting mcp.json changes (one commit per repo):")
+        for repo, paths in tracked.items():
+            rels = [str(p.relative_to(repo)) for p in paths]
+            try:
+                subprocess.run(["git", "-C", str(repo), "add", *rels], check=True)
+                subprocess.run(
+                    ["git", "-C", str(repo), "commit", "-m", "chore: adapt mcp.json to host environment"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                print(f"  [committed] {repo} ({len(rels)} file(s))")
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or str(exc)).strip()
+                print(f"  [commit failed] {repo}: {detail}")
+        for path in untracked:
+            print(f"  [skipped, not a git repo] {path}")
+        return
+
+    print(
+        "\nNOTE: these files are modified but NOT committed. Parent and each child are\n"
+        "SEPARATE git repositories, so they must be committed individually. Re-run with\n"
+        "--commit to do this automatically, or commit each repo below:"
+    )
+    for repo, paths in tracked.items():
+        rels = " ".join(str(p.relative_to(repo)) for p in paths)
+        print(f"  git -C {repo} add {rels} && git -C {repo} commit -m 'chore: adapt mcp.json to host environment'")
+    for path in untracked:
+        print(f"  [not a git repo] {path}")
 
 
 if __name__ == "__main__":

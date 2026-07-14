@@ -22,7 +22,9 @@ command -v python3 >/dev/null 2>&1 && PY="python3"
 ADAPT="$FRAMEWORK_DIR/scripts/adapt-env.py"
 if [[ -n "$PY" && -f "$ADAPT" && -f "$PROJECT_DIR/.github/mcp.json" ]]; then
   info "adapting .github/mcp.json to this environment (framework + OS interpreter)"
-  "$PY" "$ADAPT" --project-dir "$PROJECT_DIR" --framework-dir "$FRAMEWORK_DIR" || \
+  # --commit: parent and each child are separate git repos, so a later parent-only
+  # upgrade commit would leave child mcp.json changes uncommitted. Commit each here.
+  "$PY" "$ADAPT" --project-dir "$PROJECT_DIR" --framework-dir "$FRAMEWORK_DIR" --commit || \
     info "adapt-env reported an issue; review .github/mcp.json manually"
 else
   info "skipped mcp.json adapt (no Python or no mcp.json present)"
