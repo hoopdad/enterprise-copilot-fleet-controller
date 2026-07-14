@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import re
-import select
 import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -276,9 +277,38 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
+_IS_WINDOWS = os.name == "nt"
+_SIGTERM = signal.SIGTERM
+_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
+
+def _win_pid_alive(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _is_pid_alive(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
+    if _IS_WINDOWS:
+        try:
+            return _win_pid_alive(int(pid))
+        except Exception:
+            return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -292,6 +322,19 @@ def _signal_process(pid: int | None, sig: signal.Signals) -> bool:
     if not _is_pid_alive(pid):
         return False
     assert pid is not None
+    if _IS_WINDOWS:
+        # Windows has no POSIX process groups/signals; terminate the whole child
+        # process tree by PID (equivalent intent to killpg on POSIX).
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return True
+        except Exception:
+            return False
     try:
         # Runner workers and Copilot children are launched with start_new_session=True.
         # Only signal the process group when the saved PID is its leader.
@@ -304,6 +347,71 @@ def _signal_process(pid: int | None, sig: signal.Signals) -> bool:
         return False
     except PermissionError:
         return False
+
+
+def _spawn_output_readers(
+    proc: subprocess.Popen,
+) -> tuple["queue.Queue[tuple[str, str | None]]", list[threading.Thread]]:
+    """Read stdout/stderr on background threads (cross-platform; no POSIX select())."""
+    out_q: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
+
+    def _reader(stream: Any, name: str) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                out_q.put((name, line))
+        except Exception:
+            pass
+        finally:
+            out_q.put((name, None))
+
+    readers: list[threading.Thread] = []
+    for stream, name in ((proc.stdout, "stdout"), (proc.stderr, "stderr")):
+        if stream is not None:
+            thread = threading.Thread(target=_reader, args=(stream, name), daemon=True)
+            thread.start()
+            readers.append(thread)
+    return out_q, readers
+
+
+def _join_and_drain(
+    readers: list[threading.Thread],
+    out_q: "queue.Queue[tuple[str, str | None]]",
+    stdout_chunks: list[str],
+    stderr_chunks: list[str],
+) -> None:
+    for thread in readers:
+        thread.join(timeout=5.0)
+    while True:
+        try:
+            name, line = out_q.get_nowait()
+        except queue.Empty:
+            break
+        if line is None:
+            continue
+        if name == "stdout":
+            stdout_chunks.append(line)
+        else:
+            stderr_chunks.append(line)
+
+
+def _kill_proc_tree(proc: subprocess.Popen, *, graceful: bool) -> None:
+    if proc.poll() is not None:
+        return
+    if graceful:
+        _signal_process(proc.pid, _SIGTERM)
+        try:
+            proc.wait(timeout=2)
+            return
+        except Exception:
+            pass
+    _signal_process(proc.pid, _SIGKILL)
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def _load_job(project_dir: Path, job_id: str) -> dict[str, Any] | None:
@@ -567,22 +675,16 @@ def _run_copilot_with_progress(
         last_step="spawned child copilot process",
     )
 
+    out_q, readers = _spawn_output_readers(proc)
+
     while True:
         now = time.monotonic()
         elapsed = int(now - start)
 
         cancel_requested, cancel_reason = _job_cancel_requested(project_dir, job_id)
         if cancel_requested:
-            _signal_process(proc.pid, signal.SIGTERM)
-            try:
-                tail_out, tail_err = proc.communicate(timeout=2)
-            except subprocess.TimeoutExpired:
-                _signal_process(proc.pid, signal.SIGKILL)
-                tail_out, tail_err = proc.communicate()
-            if tail_out:
-                stdout_chunks.append(tail_out)
-            if tail_err:
-                stderr_chunks.append(tail_err)
+            _kill_proc_tree(proc, graceful=True)
+            _join_and_drain(readers, out_q, stdout_chunks, stderr_chunks)
             error = {
                 "code": "JOB_CANCELLED",
                 "message": cancel_reason or "child-agent job was cancelled",
@@ -611,24 +713,26 @@ def _run_copilot_with_progress(
             )
             last_heartbeat = now
 
-        streams = [stream for stream in (proc.stdout, proc.stderr) if stream is not None]
-        ready: list[Any] = []
-        if streams:
-            ready, _, _ = select.select(streams, [], [], 1.0)
-        else:
-            time.sleep(1.0)
-
+        # Drain child output without POSIX-only select(); reader threads feed a
+        # queue. Block up to ~1s when idle so heartbeat/timeout cadence is kept.
         saw_output = False
-        for stream in ready:
-            line = stream.readline()
-            if line == "":
+        first = True
+        drained = 0
+        while drained < 500:
+            try:
+                name, line = out_q.get(timeout=1.0 if first else 0.0)
+            except queue.Empty:
+                break
+            first = False
+            if line is None:
                 continue
             saw_output = True
             last_output = time.monotonic()
-            if stream is proc.stdout:
+            if name == "stdout":
                 stdout_chunks.append(line)
             else:
                 stderr_chunks.append(line)
+            drained += 1
             step = _extract_progress_step(line)
             _update_job_progress(
                 project_dir,
@@ -644,11 +748,7 @@ def _run_copilot_with_progress(
 
         rc = proc.poll()
         if rc is not None:
-            tail_out, tail_err = proc.communicate()
-            if tail_out:
-                stdout_chunks.append(tail_out)
-            if tail_err:
-                stderr_chunks.append(tail_err)
+            _join_and_drain(readers, out_q, stdout_chunks, stderr_chunks)
             _update_job_progress(
                 project_dir,
                 job_id,
@@ -686,21 +786,8 @@ def _run_copilot_with_progress(
                 continue
 
         if elapsed >= current_timeout:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-            try:
-                tail_out, tail_err = proc.communicate(timeout=2)
-            except Exception:
-                tail_out, tail_err = "", ""
-            if tail_out:
-                stdout_chunks.append(tail_out)
-            if tail_err:
-                stderr_chunks.append(tail_err)
+            _kill_proc_tree(proc, graceful=False)
+            _join_and_drain(readers, out_q, stdout_chunks, stderr_chunks)
             error = {
                 "code": "COPILOT_TIMEOUT",
                 "message": f"copilot timed out after {current_timeout}s",
@@ -1726,7 +1813,7 @@ def _stop_job_core(
 
     copilot_pid = int(job.get("copilot_pid") or 0)
     worker_pid = int(job.get("worker_pid") or 0)
-    signalled = _signal_process(copilot_pid, signal.SIGKILL if force else signal.SIGTERM)
+    signalled = _signal_process(copilot_pid, _SIGKILL if force else _SIGTERM)
 
     deadline = time.monotonic() + (0 if force else grace_seconds)
     while time.monotonic() < deadline:
@@ -1744,9 +1831,9 @@ def _stop_job_core(
             }
 
     if _is_pid_alive(copilot_pid):
-        signalled = _signal_process(copilot_pid, signal.SIGKILL) or signalled
+        signalled = _signal_process(copilot_pid, _SIGKILL) or signalled
     if _is_pid_alive(worker_pid):
-        signalled = _signal_process(worker_pid, signal.SIGKILL) or signalled
+        signalled = _signal_process(worker_pid, _SIGKILL) or signalled
 
     current = _load_job(project_dir, job_id) or job
     current["status"] = "cancelled"
