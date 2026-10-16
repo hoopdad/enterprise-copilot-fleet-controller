@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "projectRoot": ".",
+  "input": { "kind": "brownfield", "path": "src", "goal": "Add the requested feature to this legacy implementation without changing existing interfaces" },
+  "scope": ["src", "test", "scripts/delivery"],
+  "generatedPaths": ["dist"],
+  "acceptance": ["Characterize existing behavior before changing it", "Add the requested feature with focused regression tests", "All existing tests continue to pass"],
+  "attempts": { "planning": 2, "implementation": 2, "repair": 1 },
+  "execution": {
+    "authorized": true,
+    "acknowledgement": "I reviewed these commands and authorize local execution",
+    "shareDiagnostics": true,
+    "diagnosticsAcknowledgement": "I authorize redacted diagnostics to be shared with workflow agents"
+  },
+  "commands": {
+    "baseline": [{ "executable": "node", "args": ["--test"], "cwd": ".", "timeoutMs": 120000 }],
+    "test": [{ "executable": "node", "args": ["--test"], "cwd": ".", "timeoutMs": 120000 }],
+    "build": [{ "executable": "node", "args": ["scripts/build.mjs"], "cwd": ".", "timeoutMs": 120000 }]
+  },
+  "deployment": {
+    "mode": "nonproduction",
+    "environment": "test",
+    "target": "existing-legacy-test-target",
+    "acceptance": ["Test target serves the exact built revision and both existing and new feature smoke checks pass"],
+    "authorized": true,
+    "idempotent": true,
+    "allowedExecutables": ["node"]
+  }
+}
