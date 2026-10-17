@@ -13,6 +13,7 @@ owner-and-reviewer loops into executable gates. See [RESEARCH.md](RESEARCH.md) f
 the source analysis, role mapping, references, and preview limitations.
 
 **Start here: [PowerShell quickstart — four copy-and-paste steps](QUICKSTART.md).**
+**Ask Copilot to install it: [copy/paste installation prompt and manual Windows equivalent](QUICKSTART.md#copypaste-installation-prompt-for-github-copilot).**
 Bring an existing project, specification, working baseline/test/build toolchain,
 and an authorized existing nonproduction target; these are not sample applications.
 
@@ -316,3 +317,242 @@ projects, migrations, or the parent/child queue protocol. Existing generated fle
 projects must continue using their MCP child-agent runner, scoped tools, and
 predeploy gate; do not use this extension to bypass those controls. Invoke their
 approved deployment scripts rather than replacing the framework's gate.
+
+## Opt-in companion: lab-delivery
+
+`lab-delivery` is a **separate, explicitly authorized Azure nonproduction
+profile**, not a change to the `autonomous-delivery` behavior described above.
+It adds declared multi-repository roots, independent capability grants, all
+13 release/sprint role loops, and reviewed deterministic scripts executed by
+operation agents through admitted tickets.
+
+Read [LAB-DESIGN.md](LAB-DESIGN.md), the exact input/native execution
+[LAB-CONTRACT.md](LAB-CONTRACT.md), and the
+[companion quickstart](QUICKSTART.md#optional-lab-delivery-companion) before opting in.
+[examples/lab.json](examples/lab.json) is a **placeholder input template**, not a
+runnable sample app. Its default is local-only with provisioning, provider
+registration, publication, repository creation, and paid model tests all disabled.
+It still needs actual Azure identity/topology observations and working local
+scripts; it does not simulate a cloud environment.
+
+### Adoption and installation
+
+The same standalone installer now also places `lab-policy.mjs`,
+`lab-executor.mjs`, `lab-loops.mjs`, `lab-workflow.mjs`, `lab-scratch.mjs`,
+`lab-preflight.mjs`, `LAB-CONTRACT.md`, and
+`LAB-DESIGN.md` alongside the original modules, and installs `lab-reader`,
+`lab-author`, and `lab-operator` under `.github\agents`.
+The existing extension registers both workflows; installation/loading does not
+authorize or execute lab delivery. Every destination is preflighted before copying:
+existing files and symlink destinations are refused, including the new profiles.
+Existing instructions are never overwritten.
+
+Install only into a separate project. Repeat installation deliberately fails
+without overwriting files; it is not an upgrade command. Review/back up installed
+files and deliberately replace the relevant modules/profiles when upgrading.
+Version/input changes need fresh journal identity after pending effects have been
+reconciled; do not delete old journals or steal a lease to bypass unresolved work.
+No generated fleet templates, version markers, or migrations are changed.
+
+An owner must **explicitly opt into direct SDK lab dispatch** when adopting this
+execution model in a project that requires MCP child queues. The extension cannot
+automatically override those instructions. If there is no such authority, stop
+and use the existing fleet workflow.
+
+### Authority and execution
+
+Select read/write/create repositories and exact write scopes. Roots can be
+siblings but must be nonlinked and disjoint. Declare `bootstrapPaths`,
+`documentationPaths` (exact Markdown files), `maxSprints`, and all four
+`attempts` budgets, including `recovery`. Preserve unrelated and initially dirty
+work. Full tracked/nonignored source monitoring is default; shared writable roots
+may explicitly choose dependency-scoped `sourceScope`/`instructionPaths`, while
+keeping all assigned paths, instructions, specification, scripts, and dependencies
+monitored.
+Narrow read monitoring/dependency declarations may use an immediate `infra/*.tf`
+selector: membership and file bytes are pinned, so additions invalidate identity.
+No recursive globs or wildcard write scopes are allowed. Public SSH keys may be
+monitored; private keys, state, secrets, and authentication material stay excluded.
+
+Choose **independent** boolean grants for provisioning, provider registration,
+publication, repository creation, and paid model tests. Deployment is separately
+selected through `target.deploy`. Public and private publication both require
+exact owner/name/visibility/branch and create/tag policy. Local-only completion is
+valid when the target does not require publication; it returns `built`, not a
+cloud claim. Production, destructive changes, access/credential changes, quota
+requests, and trust bypass are not authorized.
+The sole optional IAM exception is the independently granted, exact runtime
+identity-to-model assignment described below; provisioning alone never grants it.
+
+Publication has a mandatory reviewed two-step artifact:
+`{prepare:{command,reconcile},command,reconcile}`. Prepare creates only a task-scoped
+**local commit**, without pushing or creating a remote. The coordinator
+deterministically checks committed paths before admitting the publish command.
+Preserve unrelated staged index entries through explicit path-only commits or an
+isolated index. Initially dirty paths require explicit
+`publication.includeInitialDirtyPaths` authority (default `[]`), even when they are
+inside writable scope. The later push/remote creation remains limited by the exact
+public/private target and independent creation grant.
+
+Existing shared infrastructure additionally needs monitored owner-contract bytes
+with exact `sourcePaths`, `addressPrefixes`, `resourceTypes`, `actions`,
+`stateOwner`, `subscriptionId`, and `tenantId`. Native plan checks enforce resource
+type and actual resource location against the admitted owner; a matching region or
+address prefix alone does not authorize arbitrary resources.
+
+`terraformPolicy` separates requirement from preference. The default
+`{requirement:"any",preference:"avm"}` permits any valid Terraform; AVM is preferred,
+**not enforced**. Only explicit `requirement:"avm"` makes it mandatory.
+Architecture and every Release Plan/revision artifact preserve the exact policy.
+Provisioning also requires a monitored nonsecret `infrastructureProfile` JSON
+reference containing `{policy:{...},metadata:{...}}`. `policy` holds immutable
+adopter-approved rules/limits/types/IDs; intake identity pins it as
+`infrastructureCeiling`. Source authoring/resume cannot enlarge those approvals.
+`metadata` is separately finalizable registry state, not the intake permission
+ceiling. After implementation/build, snapshot
+`{terraform,profile:{repository,path,sha256},rules:profile.policy,
+metadata:profile.metadata,ownerContracts}` and independently review the exact
+policy/adapter/build identity before admission. Reserved-to-finalized metadata
+changes within unchanged rules are valid; resume uses the frozen accepted
+snapshot, not an earlier reservation or replacement permissions.
+
+### Optional identity-before-post-provision ordering
+
+`deploymentOrder` defaults to `"provision-first"`; existing delivery ordering is
+unchanged. Opt-in `"identity-before-post-provision"` permits a monotonic ordered
+stage list with `phase:"before-deploy"` (default) followed by `phase:"after-deploy"`.
+The sequence is pre-provision -> deploy and positively reconcile physical identity
+-> pin its actual native receipt -> post-provision Terraform -> verify/smoke/model.
+It avoids demanding model access before the deployment's identity exists.
+
+Post-stage context adds `phase` and
+`runtimeIdentity:{identity,operationId,receipt,path,evidenceHash,binding}`.
+Deployment reconciliation returns actual
+`runtimeIdentity:{principalId,resourceId,tenantId,subscriptionId,evidence}`;
+`principalId` is a GUID. Canonical guards echo `runtimeIdentityHash` from the pinned
+receipt's `evidenceHash`. Before dependent effects/resume, a fresh read-only
+observer checks the **original** deployment and identity. Principal drift blocks;
+never redeploy or retarget to manufacture matching identity.
+
+`authorization.runtimeIdentityModelAccess:true` is a separate narrow exception,
+requiring provisioning, deployment, opt-in ordering, and immutable
+`infrastructureProfile.policy.runtimeIdentityModelAccess` with exact
+`deploymentResourceId` plus `assignments:[{scope,roleDefinitionId}]`.
+Every scope is an exact model ARM resource in the authorized subscription and
+every role is a full exact role-definition UUID ARM ID. Only known AzureRM/AzAPI
+role-assignment **creates** for the observed principal, exact scope/role, and
+`ServicePrincipal` are allowed—no updates, condition/delegation properties, or
+other IAM authority. The guard additionally needs
+`checks.runtimeIdentityModelAccess:{pass:true,evidence:[actual refs]}`.
+Source/build freeze, saved-plan admission, positive reconciliation, and no-replay
+rules remain in force; opting into ordering alone grants no model/IAM permission.
+
+Stage-specific roles share only these profiles:
+
+* `lab-reader`: `read`, `search`; planners and independent reviewers.
+* `lab-author`: `read`, `search`, `edit`; scoped source/docs, DevOps operational
+  scripts, and Git Publisher publication scripts. No terminal/executor.
+* `lab-operator`: `read`, `search`, `lab_execute_ticket` only; the responsible
+  operation agent executes one admitted ticket, without raw terminal or edits.
+
+The coordinator freezes exact native script/dependency bytes, source/build,
+arguments, target, stage order, and saved-plan identities. Independent reviewers
+inspect actual bytes before admission. Tickets are single-use; mutation intent
+is durably recorded **before** spawning. The coordinator consumes actual persisted
+native receipts rather than agent summaries. Tool profiles and application checks
+are **not an OS sandbox**; trusted scripts run with local process permissions.
+
+Architecture, UX, Release Plan, Sprint Design, Sprint Architecture, Sprint Plan,
+UI Work, Developer Work, End-to-End Test, DevOps Work, Sprint Review, Retrospective,
+and Release Closeout retain their full independent owner/reviewer sets.
+Each sprint has separate source/build freeze and delivery. Every required reviewer
+must PASS; a Stakeholder agent is not human signoff.
+
+Sprint Review returns
+`{coverage,backlog:[{id,requirementIds,description,blocking}],resolvedBacklogIds?:[]}`.
+Blocked criterion coverage is allowed there only with a matching blocking,
+in-scope correction and actual evidence; it is not final release acceptance.
+Unknown/new goals are deferred. Open in-scope blocking corrections trigger an
+independently reviewed Release Plan revision that preserves the completed sprint
+prefix/order and assigns every correction's ID via `backlogIds` to remaining
+sprints within the user's `maxSprints`. An exhausted bound blocks. Retrospective
+returns reviewed improvements, and the next sprint's design, architecture, and
+plan actually consume retained backlog/improvements. Resolution requires retained
+IDs and actual evidence; closeout still requires every criterion verified.
+
+### Evidence, recovery, and validation boundaries
+
+Bootstrap observes exact identity -> authorized providers -> relevant numeric model
+capacity -> complete topology -> actual baseline. Ordered provisioning stages
+plan only after prior positive application/reconciliation. Apply consumes saved,
+reviewed native plan bytes; it never replans. Late-bound origins/evidence stay
+ignored and bind actual HTTPS origin, source/build/revision, target, and stage.
+Local tests, native plans, applied state, live revision, scripted product
+acceptance, browser acceptance, and paid model acceptance remain separate claims.
+
+Canonical saved-plan guards are version 2, bind the accepted policy and every
+plan-stage identity, and provide actual evidence for resource semantics, parent/
+remote IDs, permitted properties, dependency closure, cumulative scope, Terraform
+policy, and accepted metadata. Reviewed canonical helpers check actual AzureRM/
+AzAPI ARM semantics; the generic engine retains destructive/action/address/owner
+bounds without imposing provider identity. Cross-region read/no-op inputs are
+allowed. The engine independently checks the sorted unique cumulative
+`stateOwner:Terraform-address` create/update union across prior stages/sprints.
+`DELIVERY_PLAN_CONTEXT` identifies private `{policy,policyIdentity,priorAdmissions}`
+JSON during provisioning and binds `planContext`; `DELIVERY_PLAN_EVIDENCE` remains the exact saved binary
+at apply, never the context file. All 20 approved native environment names,
+including run-owned `DELIVERY_EVIDENCE_DIRECTORY`, retain validation/filtering.
+
+Closeout README and release notes are local changes **after** the deployed freeze,
+not automatically published/deployed final documentation. Final closeout tests
+revalidate those changes. Results explicitly distinguish `documentationPublication`
+and `closeoutSourceFingerprint` from the earlier frozen delivery revision/build.
+
+Native scripts write actual bound PASS evidence to `DELIVERY_EVIDENCE_PATH`;
+zero exit or a local receipt is not cloud proof. Reconciliation distinguishes
+`completed`, positively `absent` with `safeToRetry:true`, and `unknown`.
+Unknown effects block and survive run completion/new run IDs in the workspace
+target ledger. Bounded read-only investigation and reviewed original-observer
+argument refinement do not authorize replaying a mutation.
+Resume retained original work before new authoring. The local workspace lease is
+not a distributed Azure lock; do not share a target/state across workspaces.
+
+### Optional standalone offline preflight
+
+Preflight is **explicit opt-in**, not an automatic workflow gate:
+
+```powershell
+node .\gh-dynamic-workflows\lab-preflight.mjs .\lab-input.json
+node .\gh-dynamic-workflows\lab-preflight.mjs .\lab-input.json --resume RUN-ID
+```
+
+It uses local input/root/inventory/scratch checks and shared retained-plan resume
+integrity validation, without framework agents, model calls, or cloud operations.
+Optional `commands.preflight` helpers must themselves be reviewed offline-only
+native scripts; although optional for workflow inputs, explicit helpers are required
+to invoke standalone preflight. Each emits actual PASS evidence bound to run/source, with
+`data.offline:true`, all `prerequisites`/`dependencyInventory`/`scratchOwnership`
+checks true, and `consumedSources` exactly matching its own pinned inventory
+including entry script and expanded collection members. This is **not cloud
+certification** or plan admission.
+
+For this offline invocation, `DELIVERY_PLAN_CONTEXT` identifies the helper's private
+command/dependency inventory, not a cloud-policy admission.
+
+`/.delivery-runs/` must actually be Git-ignored. Helpers use `withScratch` from
+`lab-scratch.mjs` with the supplied `DELIVERY_EVIDENCE_DIRECTORY`; it creates unique
+marked children and cleans those children in `finally`, preserving unrelated
+files. Invalid supplied paths fail, without fallback to source-adjacent fixtures.
+The example's preflight script is a placeholder, just like its baseline/build:
+replace it with an actual reviewed helper, or omit the optional command array.
+If omitted, skip standalone preflight; the workflow does not require it.
+
+Run `node --test gh-dynamic-workflows/test/lab-install.test.mjs` from the framework
+root for installer coverage. Companion unit/native regression tests are separate
+from live validation. An actual installed-extension CLI probe completed with
+`failures=0`: both workflows and `lab_execute_ticket` registered. That probe did
+**not** execute a delivery or establish cloud/live acceptance.
+Foundry model calls may be validated only against an already
+usable, explicitly approved endpoint; package validation must not provision,
+register providers, deploy, publish, or create access. Without an available approved
+endpoint, report live Foundry validation **unverified**, not simulated success.

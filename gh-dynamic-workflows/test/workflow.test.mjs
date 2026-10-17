@@ -367,8 +367,8 @@ test("installer works from the standalone package, resolves installed modules an
     await mkdir(distribution);
     await mkdir(project);
     async function copyPackage(source, destination) {
-        // Test fixtures live in the package; omit this one and concurrently running tests.
-        if (/^\.(?:work|nonprod)-/.test(path.basename(source))) return;
+        // Tests and their live workspaces are not part of the installed distribution.
+        if (path.basename(source) === "test") return;
         await mkdir(destination, { recursive: true });
         for (const entry of await readdir(source, { withFileTypes: true })) {
             const from = path.join(source, entry.name);

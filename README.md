@@ -137,6 +137,15 @@ cd ~/projects/my-app
 ../enterprise-copilot-fleet-controller/scripts/upgrade.sh --dry-run
 ```
 
+## Optional dynamic workflows
+
+To have GitHub Copilot CLI install the standalone dynamic workflows in an existing
+repository, use the **copy/paste installation prompt** in the
+[dynamic workflow quickstart](gh-dynamic-workflows/QUICKSTART.md).
+It covers choosing a reviewed framework checkout, preserving project instructions,
+safe installation and registration checks. Installation does not run fleet
+initialization, execute a workflow or authorize cloud changes.
+
 ## After Init
 
 ```bash

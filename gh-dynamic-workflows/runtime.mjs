@@ -279,7 +279,14 @@ export async function runCommand(root, spec, signal, { shareDiagnostics = false,
     const cwd = await safePath(root, spec.cwd);
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
         !/TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE.?KEY|CONNECTION.?STRING/i.test(key)));
-    for (const name of ["DELIVERY_TARGET", "DELIVERY_RUN_ID", "DELIVERY_SOURCE_FINGERPRINT", "DELIVERY_BUILD_FINGERPRINT"]) {
+    for (const name of [
+        "DELIVERY_TARGET", "DELIVERY_RUN_ID", "DELIVERY_SOURCE_FINGERPRINT", "DELIVERY_BUILD_FINGERPRINT",
+        "AZURE_CONFIG_DIR", "DELIVERY_REGION", "DELIVERY_SUBSCRIPTION_ID", "DELIVERY_REVISION",
+        "DELIVERY_WEB_ORIGIN", "DELIVERY_PROVISION_STAGE", "DELIVERY_PROVISION_STAGE_INDEX",
+        "DELIVERY_PLAN_EVIDENCE", "DELIVERY_PLAN_IDENTITY", "DELIVERY_PLAN_AGGREGATE",
+        "DELIVERY_TENANT_ID", "DELIVERY_OPERATION_ID", "DELIVERY_EVIDENCE_PATH", "DELIVERY_SPRINT_ID",
+        "DELIVERY_EVIDENCE_DIRECTORY", "DELIVERY_PLAN_CONTEXT",
+    ]) {
         if (environment[name] !== undefined) {
             if (typeof environment[name] !== "string") throw new Error("Invalid deployment environment");
             env[name] = environment[name];
