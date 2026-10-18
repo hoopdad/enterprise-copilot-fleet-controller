@@ -86,6 +86,15 @@ retained ReleasePlan/SprintPlan results; unavailable names are not guessed.
 Full recorded
 progress and the history outcome remain available separately.
 
+For running, in-progress, pending and queued tasks without a final response,
+the drawer summarizes the **recorded assignment**: its retained task title
+(or task ID/label), reviewer role and recorded phase context. It labels this
+as task context, not completed work or an agent reply, and switches to the
+actual outcome when one is retained. Pending tasks can be opened from the
+agent list before they start; they are not added to the observed-only flowchart.
+Paused/stale activity remains explicitly paused/unconfirmed. No prompts,
+intermediate messages or tool arguments are read to generate these summaries.
+
 Each process square and its drawer show the **LLM model**, **input tokens**,
 **cached tokens** (cache reads), and **output tokens**, summed from exact
 per-agent `session.usage_record` records. Multiple observed models are listed,

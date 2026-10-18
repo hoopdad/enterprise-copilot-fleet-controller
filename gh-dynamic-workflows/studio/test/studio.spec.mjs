@@ -18,6 +18,66 @@ test.afterAll(async () => {
     await f?.cleanup();
 });
 
+test("shows unfinished task context, opens unstarted pending tasks, and refreshes to the actual final outcome", async ({ page }) => {
+    const local = await fixture();
+    let instance;
+    try {
+        const log = path.join(path.dirname(local.dbFile), "events.jsonl");
+        await appendFile(log, [
+            { type: "subagent.started", agentId: "planner", data: { toolCallId: "planner", workflowRunId: "live-run" } },
+            workEvent("plan-context", "planner", { status: "complete", summary: "Assigned implementation.", artifact: {
+                SprintPlan: { tasks: [{ id: "s1-ui", title: "Customer Activity Screen" }] },
+            } }),
+        ].map((event) => JSON.stringify(event)).join("\n") + "\n");
+        local.mutate((db) => {
+            db.prepare("UPDATE workflow_agents SET label=? WHERE run_id='live-run'")
+                .run("yaml:sprint/1/S1/task/s1-ui/AssignedWorkUIDeveloperLoop:reviewer:Critic:1");
+            db.prepare("UPDATE workflow_phases SET detail=? WHERE run_id='live-run' AND phase_id='p1'")
+                .run("Inspect filtering and the selected customer.");
+        });
+        instance = await startStudio(local.project, { sessionsRoot: local.sessionsRoot });
+        await page.goto(instance.url);
+        await expect(page.locator("#connection")).toContainText("Connected");
+        for (const status of ["running", "in-progress", "pending", "queued"]) {
+            const pending = ["pending", "queued"].includes(status);
+            local.mutate((db) => db.prepare("UPDATE workflow_agents SET status=?, started_at_ms=? WHERE run_id='live-run'")
+                .run(status, pending ? null : Date.now() - 1000));
+            await expect(page.locator("#agents .status > span")).toHaveText(status, { timeout: 6000 });
+            await expect(page.locator("#graph .flow-node.task")).toHaveCount(pending ? 0 : 1);
+            const task = pending ? page.locator("#agents .agent-open") : page.locator("#graph .flow-node.task");
+            await task.click();
+            await expect(page.locator("#task-drawer")).toBeVisible();
+            await expect(page.locator("#task-drawer-title")).toHaveText("Customer Activity Screen");
+            const summary = page.locator("#task-details .evidence-summary");
+            await expect(summary).toContainText("RECORDED TASK CONTEXT");
+            await expect(summary).toContainText(pending ? "Task pending" : "Work in progress");
+            await expect(summary).toContainText("Assigned task: Customer Activity Screen");
+            await expect(summary).toContainText("Critic reviewer");
+            await expect(summary).toContainText("Inspect filtering and the selected customer");
+            await expect(summary).not.toContainText("No final work response");
+            await expect(summary).not.toContainText("No further detail was retained");
+            if (pending) await expect(page.locator("#task-details")).toContainText("Not started");
+            await page.locator("#close-task").click();
+            await expect(task).toBeFocused();
+        }
+        await page.locator("#agents .agent-open").click();
+        await appendFile(log, JSON.stringify(workEvent("final-context", "a1", {
+            agree: true, feedback: "Verified that customer filtering preserves selection.",
+        })) + "\n");
+        local.mutate((db) => db.prepare("UPDATE workflow_agents SET status='completed', completed_at_ms=? WHERE run_id='live-run'")
+            .run(Date.now()));
+        const summary = page.locator("#task-details .evidence-summary");
+        await expect(summary).toContainText("RECORDED AGENT OUTCOME", { timeout: 6000 });
+        await expect(summary).toContainText("Verified that customer filtering preserves selection");
+        await expect(summary).not.toContainText("Assigned task:");
+        await expect(page.locator("#error")).toBeHidden();
+    } finally {
+        await page.close();
+        await instance?.close();
+        await local.cleanup();
+    }
+});
+
 test("unifies live phase/agent activity, historical outcomes and export-only design drafts", async ({ page }) => {
     const pageErrors = [];
     const externalRequests = [];

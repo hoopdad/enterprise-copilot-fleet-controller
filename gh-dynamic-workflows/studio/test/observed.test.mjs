@@ -99,3 +99,53 @@ test("uses recorded models/counters and distinguishes reviewer agreement from an
     assert.equal(outcome({ status: "completed", workResult: { kind: "review", agree: false, summary: "Filtering drops the selected customer." } }, { agent: true }).tone, "error");
     assert.equal(taskLabel({ taskTitle: "Customer Activity Screen" }), "Customer Activity Screen");
 });
+
+test("describes unfinished tasks from recorded assignment, role and phase context instead of missing final output", () => {
+    for (const status of ["running", "in-progress", "in_progress", "pending", "queued"]) {
+        const result = workOutcome({
+            status, taskTitle: "Customer Activity Screen",
+            label: "yaml:sprint/1/S1/task/s1-ui/AssignedWorkUIDeveloperLoop:reviewer:Critic:2",
+        }, { phase: { title: "Sprint Loop", detail: "Inspect filtering and the selected customer." } });
+        assert.equal(result.title, ["pending", "queued"].includes(status) ? "Task pending" : "Work in progress");
+        assert.equal(result.contextOnly, true);
+        assert.equal(result.tone, "waiting");
+        assert.match(result.summary, /Assigned task: Customer Activity Screen/);
+        assert.match(result.summary, /Critic reviewer/);
+        assert.match(result.summary, /Sprint Loop/);
+        assert.match(result.summary, /Inspect filtering/);
+        assert.match(result.summary, /not a final work outcome/);
+        assert.doesNotMatch(JSON.stringify(summarizeEvidence(result.summary)), /No final work response|No further detail was retained/);
+    }
+});
+
+test("uses recorded task IDs, full labels and phase names when no planning title is available", () => {
+    assert.match(workOutcome({
+        status: "running", label: "yaml:sprint/1/S1/task/s1-paired-framework/AssignedWorkDeveloperLoop:doer:10",
+    }).summary, /Assigned task: s1-paired-framework/);
+    assert.match(workOutcome({
+        status: "pending", label: "Developer: Implement customer navigation with preserved search filters",
+    }).summary, /with preserved search filters/);
+    assert.match(workOutcome({ status: "queued" }, { phase: { title: "Package compatibility" } }).summary,
+        /Assigned task: Package compatibility/);
+    assert.match(workOutcome({ status: "running", label: "yaml:ArchitectureLoop:doer:1" }).summary,
+        /Assigned task: Architecture doer/);
+    assert.match(workOutcome({ status: "running" }).summary, /Assigned task: Recorded agent task/);
+});
+
+test("does not claim stale/paused activity is running or replace an actual outcome with assignment context", () => {
+    for (const [status, title] of [["stale", "Task activity unconfirmed"], ["unsettled", "Task activity unconfirmed"],
+        ["paused", "Work paused"], ["needs-input", "Awaiting input"]]) {
+        assert.equal(workOutcome({ status, label: "Recorded assignment" }).title, title);
+    }
+    const review = { kind: "review", agree: false, summary: "Actual final review finding." };
+    const work = { kind: "work", status: "complete", summary: "Actual final work summary." };
+    for (const status of ["running", "pending", "completed"]) {
+        for (const workResult of [review, work]) {
+            const result = workOutcome({ status, taskTitle: "Assigned task", workResult });
+            assert.equal(result.summary, workResult.summary);
+            assert.equal(result.contextOnly, undefined);
+        }
+    }
+    assert.equal(workOutcome({ status: "completed", taskTitle: "Assigned task" }).title, "Work outcome unavailable");
+    assert.equal(workOutcome({ status: "error", taskTitle: "Assigned task" }).contextOnly, undefined);
+});

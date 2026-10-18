@@ -28,7 +28,7 @@ export function tokenText(value) {
     return Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString("en-US") : "Not recorded";
 }
 
-export function workOutcome(agent) {
+export function workOutcome(agent, { phase } = {}) {
     const work = agent.workResult;
     if (work?.kind === "review") {
         const explicit = work.summary.match(/^\s*(PASS|FAIL)\b/i)?.[1]?.toUpperCase();
@@ -39,10 +39,33 @@ export function workOutcome(agent) {
         title: work.status === "complete" ? "Work reported complete" : work.status === "needs-input" ? "Awaiting input" : "Work needs revision",
         summary: work.summary, tone: work.status === "complete" ? "success" : "waiting",
     };
+    const status = String(agent.status ?? "").toLowerCase().replaceAll(/[_\s]+/g, "-");
+    if (active.has(status) || ["stale", "unsettled"].includes(status)) {
+        const taskId = agent.label?.match(/\/task\/([^/:]+)/)?.[1];
+        const reviewer = agent.label?.match(/:reviewer:([^:]+)/)?.[1];
+        const structured = /\b[A-Za-z][A-Za-z0-9]*Loop\b/.test(agent.label ?? "");
+        const task = agent.taskTitle?.trim() || taskId ||
+            (structured ? taskLabel(agent) : agent.label?.trim()) || phase?.title || agent.agentType || "Recorded agent task";
+        const title = ["queued", "pending"].includes(status) ? "Task pending"
+            : ["stale", "unsettled"].includes(status) ? "Task activity unconfirmed"
+            : status === "paused" ? "Work paused"
+            : ["needs-input", "awaiting-input"].includes(status) ? "Awaiting input" : "Work in progress";
+        return {
+            title,
+            summary: [
+                `Assigned task: ${task}.`,
+                `Recorded execution state: ${status}.`,
+                reviewer ? `Responsibility: ${reviewer} reviewer.` : null,
+                phase?.title ? `Recorded phase: ${phase.title}.` : null,
+                phase?.detail ? `Phase context: ${phase.detail}` : null,
+                "This is recorded task context, not a final work outcome or proof of completion.",
+            ].filter(Boolean).join(" "),
+            tone: "waiting", contextOnly: true,
+        };
+    }
     return {
-        title: active.has(agent.status) ? "Work in progress" : "Work outcome unavailable",
-        summary: active.has(agent.status) ? "No final work response has been recorded yet."
-            : "The execution state is recorded, but this agent's final work outcome was not retained in a supported format.",
+        title: "Work outcome unavailable",
+        summary: "The execution state is recorded, but this agent's final work outcome was not retained in a supported format.",
         tone: "waiting",
     };
 }

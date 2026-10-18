@@ -1,4 +1,4 @@
-import { observedFlow, outcome, stopReason, summarizeEvidence, queryTeam, processModel, tokenText, workOutcome } from "./observed.mjs";
+import { observedFlow, outcome, stopReason, summarizeEvidence, queryTeam, processModel, tokenText, workOutcome, taskLabel } from "./observed.mjs";
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -319,23 +319,28 @@ function appendSummary(container, summary, source = "EXTRACTIVE LOCAL EVIDENCE /
 }
 
 function renderTaskInspector(container, current) {
-    const node = observedFlow(current).nodes.find((item) => item.id === state.task);
+    const selectedAgent = current.agents.find((agent) => `agent:${agent.id}` === state.task);
+    const node = observedFlow(current).nodes.find((item) => item.id === state.task) ??
+        (selectedAgent ? { kind: "task", agent: selectedAgent, title: taskLabel(selectedAgent) } : null);
     if (!node) { state.task = null; return false; }
     $("task-drawer-title").textContent = node.kind === "task" ? node.agent.taskTitle ?? node.title : node.kind === "start" ? "Workflow started" : "Workflow stop";
     if (node.agent) {
         const agent = node.agent;
         const phase = current.phases.find((item) => item.id === agent.phaseId);
-        const result = workOutcome(agent);
+        const result = workOutcome(agent, { phase });
         const summary = summarizeEvidence(result.summary);
         summary.title = result.title;
-        appendSummary(container, summary, agent.workResult ? "RECORDED AGENT OUTCOME" : "RECORDED EXECUTION");
+        appendSummary(container, summary, agent.workResult ? "RECORDED AGENT OUTCOME"
+            : result.contextOnly ? "RECORDED TASK CONTEXT" : "RECORDED EXECUTION");
         const role = agent.label?.match(/:reviewer:([^:]+)/)?.[1];
         inspectFields(container, {
             Agent: role ? `${role} reviewer` : agent.agentType, Execution: agent.status,
             Model: processModel(agent), "Input tokens": tokenText(agent.usage?.inputTokens),
             "Cached tokens": tokenText(agent.usage?.cacheReadTokens), "Output tokens": tokenText(agent.usage?.outputTokens),
             "Usage records": agent.usage?.records ?? 0,
-            "Observed elapsed": duration((agent.completedAt ?? (current.stale || current.terminal ? current.updatedAt : current.observedAt)) - agent.startedAt),
+            "Observed elapsed": Number.isFinite(agent.startedAt)
+                ? duration((agent.completedAt ?? (current.stale || current.terminal ? current.updatedAt : current.observedAt)) - agent.startedAt)
+                : "Not started",
         });
         container.append(element("p", agent.usage?.message ?? "No per-agent token records retained.", "small muted"));
         const technical = element("details", null, "technical-details");
@@ -473,6 +478,7 @@ function renderAgents() {
         const row = element("div", null, "agent-row");
         const title = element("div", null, "agent-label");
         const name = element("button", label(agent.label) || agent.agentType, "agent-open");
+        name.dataset.agentTask = `agent:${agent.id}`;
         name.title = agent.label;
         name.addEventListener("click", () => {
             state.task = `agent:${agent.id}`;
@@ -631,7 +637,9 @@ function closeTaskDetails() {
     state.task = null;
     if ($("task-drawer").open) $("task-drawer").close();
     renderGraph(); renderInspector();
-    [...$("graph").querySelectorAll("[data-task]")].find((button) => button.dataset.task === selected)?.focus({ preventScroll: true });
+    const button = [...$("graph").querySelectorAll("[data-task]")].find((item) => item.dataset.task === selected)
+        ?? [...$("agents").querySelectorAll("[data-agent-task]")].find((item) => item.dataset.agentTask === selected);
+    button?.focus({ preventScroll: true });
 }
 $("close-task").addEventListener("click", closeTaskDetails);
 $("task-drawer").addEventListener("cancel", (event) => { event.preventDefault(); closeTaskDetails(); });
