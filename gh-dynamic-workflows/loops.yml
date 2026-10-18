@@ -1,0 +1,289 @@
+# HUMAN-EDITED SOURCE: Edit this file directly, then run: ./compact.sh docs/runbooks/loops.yml docs/runbooks/compact-loop.yml
+# Optional local guard automation: ./install-git-hooks.sh
+version: "1.0"
+entities:
+  - name: Architecture
+    description: "End-to-end technical design including principles, toolsets, and frameworks"
+  - name: UserExperience
+    description: "UI/UX design including principles, toolsets, frameworks, user flows, and screen designs"
+  - name: ReleasePlan
+    description: "Release plan containing sprints with goals and acceptance criteria"
+  - name: SprintDesign
+    description: "Screen designs and user flows for current sprint"
+  - name: SprintArchitecture
+    description: "Technical design for current and all prior sprints, organized by tier"
+  - name: SprintPlan
+    description: "Sprint work assignments and task breakdowns"
+  - name: UIWork
+    description: "Built and tested UI components"
+  - name: DeveloperWork
+    description: "Built and tested backend/business logic work"
+  - name: Deployments
+    description: "Deployment scripts and cloud deployments"
+
+roles:
+  - name: Product Owner
+    description: "Defines product vision, manages stakeholders, and prioritizes backlog"
+  - name: Architect
+    description: "Provides principles, toolsets, and frameworks along with end-to-end system designs"
+  - name: Scrum Master
+    description: "Facilitates sprints, removes roadblocks, makes sure that Agile principles are followed"
+  - name: Developer
+    description: "Builds, tests, and refines the product during each sprint"
+  - name: Designer
+    description: "Focus User Experience including optimal UI flows, screen layouts, screen designs, color schemes and themes, light/dark mode"
+  - name: DevOps Engineer
+    description: "Writes and runs scripts to test, validate, scan, build and deploy"
+  - name: Stakeholder
+    description: "Provides input, feedback, and strategic direction"
+  - name: Critic
+    description: "Compares requirements, acceptance criteria and definition of done to outcomes. Expert evaluator in the field as inferred by context"
+  - name: Red Team
+    description: "Expert cybersecurity analyst; finds risks and remediations for those risks"
+
+workflows:
+  ReleaseLoop:
+    description: "Complete release workflow with iterative sprint delivery"
+    cadence: "Release loop with one or more sprint iterations"
+    steps:
+      - step: "1"
+        id: ArchitectureLoop
+        name: "Architecture Loop"
+        description: "Define end-to-end architecture for the full release scope."
+        inputs:
+          - "Requirements in docs/requirements"
+          - "User prompt"
+        outputs:
+          - "Architecture: principles, toolsets, frameworks, and end-to-end technical design"
+        owner: "Architect"
+        reviewers:
+          - "Product Owner"
+          - "Red Team"
+          - "Critic"
+        completeWhen: "Owner and reviewers agree."
+
+      - step: "2"
+        id: UserExperienceLoop
+        name: "User Experience Loop"
+        description: "Define full-scope UX including flows, screen designs, layout principles, and design frameworks."
+        inputs:
+          - "Requirements in docs/requirements"
+          - "User prompt"
+          - "Architecture"
+        outputs:
+          - "UserExperience: UX principles, toolsets, frameworks, user flows, and screen direction"
+        owner: "Designer"
+        reviewers:
+          - "Product Owner"
+          - "Critic"
+        completeWhen: "Owner and reviewers agree."
+
+      - step: "3"
+        id: ReleasePlanLoop
+        name: "Release Plan Loop"
+        description: "Create a release plan with one or more sprints, each with goals and acceptance criteria."
+        inputs:
+          - "Architecture"
+          - "UserExperience"
+          - "Requirements in docs/requirements"
+          - "User prompt"
+        outputs:
+          - "ReleasePlan"
+        owner: "Product Owner"
+        reviewers:
+          - "Stakeholder"
+          - "Architect"
+          - "Designer"
+          - "Critic"
+        completeWhen: "Owner and reviewers agree."
+
+      - step: "4"
+        id: SprintLoop
+        name: "Sprint Loop"
+        description: "Execute the following substeps for each sprint in the release plan."
+        substeps:
+          - step: "4.1"
+            id: SprintDesignLoop
+            name: "Sprint Design Loop"
+            description: "Design UI for current sprint items and any previously blocked items needing design decisions."
+            inputs:
+              - "Sprint"
+              - "Architecture"
+              - "UserExperience"
+              - "Open blocked backlog items"
+            outputs:
+              - "SprintDesign: sprint-level user flows and screen designs"
+            owner: "Designer"
+            reviewers:
+              - "Product Owner"
+              - "Critic"
+            completeWhen: "Owner and reviewers agree."
+
+          - step: "4.2"
+            id: SprintArchitectureLoop
+            name: "Sprint Architecture Loop"
+            description: "Refine architecture for this sprint and resolve architecture blockers from prior sprints."
+            inputs:
+              - "Sprint"
+              - "Architecture"
+              - "Blocked architecture decisions"
+            outputs:
+              - "SprintArchitecture: holistic design updated for all prior sprints plus current sprint"
+              - "Tier-specific architecture files in docs/requirements/<tier>"
+            owner: "Architect"
+            reviewers:
+              - "Product Owner"
+              - "Critic"
+              - "Red Team"
+            completeWhen: "Owner and reviewers agree."
+
+          - step: "4.3"
+            id: SprintPlanLoop
+            name: "Sprint Plan Loop"
+            description: "Plan and assign sprint work with dependency-aware sequencing and parallel fan-out for independent tasks."
+            inputs:
+              - "Sprint"
+              - "SprintArchitecture"
+              - "SprintDesign"
+            outputs:
+              - "SprintPlan"
+              - "AssignedWorkUIDeveloper"
+              - "AssignedWorkDeveloper"
+              - "AssignedWorkDevOpsEngineer"
+              - "AssignedWorkDesigner"
+            owner: "Scrum Master"
+            reviewers:
+              - "Product Owner"
+              - "Architect"
+              - "Critic"
+            completeWhen: "Owner and reviewers agree, all todos are assigned, and independent work is dispatched in parallel."
+
+          - step: "4.4"
+            id: AssignedWorkUIDeveloperLoop
+            name: "Assigned Work - UI Developer Loop"
+            description: "Build, test, and validate UI work for sprint scope."
+            inputs:
+              - "AssignedWorkUIDeveloper"
+              - "SprintDesign"
+              - "Architecture"
+              - "SprintArchitecture"
+              - "WorkRepo"
+            outputs:
+              - "UIWork"
+            owner: "Developer"
+            reviewers:
+              - "Architect"
+              - "Designer"
+              - "Critic"
+            completeWhen: "Owner and reviewers agree."
+
+          - step: "4.5"
+            id: AssignedWorkDeveloperLoop
+            name: "Assigned Work - Developer Loop"
+            description: "Build, test, and validate backend and business logic across all relevant tiers."
+            inputs:
+              - "AssignedWorkDeveloper"
+              - "Architecture"
+              - "SprintArchitecture"
+              - "WorkRepo"
+            outputs:
+              - "DeveloperWork"
+            owner: "Developer"
+            reviewers:
+              - "Architect"
+              - "Critic"
+            completeWhen: "Owner and reviewers agree."
+
+          - step: "4.6"
+            id: EndToEndTestLoop
+            name: "End-to-End Test Loop"
+            description: "Run integration tests across UI and all backend tiers."
+            inputs:
+              - "Architecture"
+              - "SprintDesign"
+              - "UIWork"
+              - "DeveloperWork"
+              - "SprintArchitecture"
+            outputs:
+              - "PASS"
+              - "FAIL with feedback"
+            owner: "Developer"
+            reviewers:
+              - "Architect"
+              - "Critic"
+              - "Product Owner"
+            completeWhen: "Owner and reviewers agree test outcomes are accurate and actionable."
+
+          - step: "4.7"
+            id: DevOpsWorkLoop
+            name: "DevOps Work Loop"
+            description: "Write and run scripts for scan, build, and deploy (wrapped with azd)."
+            inputs:
+              - "Architecture"
+              - "UIWork"
+              - "DeveloperWork"
+            outputs:
+              - "Scripts in scripts/"
+              - "Deployments"
+            owner: "DevOps Engineer"
+            reviewers:
+              - "Architect"
+              - "Critic"
+              - "Developer"
+            completeWhen: "Owner and reviewers agree and cloud-deployed system passes tests."
+
+          - step: "4.8"
+            id: SprintReviewLoop
+            name: "Sprint Review Loop"
+            description: "Run sprint demo and validate system behavior from workstation to cloud."
+            inputs:
+              - "Deployments"
+              - "SprintPlan"
+              - "Scripts in scripts/"
+            outputs:
+              - "Additional backlog items in ReleasePlan for new findings or blocked work"
+            owner: "Product Owner"
+            reviewers:
+              - "Scrum Master"
+              - "Critic"
+              - "Architect"
+              - "Red Team"
+            completeWhen: "Owner and reviewers agree."
+
+          - step: "4.9"
+            id: SprintRetroLoop
+            name: "Sprint Retrospective Loop"
+            description: "Retrospective on workflow quality and work outcomes, then capture improvements."
+            inputs:
+              - "Sprint review outcomes"
+              - "Error and communication metrics"
+              - "Process observations"
+            outputs:
+              - "Improvements for Architecture, UserExperience, and ReleasePlan artifacts"
+              - "Documented retrospective inputs and decisions"
+            owner: "Product Owner"
+            reviewers:
+              - "Scrum Master"
+              - "Critic"
+              - "Architect"
+              - "Red Team"
+              - "Designer"
+              - "Developer"
+            completeWhen: "Owner and reviewers agree."
+
+      - step: "5"
+        id: ReleaseCloseoutLoop
+        name: "Release Closeout Loop"
+        description: "Document completion status of all requirements and finalize release artifacts."
+        inputs:
+          - "ReleasePlan"
+          - "All prior sprint outputs"
+        outputs:
+          - "ReleaseNotes"
+          - "Updated README"
+        owner: "Product Owner"
+        reviewers:
+          - "Stakeholder"
+          - "Architect"
+          - "Critic"
+        completeWhen: "Owner and reviewers agree."

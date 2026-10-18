@@ -1,29 +1,6 @@
 {
-  "schemaVersion": 1,
   "projectRoot": ".",
-  "input": { "kind": "architecture", "path": "specs/architecture.md", "goal": "Deliver the architecture specification in an existing local test environment" },
-  "scope": ["src", "test", "scripts/delivery"],
-  "generatedPaths": ["dist"],
-  "acceptance": ["Implement the architecture contracts", "Preserve backward compatibility"],
-  "attempts": { "planning": 2, "implementation": 2, "repair": 1 },
-  "execution": {
-    "authorized": true,
-    "acknowledgement": "I reviewed these commands and authorize local execution",
-    "shareDiagnostics": true,
-    "diagnosticsAcknowledgement": "I authorize redacted diagnostics to be shared with workflow agents"
-  },
-  "commands": {
-    "baseline": [{ "executable": "node", "args": ["--test"], "cwd": ".", "timeoutMs": 120000 }],
-    "test": [{ "executable": "node", "args": ["--test"], "cwd": ".", "timeoutMs": 120000 }],
-    "build": [{ "executable": "node", "args": ["scripts/build.mjs"], "cwd": ".", "timeoutMs": 120000 }]
-  },
-  "deployment": {
-    "mode": "nonproduction",
-    "environment": "test",
-    "target": "existing-local-test-server",
-    "acceptance": ["Live test target reports the exact built revision and passes smoke checks"],
-    "authorized": true,
-    "idempotent": true,
-    "allowedExecutables": ["node"]
-  }
+  "input": {"kind": "architecture", "path": "specs/architecture.md", "goal": "Implement the supplied architecture"},
+  "acceptance": ["Replace with measurable architecture and behavior requirements"],
+  "authority": "Describe your actual repository/resource permissions; the workflow does not supply them"
 }

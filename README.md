@@ -146,6 +146,14 @@ It covers choosing a reviewed framework checkout, preserving project instruction
 safe installation and registration checks. Installation does not run fleet
 initialization, execute a workflow or authorize cloud changes.
 
+The standalone workflows execute the original YAML's nested do-er/reviewer
+loops without an additional engine admission pipeline. This does not change
+the generated fleet's separate governance or deployment policy.
+
+The optional [Workflow Studio canvas](gh-dynamic-workflows/studio/README.md)
+combines design drafts, live observation and historical workflow results.
+It can observe an already-running local project without changing that project.
+
 ## After Init
 
 ```bash

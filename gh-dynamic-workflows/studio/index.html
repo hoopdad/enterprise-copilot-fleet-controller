@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workflow Studio</title>
+  <script nonce="__NONCE__">
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme = ["light", "dark"].includes(param) ? param :
+        (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">W</span><div><strong>Workflow Studio</strong><span class="eyebrow">GITHUB COPILOT CANVAS</span></div></div>
+    <div class="project"><strong id="project-name">Connecting...</strong><span id="project-path"></span></div>
+    <span class="badge">READ-ONLY CONNECTION</span>
+    <button id="theme" aria-label="Toggle theme">Theme</button>
+  </header>
+  <div id="error" class="error-banner" role="alert" hidden></div>
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-heading"><span class="eyebrow">WORKSPACE</span><button id="refresh" title="Refresh source and run discovery">Refresh</button></div>
+      <label for="workflow">Workflow</label>
+      <select id="workflow"></select>
+      <p class="small muted" id="workflow-description"></p>
+      <label for="run-search">Find a run</label>
+      <input id="run-search" type="search" placeholder="Status, run or session ID">
+      <div class="run-filter" aria-label="Filter runs">
+        <button data-filter="all" class="active">All</button><button data-filter="running">Live</button><button data-filter="finished">Past</button>
+      </div>
+      <div id="run-list" class="run-list" aria-label="Workflow runs"></div>
+      <div class="sidebar-footer"><span id="connection" role="status">Connecting</span><span id="last-updated"></span><p class="small">Local data only. No workflow execution controls.</p></div>
+    </aside>
+    <main>
+      <nav class="tabs" aria-label="Workflow lifecycle">
+        <button data-view="design"><span>01</span> Design &amp; build</button>
+        <button data-view="live" class="active"><span>02</span> Live execution</button>
+        <button data-view="history"><span>03</span> History &amp; results</button>
+        <button id="follow" class="follow active" aria-pressed="true">Follow latest live run</button>
+      </nav>
+      <section class="view-heading">
+        <div><span class="eyebrow" id="view-kicker">OBSERVED EXECUTION</span><h1 id="view-title">Waiting for workflow data</h1><p id="view-subtitle" class="muted"></p></div>
+        <div class="view-actions"><span id="run-status" class="badge"></span><button id="export-run">Export snapshot</button></div>
+      </section>
+      <section class="metrics" id="metrics" aria-label="Run statistics"></section>
+      <div id="warnings" class="notice" hidden></div>
+      <div id="stop-notice" class="notice" role="status" hidden></div>
+      <section class="panel graph-panel">
+        <div class="panel-heading"><div><h2 id="graph-title">Phase map</h2><span id="graph-caption" class="small muted"></span></div><div class="graph-tools"><label for="graph-layer" class="sr-only">Design graph layer</label><select id="graph-layer"><option value="phases">Declared phases</option><option value="contract">Process contract</option></select><button id="clear-phase" hidden>All phases</button></div></div>
+        <div id="graph" class="phase-map" aria-label="Workflow phase map"></div>
+        <div id="observed-phases" class="observed-phases" aria-label="Filter by entered phase"></div>
+        <p id="graph-legend" class="graph-legend small"><span class="legend-dot running"></span> In progress / awaiting input / unconfirmed <span class="legend-dot visited"></span> Agent completed / explicit success <span class="legend-dot error"></span> Error <span class="muted">Select a task for its details. Green agent completion is not delivery acceptance.</span></p>
+      </section>
+      <section id="team-panel" class="panel">
+        <div class="panel-heading"><div><h2>Query team activity</h2><span class="small muted">Local evidence lookup, not a conversation with executing agents. Answers refresh with observations.</span></div></div>
+        <form id="team-query" class="toolbar"><label for="team-question" class="sr-only">Ask about recorded team activity</label><input id="team-question" placeholder="Who is working? What is done? Why did it stop? Or an agent label" maxlength="500"><button type="submit">Look up</button></form>
+        <div id="team-answer" role="status"></div>
+      </section>
+      <div class="detail-grid">
+        <section class="panel">
+          <div class="panel-heading"><h2 id="detail-title">Agent activity</h2><span id="agent-count" class="small muted"></span></div>
+          <div id="runtime-panel">
+            <div class="toolbar"><label for="agent-search" class="sr-only">Filter agents</label><input id="agent-search" type="search" placeholder="Filter agents by label, role or status"><label for="attempt" class="small">Attempt</label><select id="attempt"><option value="">All</option></select></div>
+            <div id="agents" class="agent-list"></div>
+          </div>
+          <div id="design-panel" hidden>
+            <div class="toolbar"><label for="source-file" class="sr-only">Source file</label><select id="source-file"></select><button id="preview-source">Preview draft</button><button id="export-source">Export draft</button></div>
+            <p class="notice small">Drafts stay in this pane until exported. There is no save, apply, import, or execution endpoint. Preview parses syntax; it does not execute or fully validate workflow behavior.</p>
+            <label for="source-editor" class="editor-label">Workflow source draft <span id="draft-status" class="muted"></span></label>
+            <textarea id="source-editor" spellcheck="false" wrap="off" aria-describedby="draft-message"></textarea>
+            <p id="draft-message" class="small" role="status"></p>
+          </div>
+        </section>
+        <section class="panel inspector">
+          <div class="panel-heading"><h2>Inspector</h2><span id="inspector-tag" class="small muted"></span></div>
+          <div id="inspector"></div>
+        </section>
+      </div>
+      <section class="panel" id="progress-panel">
+        <div class="panel-heading"><div><h2>Progress journal</h2><span class="small muted">Durable phase transitions and workflow log messages</span></div><button id="older-progress" hidden>Load older</button></div>
+        <div id="progress" class="progress-list"></div>
+      </section>
+      <section class="panel" id="results-panel" hidden>
+        <div class="panel-heading"><h2>Outcome &amp; evidence</h2><span class="small muted">Actual retained result, not an inferred success</span></div>
+        <pre id="results"></pre>
+      </section>
+      <footer class="small muted" id="data-notice"></footer>
+    </main>
+  </div>
+  <dialog id="task-drawer" aria-labelledby="task-drawer-title">
+    <div class="drawer-heading"><div><span class="eyebrow">TASK DETAILS / READ ONLY</span><h2 id="task-drawer-title">Task</h2></div><button id="close-task" aria-label="Close task details" autofocus>Close</button></div>
+    <div id="task-details"></div>
+  </dialog>
+</body>
+</html>

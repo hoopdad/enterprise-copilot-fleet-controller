@@ -1,29 +1,6 @@
 {
-  "schemaVersion": 1,
   "projectRoot": ".",
-  "input": { "kind": "product", "path": "specs/product.md", "goal": "Implement the product specification while preserving current behavior" },
-  "scope": ["src", "test", "scripts/delivery"],
-  "generatedPaths": ["dist"],
-  "acceptance": ["All product acceptance criteria are implemented and tested", "Existing public behavior and baseline tests remain passing"],
-  "attempts": { "planning": 2, "implementation": 2, "repair": 1 },
-  "execution": {
-    "authorized": true,
-    "acknowledgement": "I reviewed these commands and authorize local execution",
-    "shareDiagnostics": true,
-    "diagnosticsAcknowledgement": "I authorize redacted diagnostics to be shared with workflow agents"
-  },
-  "commands": {
-    "baseline": [{ "executable": "node", "args": ["--test"], "cwd": ".", "timeoutMs": 120000 }],
-    "test": [{ "executable": "node", "args": ["--test"], "cwd": ".", "timeoutMs": 120000 }],
-    "build": [{ "executable": "node", "args": ["scripts/build.mjs"], "cwd": ".", "timeoutMs": 120000 }]
-  },
-  "deployment": {
-    "mode": "nonproduction",
-    "environment": "test",
-    "target": "existing-product-test-target",
-    "acceptance": ["Test target serves the exact built revision and deployed product smoke checks pass"],
-    "authorized": true,
-    "idempotent": true,
-    "allowedExecutables": ["node"]
-  }
+  "input": {"kind": "product", "path": "specs/product.md", "goal": "Implement the supplied product specification"},
+  "acceptance": ["Replace with actual product acceptance criteria"],
+  "authority": "Describe your writable project and actual authorized deployment/publication targets and restrictions"
 }

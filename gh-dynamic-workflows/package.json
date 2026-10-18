@@ -1,0 +1,11 @@
+{
+  "name": "copilot-yaml-delivery-loops",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  }
+}
