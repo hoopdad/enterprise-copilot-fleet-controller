@@ -266,3 +266,66 @@ test("a failed parallel assignment names its task instead of hiding which work f
     };
     await assert.rejects(createLoopRunner()(f.ctx), /Assigned work execution failed for actual-failed-task/);
 });
+
+test("stagnation settings reach planning and implementation, with per-assignment counters and original dependency stop reporting", async () => {
+    const f = fake({
+        args: { maxNoProgressRounds: 10 },
+        tasks: [task("dependent", "ui", ["stalled"]), task("stalled"), task("productive")],
+    });
+    const original = f.ctx.agent;
+    const rounds = new Map();
+    f.ctx.agent = async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        const result = await original(prompt, options);
+        const id = input.context.assignment?.id;
+        if (input.kind === "reviewer") {
+            return { ...result, agree: id === "stalled" ? false : result.agree, verifiedProgress: [] };
+        }
+        rounds.set(id ?? input.loop.id, (rounds.get(id ?? input.loop.id) ?? 0) + 1);
+        return { ...result, status: id === "stalled" ? "rework" : result.status, progress: [] };
+    };
+    const result = await createLoopRunner()(f.ctx);
+    assert.equal(result.status, "blocked");
+    assert.equal(result.stopCause, "no-progress");
+    assert.equal(result.stoppedAt, "AssignedWorkDeveloperLoop");
+    assert.match(result.stoppedKey, /task\/stalled/);
+    assert.equal(result.rounds, 10);
+    assert.equal(result.progress.noProgressRounds, 10);
+    assert.equal(rounds.get("productive"), 1);
+    assert.equal(rounds.get("dependent"), undefined);
+    assert.equal(rounds.get("ArchitectureLoop"), 1);
+    assert.ok(!f.calls.some((call) => call.loop.id === "DevOpsWorkLoop"));
+    const count = f.calls.length;
+    const { outcomes: replayedOutcomes, ...replayed } = await createLoopRunner()(f.ctx);
+    const { outcomes, ...initial } = result;
+    assert.deepEqual(replayed, initial);
+    const byKey = (a, b) => a.key.localeCompare(b.key);
+    assert.deepEqual(replayedOutcomes.toSorted(byKey), outcomes.toSorted(byKey));
+    assert.equal(f.calls.length, count);
+});
+
+test("productive planning and implementation exceed ten rounds and six sprints with only a stagnation limit", async () => {
+    const f = fake({
+        args: { maxNoProgressRounds: 10 }, tasks: [task("productive")],
+        artifact: (input, output) => input.loop.id === "ReleasePlanLoop"
+            ? { ReleasePlan: { sprints: Array.from({ length: 7 }, (_, index) => ({ id: `s${index + 1}` })) } } : output,
+    });
+    const original = f.ctx.agent;
+    const rounds = new Map();
+    f.ctx.agent = async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        const result = await original(prompt, options);
+        const key = `${input.context.sprint?.id ?? "release"}/${input.loop.id}`;
+        if (input.kind === "doer") {
+            const round = (rounds.get(key) ?? 0) + 1;
+            rounds.set(key, round);
+            return { ...result, status: round >= 12 ? "complete" : "rework",
+                progress: [{ id: `check-${round}`, evidence: `Newly verified milestone ${round}` }] };
+        }
+        return { ...result, agree: rounds.get(key) >= 12, verifiedProgress: input.owner.progress.map((item) => item.id) };
+    };
+    const result = await createLoopRunner()(f.ctx);
+    assert.equal(result.status, "completed");
+    assert.equal(result.completedSprints.length, 7);
+    assert.ok(result.outcomes.every((outcome) => outcome.rounds === 12));
+});

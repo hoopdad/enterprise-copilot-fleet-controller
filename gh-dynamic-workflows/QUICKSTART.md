@@ -49,7 +49,13 @@ The do-ers research, edit and execute within their original YAML loops, and the
 original reviewers decide agreement. There is no mandatory baseline/bootstrap
 gate or prebuilt adapter requirement. Review disagreements return to the do-er.
 No limits are invented; optionally supply positive `maxSprints` and
-`attempts.planning` / `attempts.implementation`.
+`attempts.planning` / `attempts.implementation` as hard caps on all rounds/sprints.
+For unlimited productive work, omit those caps and supply
+`"maxNoProgressRounds": 10` instead: stop only after ten consecutive rounds
+without new progress verified by every original reviewer, or on confirmed
+human-input needs. See the README for evidence reporting and the safeguard's
+round-boundary limitations. Do not replace an installed runtime during an
+active run.
 
 ## Copy/paste installation prompt for GitHub Copilot
 

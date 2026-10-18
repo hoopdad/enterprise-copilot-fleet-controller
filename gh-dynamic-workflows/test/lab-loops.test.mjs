@@ -92,3 +92,153 @@ test("invalid or failed subagents are explicit failures, not agreement", async (
     }), /Invalid .*reviewer/);
     assert.throws(() => parseWorkflow("workflows: {}"), /ReleaseLoop/);
 });
+
+function progressContext({ owner, review } = {}) {
+    let round = 0;
+    return context(async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        if (input.kind === "doer") {
+            round++;
+            assert.ok(options.schema.required.includes("progress"));
+            return { status: "rework", summary: "Continuing", artifact: {}, progress: [], ...await owner?.(round, input) };
+        }
+        assert.ok(options.schema.required.includes("verifiedProgress"));
+        return { agree: false, feedback: "More work remains", verifiedProgress: [], ...await review?.(round, input) };
+    });
+}
+test("productive rework can exceed ten rounds, with progress independently verified by the original reviewers", async () => {
+    const ctx = progressContext({
+        owner: (round, input) => {
+            assert.equal(input.progressState.credited.length, round - 1);
+            assert.equal(input.progressState.noProgressRounds, 0);
+            return {
+                status: round === 25 ? "complete" : "rework",
+                progress: [{ id: `check-${round}`, evidence: `Newly resolved failing check ${round}` }],
+            };
+        },
+        review: (round, input) => ({
+            agree: round === 25, verifiedProgress: input.owner.progress.map((item) => item.id),
+        }),
+    });
+    const result = await runLoop({ ctx, loop: loops[0], key: "productive", context: {}, maxNoProgressRounds: 10 });
+    assert.equal(result.status, "agreed");
+    assert.equal(result.rounds, 25);
+});
+test("ten consecutive unverified rounds stop as blocked, not successful completion or a total-round limit", async () => {
+    const ctx = progressContext({ owner: (round) => ({
+        summary: `A different claim ${round}`, artifact: { changed: round },
+        progress: [{ id: `claim-${round}`, evidence: `Unverified claim ${round}` }],
+    }) });
+    const result = await runLoop({ ctx, loop: loops[0], key: "stalled", context: {}, maxNoProgressRounds: 10 });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.stopCause, "no-progress");
+    assert.equal(result.rounds, 10);
+    assert.deepEqual(result.progress, { noProgressRounds: 10, limit: 10, credited: [] });
+    assert.equal(result.feedback.owner.summary, "A different claim 10");
+    assert.match(result.summary, /10 consecutive rounds/);
+    assert.ok(result.nextAction);
+});
+test("verified progress on the threshold round resets the consecutive counter; reused IDs never reset it", async () => {
+    const ctx = progressContext({
+        owner: (round, input) => {
+            if (round === 20) assert.equal(input.progressState.noProgressRounds, 9);
+            return { progress: round >= 10 ? [{ id: "resolved-check", evidence: `Evidence prose version ${round}` }] : [] };
+        },
+        review: (_, input) => ({ verifiedProgress: input.owner.progress.map((item) => item.id) }),
+    });
+    const result = await runLoop({ ctx, loop: loops[0], key: "reset", context: {}, maxNoProgressRounds: 10 });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.rounds, 20);
+    assert.equal(result.progress.noProgressRounds, 10);
+    assert.deepEqual(result.progress.credited, [{ id: "resolved-check", evidence: "Evidence prose version 10", round: 10 }]);
+});
+test("one reviewer's progress claim is not enough and disjoint verified IDs are not consensus", async () => {
+    for (const disjoint of [false, true]) {
+        const ctx = progressContext({
+            owner: () => ({ progress: [{ id: "a", evidence: "Check A" }, { id: "b", evidence: "Check B" }] }),
+            review: (_, input) => ({ verifiedProgress: input.role === "Critic" ? (disjoint ? ["b"] : []) : ["a"] }),
+        });
+        const result = await runLoop({ ctx, loop: loops[0], key: `no-consensus-${disjoint}`, context: {}, maxNoProgressRounds: 1 });
+        assert.equal(result.status, "blocked");
+        assert.equal(result.progress.credited.length, 0);
+    }
+});
+test("relabeling identical evidence cannot reset stagnation even when reviewers endorse a fresh ID", async () => {
+    const ctx = progressContext({
+        owner: (round) => ({ progress: [{ id: `new-label-${round}`, evidence: round % 2 ? " Check A passed " : "check   a PASSED" }] }),
+        review: (_, input) => ({ verifiedProgress: input.owner.progress.map((item) => item.id) }),
+    });
+    const result = await runLoop({ ctx, loop: loops[0], key: "relabeled", context: {}, maxNoProgressRounds: 10 });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.rounds, 11);
+    assert.equal(result.progress.credited.length, 1);
+});
+test("completion and genuine human input take precedence over stagnation on the threshold round", async () => {
+    for (const status of ["complete", "needs-input"]) {
+        const ctx = progressContext({
+            owner: () => ({ status, summary: "Accurately reviewed outcome", nextAction: "Supply missing authority" }),
+            review: () => ({ agree: true }),
+        });
+        const result = await runLoop({ ctx, loop: loops[0], key: status, context: {}, maxNoProgressRounds: 1 });
+        assert.equal(result.status, status === "complete" ? "agreed" : "needs-input");
+        assert.equal(result.rounds, 1);
+    }
+});
+test("unconfirmed human-input claims are still bounded by stagnation", async () => {
+    const ctx = progressContext({ owner: () => ({ status: "needs-input" }) });
+    const result = await runLoop({ ctx, loop: loops[0], key: "unconfirmed", context: {}, maxNoProgressRounds: 2 });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.rounds, 2);
+});
+test("dispatch is settled before a stagnation stop and its actual result is retained", async () => {
+    let settled = false;
+    const ctx = progressContext({ owner: () => ({ status: "complete" }) });
+    const result = await runLoop({
+        ctx, loop: loops[0], key: "dispatch-stall", context: {}, maxNoProgressRounds: 1,
+        dispatch: async () => ({
+            context: { status: "dispatched" },
+            settle: async () => { settled = true; return [{ status: "agreed" }]; },
+        }),
+    });
+    assert.ok(settled);
+    assert.equal(result.status, "blocked");
+    assert.deepEqual(result.feedback.dispatchedWork, [{ status: "agreed" }]);
+});
+test("malformed progress cannot silently become verified progress, and dispatched work is joined on reviewer errors", async () => {
+    for (const progress of [undefined, null, {}, [{ id: "", evidence: "x" }], [{ id: "x", evidence: " " }],
+        [{ id: " x ", evidence: "x" }], [{ id: "x", evidence: "a" }, { id: "x", evidence: "b" }]]) {
+        await assert.rejects(runLoop({
+            ctx: progressContext({ owner: () => ({ progress }) }),
+            loop: loops[0], key: "invalid-owner", context: {}, maxNoProgressRounds: 10,
+        }), /Invalid do-er progress/);
+    }
+    for (const verifiedProgress of [undefined, null, {}, [7], ["unknown"], ["x", "x"]]) {
+        let settled = false;
+        await assert.rejects(runLoop({
+            ctx: progressContext({
+                owner: () => ({ status: "complete", progress: [{ id: "x", evidence: "Check X" }] }),
+                review: () => ({ verifiedProgress }),
+            }),
+            loop: loops[0], key: "invalid-reviewer", context: {}, maxNoProgressRounds: 10,
+            dispatch: async () => ({ context: {}, settle: async () => { settled = true; } }),
+        }), /Invalid .*reviewer progress/);
+        assert.ok(settled);
+    }
+});
+test("stagnation is opt-in and explicit legacy round caps remain independent ceilings", async () => {
+    for (const maxNoProgressRounds of [0, -1, 1.5, NaN, null, "10", Number.MAX_SAFE_INTEGER + 1]) {
+        await assert.rejects(runLoop({
+            ctx: context(() => assert.fail("Invalid settings must not launch an agent")),
+            loop: loops[0], key: "invalid-limit", context: {}, maxNoProgressRounds,
+        }), /maxNoProgressRounds.*positive integer/);
+    }
+    const result = await runLoop({
+        ctx: progressContext({
+            owner: (round) => ({ progress: [{ id: `check-${round}`, evidence: "Newly resolved check" }] }),
+            review: (_, input) => ({ verifiedProgress: input.owner.progress.map((item) => item.id) }),
+        }),
+        loop: loops[0], key: "explicit-cap", context: {}, attempts: 2, maxNoProgressRounds: 10,
+    });
+    assert.equal(result.status, "limit-reached");
+    assert.equal(result.rounds, 2);
+});

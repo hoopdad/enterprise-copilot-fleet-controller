@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { labMetadata } from "../lab-workflow.mjs";
 import { metadata } from "../workflow.mjs";
+import { ownerSchema, reviewerSchema } from "../lab-loops.mjs";
 
 test("every declared schema object has an explicit type and no guessed SDK limits", () => {
     function check(schema) {
@@ -17,6 +18,8 @@ test("every declared schema object has an explicit type and no guessed SDK limit
         for (const key of ["oneOf", "anyOf", "allOf"]) for (const nested of schema[key] ?? []) check(nested);
     }
     check(labMetadata.argsSchema);
+    check(ownerSchema);
+    check(reviewerSchema);
     assert.equal(Object.hasOwn(labMetadata, "limits"), false);
 });
 

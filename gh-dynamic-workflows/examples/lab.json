@@ -4,6 +4,5 @@
   "repositories": [{"id": "product", "path": ".", "access": "write"}],
   "acceptance": ["Replace with real local, deployed and experiment requirements"],
   "authority": "Describe exact allowed existing Azure targets, new resources, publication and prohibitions",
-  "maxSprints": 6,
-  "attempts": {"planning": 3, "implementation": 5}
+  "maxNoProgressRounds": 10
 }

@@ -50,6 +50,7 @@ export function describeOutcome(envelope, result) {
     return {
         status: result.status, sdkStatus: envelope.status, runId: envelope.runId ?? result.runId,
         stoppedAt: result.stoppedAt ?? stop?.loopId, rounds: result.rounds ?? stop?.rounds,
+        stopCause: result.stopCause ?? stop?.stopCause, progress: result.progress ?? stop?.progress,
         summary: result.summary ?? stop?.summary ?? (result.status === "completed" ? "Original YAML loops completed." : undefined),
         reason: result.reason ?? stop?.reason ?? stop?.feedback?.transportIssue ?? stop?.feedback?.owner?.summary,
         reviewers: (stop?.feedback?.reviews ?? stop?.reviews ?? []).filter((review) => !review.agree),

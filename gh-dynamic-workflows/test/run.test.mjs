@@ -51,11 +51,31 @@ test("runtime error, pause, cancellation and unknown envelopes are never reporte
     assert.deepEqual(parseEnvelope('{"type":"workflow.result","data":{"run":{"status":"completed","runId":"real-shape"}}}\n'), {
         status: "completed", runId: "real-shape",
     });
+
     assert.equal(describeOutcome({ ...envelope("error"), failure: { message: "SDK budget exhausted" } }).reason, "SDK budget exhausted");
     assert.equal(describeOutcome(envelope("paused")).exitCode, 3);
     assert.equal(describeOutcome(envelope("cancelled")).exitCode, 130);
     assert.equal(describeOutcome(envelope("halted")).exitCode, 1);
     assert.throws(() => describeOutcome({ status: "unknown" }), /recognized workflow run envelope/);
+});
+
+test("stagnation stop evidence survives concise reporting without treating SDK completion as work completion", () => {
+    const progress = { noProgressRounds: 10, limit: 10, credited: [{ id: "check-1", evidence: "Resolved check", round: 1 }] };
+    const outcome = describeOutcome(envelope(), {
+        status: "blocked", stoppedKey: "task/stalled", outcomes: [{
+            status: "blocked", loopId: "AssignedWorkDeveloperLoop", key: "task/stalled", rounds: 17,
+            stopCause: "no-progress", progress,
+            summary: "Stopped after 10 consecutive rounds without reviewer-verified new progress.",
+            feedback: { reviews: [{ role: "Critic", agree: false, feedback: "Still blocked on the same failing test" }] },
+        }],
+    });
+    assert.equal(outcome.exitCode, 2);
+    assert.equal(outcome.rounds, 17);
+    assert.equal(outcome.stopCause, "no-progress");
+    assert.deepEqual(outcome.progress, progress);
+    const text = formatOutcome(outcome, {});
+    assert.match(text, /10 consecutive rounds/);
+    assert.match(text, /Still blocked on the same failing test/);
 });
 
 async function fixture(t) {

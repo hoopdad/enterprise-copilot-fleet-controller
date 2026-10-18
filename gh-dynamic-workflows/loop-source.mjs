@@ -46,6 +46,7 @@ export function workflowMetadata(name) {
             specification: { type: ["string", "object"] }, input: { type: "object" },
             acceptance: { type: "array" }, repositories: { type: "array" },
             attempts: { type: "object" }, maxSprints: { type: "integer" },
+            maxNoProgressRounds: { type: "integer", minimum: 1 },
         } },
     };
 }

@@ -114,7 +114,7 @@ export function createLoopRunner() {
                     if (Object.hasOwn(artifact, "ReleasePlan")) releasePlan(artifact);
                     await decode?.(artifact);
                 },
-                attempts: attemptsFor(node.id), agents: args.agents, dispatch,
+                attempts: attemptsFor(node.id), maxNoProgressRounds: args.maxNoProgressRounds, agents: args.agents, dispatch,
             });
             const outcome = { loopId: node.id, key, ...result };
             outcomes.push(outcome);
@@ -125,6 +125,7 @@ export function createLoopRunner() {
             status: result.status, engine: ENGINE, runId: ctx.runId, summary: result.summary ?? result.reason,
             stoppedAt: result.loopId, stoppedKey: result.key, reason: result.reason, nextAction: result.nextAction,
             rounds: result.rounds, limit: result.limit,
+            ...(result.progress ? { stopCause: result.stopCause, progress: result.progress } : {}),
             completedSprints: [...completed], documents, outcomes,
         });
         const assignedWork = async (container, sprint, tasks, iteration, planRound = 1) => {

@@ -50,7 +50,17 @@ report it honestly rather than repeat blindly. This is not an extra review gate.
 Old engine native journals remain historical and are not replay-compatible.
 
 Explicit user round/sprint limits are honored; unspecified limits remain absent.
-An agreed human-input blocker or reached user limit ends with an explicit
+An optional `maxNoProgressRounds` counts consecutive stalled rounds per loop/
+assignment. Do-ers propose stable progress IDs with inspectable evidence; the
+original reviewers independently verify them within their existing review.
+Only new IDs verified by every reviewer reset the counter. The credited
+evidence and prior feedback accompany later rounds to prevent repeated work
+being relabeled as progress. At the threshold, dispatched work has been joined
+and a `blocked`/`no-progress` result retains the counter and unresolved feedback.
+Omit total round and sprint limits to allow unlimited productive work. This
+opt-in safeguard does not change YAML agreement, introduce a review stage or
+preempt an individual agent call; semantic progress remains reviewer-judged.
+An agreed human-input blocker, stagnation stop or reached user limit ends with an explicit
 non-success result. Real project permissions, credentials, actual user approvals,
 scientific data provenance and product acceptance requirements are not removed.
 The shared `run.mjs` launcher keeps full CLI logs/results in unique ignored

@@ -102,10 +102,41 @@ rewritten into a second inline-only format.
 
 No attempt, sprint, concurrency, time or credit ceiling is invented. Optional
 `maxSprints` and `attempts.planning`/`attempts.implementation` apply only when
-supplied; a loop-id property can override its round limit. Rework is inside these
-rounds, not a separate repair/recovery pipeline. An agreed `needs-input` or an
-explicitly reached limit returns that status, not success. Inspect both the SDK
-envelope and the application-level result.
+supplied; a loop-id property can override its round limit. Those legacy attempt
+limits count **all rounds**, including productive rework, not just failures.
+
+For unlimited productive rounds and sprints with a stagnation stop, omit
+`attempts` and `maxSprints` and explicitly supply:
+
+```json
+{"projectRoot":".","maxNoProgressRounds":10}
+```
+
+This counts **consecutive rounds without new progress verified by every
+original reviewer**, independently per loop invocation/assignment. The do-er
+reports `progress:[{id,evidence}]` using stable milestone/check/finding IDs and
+inspectable evidence; each reviewer returns `verifiedProgress:[id,...]` after
+independent inspection. New IDs endorsed by all reviewers reset the counter
+even when the loop still needs rework. Reusing an already credited ID or the
+same evidence text (ignoring case/whitespace) never resets it. Changed summaries,
+file churn, repeated tests, relabeled old work,
+and unsupported progress claims do not qualify; reviewers compare against the
+credited evidence and prior feedback. There is no new review stage or change
+to YAML completion conditions.
+
+At the threshold the result is `blocked` with `stopCause:"no-progress"`, the
+consecutive counter, credited evidence and unresolved feedback. Completion or
+reviewer-confirmed `needs-input` exits earlier, including on the threshold round.
+Already-dispatched work is joined before stopping or revising a plan. If legacy
+`attempts`/`maxSprints` are also supplied, they remain independent hard ceilings.
+No stagnation threshold is inserted by default. This is a reviewer-judged
+round-boundary safeguard, not a deterministic proof of progress, per-agent
+timeout, or spend ceiling; a single hung/expensive agent call is not preempted
+by it. Explicit SDK resource limits, when supplied, still apply.
+
+Rework stays inside original loops, not a separate repair/recovery pipeline.
+An agreed `needs-input`, stagnation `blocked`, or explicitly reached limit is
+not success. Inspect both the SDK envelope and the application-level result.
 
 SDK step/agent journals support replay of this engine's runs. They provide
 best-effort at-least-once execution, not exactly-once side effects. Agents must
