@@ -48,11 +48,40 @@ test("planning and its original reviewers favor contract handoffs, critical path
     assert.match(calls[0].instructions.join("\n"), /smallest useful accepted handoff/);
     assert.match(calls[0].instructions.join("\n"), /explicit integration\/refactoring tasks/);
     assert.match(calls[0].instructions.join("\n"), /request.git.featureBranch/);
+    assert.match(calls[0].instructions.join("\n"), /doneWhen string, exclusions array and handoff string/);
+    assert.match(calls[0].instructions.join("\n"), /model name, input tokens, cached\/cache-read tokens, output tokens and elapsed time/);
     for (const call of calls.filter((input) => input.kind === "reviewer")) {
         assert.match(call.instructions.join("\n"), /agreed interface\/fixture or the whole implementation/);
         assert.match(call.instructions.join("\n"), /File overlap alone is not a dependency/);
         assert.match(call.instructions.join("\n"), /Plan review does not wait/);
     }
+});
+
+test("accurate rework agreement is not completion, and a reviewer cannot automatically promote the owner's status", async () => {
+    let round = 0;
+    const ctx = context(async (prompt) => {
+        const input = JSON.parse(prompt);
+        if (input.kind === "doer") {
+            round++;
+            return { status: round === 1 ? "rework" : "complete", summary: "Bounded finding.", artifact: { liveReady: false } };
+        }
+        return { agree: true, taskComplete: round !== 2, unmetCriteria: round === 2 ? ["Missing handoff."] : [], feedback: "Accurate report." };
+    });
+    const result = await runLoop({ ctx, loop: loops[0], key: "scope", context: { assignment: { doneWhen: "Document a bounded finding." } } });
+    assert.equal(result.rounds, 3);
+    assert.equal(result.status, "agreed");
+    assert.equal(result.artifact.liveReady, false);
+});
+
+test("an agreed scope change returns internal needs-replan instead of more rework or human input", async () => {
+    const result = await runLoop({
+        ctx: context(async (prompt) => JSON.parse(prompt).kind === "doer"
+            ? { status: "needs-replan", summary: "The live binding is outside this research task.", artifact: {} }
+            : { agree: true, taskComplete: false, unmetCriteria: ["Correct the scope."], feedback: "Architect decision needed." }),
+        loop: loops[0], key: "replan", context: { assignment: { id: "research" } },
+    });
+    assert.equal(result.status, "needs-replan");
+    assert.equal(result.rounds, 1);
 });
 
 test("the original YAML's hierarchy, roles, reviewer order and completion conditions are retained", () => {

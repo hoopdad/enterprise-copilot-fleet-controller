@@ -18,6 +18,38 @@ test.afterAll(async () => {
     await f?.cleanup();
 });
 
+test("agreed rework remains visibly incomplete rather than a green assignment PASS", async ({ page }) => {
+    const local = await fixture();
+    let instance;
+    try {
+        const label = "yaml:sprint/1/S1/task/research/AssignedWorkDeveloperLoop";
+        local.mutate((db) => {
+            db.prepare("UPDATE workflow_agents SET label=?,status='completed' WHERE run_id='live-run'")
+                .run(`${label}:reviewer:Critic:7`);
+            db.prepare("INSERT INTO workflow_agents(run_id,agent_id,phase_id,label,agent_type,status,started_at_ms,completed_at_ms) VALUES (?,?,?,?,?,?,?,?)")
+                .run("live-run", "owner", "p1", `${label}:doer:7`, "workflow-doer", "completed", Date.now() - 3000, Date.now() - 1000);
+        });
+        await appendFile(path.join(path.dirname(local.dbFile), "events.jsonl"), [
+            { type: "subagent.started", agentId: "owner", data: { toolCallId: "owner", workflowRunId: "live-run" } },
+            workEvent("owner-rework", "owner", { status: "rework", summary: "Adapter remains unresolved.", artifact: {} }),
+            workEvent("review-agreed", "a1", { agree: true, taskComplete: false, unmetCriteria: ["Clarify research scope."],
+                feedback: "PASS: accurately reported unresolved capability." }),
+        ].map((event) => JSON.stringify(event)).join("\n") + "\n");
+        instance = await startStudio(local.project, { sessionsRoot: local.sessionsRoot });
+        await page.goto(instance.url);
+        const review = page.locator('[data-task="agent:a1"]');
+        await expect(review).toContainText("Agrees: task still incomplete");
+        await expect(review).toHaveClass(/waiting/);
+        await review.click();
+        await expect(page.locator("#task-details")).toContainText("not the assignment's combined acceptance or proof of live capability");
+        await expect(page.locator("#error")).toBeHidden();
+    } finally {
+        await page.close();
+        await instance?.close();
+        await local.cleanup();
+    }
+});
+
 test("shows unfinished task context, opens unstarted pending tasks, and refreshes to the actual final outcome", async ({ page }) => {
     const local = await fixture();
     let instance;

@@ -15,6 +15,17 @@ work, secrets or ignored outputs. In a shared checkout use path-scoped
 `git commit --only`; do not switch branches while others are working. Report
 actual branch/commit IDs and any commit failure, never fabricated completion.
 Do not remove another process's Git lock or discard work to resolve contention.
+When observed metadata is available, include model name, input/cached(cache-read)/
+output token counts and elapsed time with units/scope in commit messages.
+Omit unavailable values rather than fabricate zeroes. A follow-up metadata commit
+may reference a code commit when final usage arrives later; do not amend reviewed
+history merely to add counters.
+
+Complete the assigned doneWhen/exclusions/handoff, not the entire product.
+Actionable unresolved/negative research can complete a bounded research task
+without asserting live capability. Rework needs a concrete unmet criterion and
+closing action. Material scope/contract/architecture changes use needs-replan,
+not endless research or invented human needs-input.
 
 The Scrum Master owns contract-first task decomposition, critical-path planning
 and assignment of Git reconciliation. Integration uses the authorized feature

@@ -55,8 +55,33 @@ export function createAgentScheduler(concurrency = {}, signal) {
     });
 }
 
-export function scheduleTasks(tasks, execute, { priorities = criticalPathPriorities(tasks), signal } = {}) {
-    const pending = new Set(tasks.map((task) => task.id)), results = new Map(), failures = new Map(), resources = new Set();
+export function createResourceScheduler(signal) {
+    const held = new Set(), queue = [];
+    let sequence = 0;
+    const drain = () => {
+        queue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+        for (let index = 0; index < queue.length;) {
+            const entry = queue[index];
+            if (signal?.aborted) { queue.splice(index, 1); entry.reject(signal.reason); continue; }
+            if (entry.resources.some((name) => held.has(name))) { index++; continue; }
+            queue.splice(index, 1);
+            entry.resources.forEach((name) => held.add(name));
+            const finish = () => { entry.resources.forEach((name) => held.delete(name)); drain(); };
+            Promise.resolve().then(() => { signal?.throwIfAborted(); return entry.work(); }).then(
+                (value) => { finish(); entry.resolve(value); },
+                (error) => { finish(); entry.reject(error); },
+            );
+        }
+    };
+    return (resources, work, priority = 0) => new Promise((resolve, reject) => {
+        queue.push({ resources, work, priority, sequence: sequence++, resolve, reject });
+        drain();
+    });
+}
+
+export function scheduleTasks(tasks, execute, { priorities = criticalPathPriorities(tasks), signal,
+    resources = createResourceScheduler(signal), replan } = {}) {
+    const pending = new Set(tasks.map((task) => task.id)), results = new Map(), failures = new Map();
     const order = tasks.map((task, index) => ({ task, index }))
         .sort((a, b) => priorities.get(b.task.id) - priorities.get(a.task.id) || a.index - b.index);
     let active = 0;
@@ -79,16 +104,13 @@ export function scheduleTasks(tasks, execute, { priorities = criticalPathPriorit
                         changed = true;
                         continue;
                     }
-                    const required = task.exclusiveResources ?? [];
-                    if (required.some((name) => resources.has(name))) continue;
                     pending.delete(task.id);
-                    required.forEach((name) => resources.add(name));
                     active++;
                     changed = true;
-                    let execution;
-                    try { execution = execute(task, dependencies, priorities.get(task.id)); }
-                    catch (error) { execution = Promise.reject(error); }
-                    Promise.resolve(execution).then((result) => {
+                    resources(task.exclusiveResources ?? [], () => execute(task, dependencies, priorities.get(task.id)),
+                        priorities.get(task.id)).then(async (outcome) => {
+                        const result = outcome?.status === "needs-replan" && replan
+                            ? await replan(task, outcome, dependencies) : outcome;
                         if (!result || typeof result.status !== "string") throw new Error("No assignment outcome was recorded");
                         results.set(task.id, result);
                     }).catch((error) => {
@@ -96,7 +118,6 @@ export function scheduleTasks(tasks, execute, { priorities = criticalPathPriorit
                         results.set(task.id, { status: "error", taskId: task.id, reason: String(error?.message ?? error) });
                     }).finally(() => {
                         active--;
-                        required.forEach((name) => resources.delete(name));
                         pump();
                     });
                 }

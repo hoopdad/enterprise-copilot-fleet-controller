@@ -2,7 +2,7 @@ const object = (value) => value !== null && typeof value === "object" && !Array.
 export const ownerSchema = {
     type: "object", required: ["status", "summary", "artifact"],
     properties: {
-        status: { type: "string", enum: ["complete", "rework", "needs-input"] },
+        status: { type: "string", enum: ["complete", "rework", "needs-replan", "needs-input"] },
         summary: { type: "string" }, artifact: { type: "object" },
         nextAction: { type: "string" },
         progress: { type: "array", items: {
@@ -15,6 +15,8 @@ export const reviewerSchema = {
     type: "object", required: ["agree", "feedback"],
     properties: {
         agree: { type: "boolean" }, feedback: { type: "string" },
+        taskComplete: { type: "boolean" },
+        unmetCriteria: { type: "array", items: { type: "string" } },
         verifiedProgress: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true },
     },
 };
@@ -29,7 +31,8 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
     }
     const guarded = maxNoProgressRounds !== undefined;
     const doerSchema = guarded ? { ...ownerSchema, required: [...ownerSchema.required, "progress"] } : ownerSchema;
-    const reviewSchema = guarded ? { ...reviewerSchema, required: [...reviewerSchema.required, "verifiedProgress"] } : reviewerSchema;
+    const reviewSchema = { ...reviewerSchema, required: [...reviewerSchema.required,
+        ...(guarded ? ["verifiedProgress"] : []), ...(context.assignment ? ["taskComplete", "unmetCriteria"] : [])] };
     return ctx.step(key, async () => {
         let feedback = null;
         let noProgressRounds = 0;
@@ -48,9 +51,12 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     "Follow actual project instructions and the supplied user authority. This workflow does not expand permissions.",
                     "Research and resolve technical issues within your work loop; do not invent prerequisite approval stages.",
                     "Return complete only when you consider this loop's completeWhen condition satisfied. Return rework for work you can continue, or needs-input for a decision or authority only the user can supply.",
+                    "Judge completion against the assigned task's doneWhen, exclusions and handoff, not the whole product ambition or all sprint-level criteria it contributes to. Bounded research can complete with actionable negative or unresolved findings when that satisfies its scope; task completion never asserts a working or live-ready capability.",
+                    "Use rework only for a concrete unmet assigned criterion and a next action that can close it, not merely because further useful investigation is possible. Return needs-replan when a finding materially changes architecture, contracts, feasibility or task scope; identify the decision and affected deliverable in summary. This is internal Architect/Scrum Master coordination, not human needs-input.",
                     "Use artifact keys matching the YAML outputs. ReleasePlan contains sprints with unique ids; SprintPlan contains assigned tasks with id, title, kind (ui/developer/designer/devops), owner and dependsOn.",
                     "Report actual failures and uncertainty. Accurate FAIL with feedback can satisfy the EndToEndTestLoop's agreement condition; do not turn it into a fabricated PASS.",
                     "Before ending every turn that changes files, including rework or needs-input, commit your own intended changes before reviewers inspect them. Include documentation, tests and partial work worth retaining; never commit secrets or ignored build outputs. Report the branch and commit IDs in your summary/artifact. If committing fails, report the actual problem; do not claim complete.",
+                    "When actually available, include model name, input tokens, cached/cache-read tokens, output tokens and elapsed time in the Git commit message. Use observed values with units/scope; omit unavailable values, never invent zeroes or infer exact counters from estimates. If final usage becomes available only afterward, an ordinary follow-up metadata commit can reference the original code commit; do not amend reviewed history just to add usage.",
                     "Use request.git.featureBranch when supplied, otherwise the project's intended feature branch. Establish that branch before parallel writing begins; do not switch a checkout underneath active agents. If working on a separate task branch, keep its commits available for integration and never delete unmerged work.",
                     "Inspect Git status first and preserve other agents' and the user's changes. Stage and commit explicit owned paths only; in a shared checkout use path-scoped git commit --only rather than committing the whole index. Do not switch a shared checkout's branch during concurrent work, force-push, discard work or remove another process's Git lock. Retry ordinary transient index contention rather than losing changes.",
                     "For needs-input, state the exact missing decision or authority in summary and an actionable nextAction. Do not request new approval for already-authorized ordinary work.",
@@ -66,6 +72,11 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                         "Split broad foundations into useful contract/fixture handoffs, substantial independent implementation tasks and explicit integration/refactoring tasks using existing task kinds. Document what tasks produce/consume and their acceptance criteria. Favor large amounts of parallel work with a small amount of integration refactoring; contracts are working agreements, not frozen monuments.",
                         "File overlap is an integration risk, not automatically a technical dependency. Coordinate genuinely conflicting shared edits, branch operations, test databases, ports and other mutable resources using matching exclusiveResources names. These resources are held for the assignment including reviews; split tasks at useful boundaries to avoid unnecessarily serializing whole subsystems. No worktree isolation is supplied by this runner.",
                         "As Scrum Master, identify the authorized feature branch (request.git.featureBranch when supplied), establish ownership of shared files and Git reconciliation, and include integration work to get every task's commits onto that feature branch. Never silently commit, stash or discard pre-existing user work. Do not require implementation to finish merely to approve this dispatch-ready plan.",
+                        "Give every task a concise doneWhen string, exclusions array and handoff string. Separate what this task must satisfy from sprint/product acceptance it merely contributes to. Research tasks must state whether actionable unresolved/unsupported findings complete the assignment, and leave live implementation/verification in their actual owning tasks.",
+                    ] : []),
+                    ...(context.scopeRevision ? [
+                        "This is a scoped amendment using the existing Architect and Scrum Master roles, not a full architecture restart or new approval stage. Resolve only the reported scope/contract issue; preserve user requirements, authority and unrelated running/accepted work.",
+                        "Architect: return the affected SprintArchitecture disposition. Scrum Master: return SprintPlan.tasks as a self-contained replacement graph for this one assignment, with explicit doneWhen/exclusions/handoffs. Its already accepted prerequisites are in scopeRevision.dependencies; do not reference unrelated in-flight task IDs. Keep new dependency edges inside this replacement graph. Preserve the outer plan on disk too: use a separate scoped amendment file if saving this replacement graph. Do not change the outer graph or require later DevOps before implementation; defer live work to its original stage.",
                     ] : []),
                     ...(["SprintReviewLoop", "SprintRetroLoop", "ReleaseCloseoutLoop"].includes(loop.id) ? [
                         "Reconcile all sprint/release work in Git before reporting complete: every intended file change must be committed and every task commit merged into the authorized feature branch, or explicitly abandoned. Resolve ordinary integration/refactoring here; do not invent a new acceptance stage.",
@@ -73,7 +84,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     ] : []),
                 ],
             }), { agent: agents.doer ?? "workflow-doer", label: `${key}:doer:${attempt}`, schema: doerSchema }), priority);
-            if (!object(owner) || !["complete", "rework", "needs-input"].includes(owner.status) ||
+            if (!object(owner) || !["complete", "rework", "needs-replan", "needs-input"].includes(owner.status) ||
                 typeof owner.summary !== "string" || !object(owner.artifact)) {
                 throw new Error(`Invalid do-er response in ${loop.id}; no completion was recorded`);
             }
@@ -98,6 +109,8 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     instructions: [
                         "Independently review the actual work and the YAML completeWhen condition. Read the relevant files, not just the do-er's summary.",
                         "Return agree:true when you agree with the reported outcome. Feedback may include observations even when you agree; there is no zero-findings requirement.",
+                        "Separately judge report accuracy and assignment completion. For assigned work return taskComplete:boolean and unmetCriteria:[specific assigned criteria still unmet]. Agreement with an accurate incomplete report is not task acceptance. Do not demand full product/live readiness from a bounded contract or research handoff.",
+                        "If continued rework is justified, identify a specific unmet doneWhen criterion and a closing next action. If the assigned deliverable is already satisfied, ask the owner to report complete rather than endorsing indefinite investigation. Material scope changes should be reported as needs-replan for existing Architect/Scrum Master coordination, not invented human permission.",
                         "Disagree with concrete feedback when more work is needed. Judge risk and evidence in context using the project's instructions, not an invented global policy.",
                         "A role named Stakeholder is a reviewer role, not a substitute for an actual required human authorization.",
                         "For any changed files, inspect the do-er's actual Git commits as well as the code. Uncommitted intended changes or an unsuccessful commit need concrete rework feedback, not a new proof protocol. Do not demand a commit for a turn that changed no files; never ask to commit secrets, generated junk or another person's work.",
@@ -110,6 +123,10 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                             "SprintPlan completion requires assigned todos and dispatched independent work, not finished implementation. Judge the orchestrator's actual dispatch context; do not require the Scrum Master to invent a second dispatcher or an additional approval stage.",
                             "Challenge unnecessary dependency chains: does a consumer need an agreed interface/fixture or the whole implementation? Check rough critical-path estimates, useful foundation handoffs, substantial parallel tasks and explicit integration work. Prefer economical refactoring over serializing all work for perfect contracts. File overlap alone is not a dependency; genuine mutable contention should be declared in exclusiveResources.",
                             "Check that the Scrum Master identified the feature branch and assigned Git integration/reconciliation responsibility. Plan review does not wait for all future code to exist or be merged.",
+                            "Check each task's doneWhen, exclusions and handoff. Sprint-level acceptance references describe contribution unless explicitly assigned in full. Do not silently turn a bounded research task into a live implementation or deployment obligation.",
+                        ] : []),
+                        ...(context.scopeRevision ? [
+                            "Review only this scoped architectural/plan amendment. Preserve the original requirements and outer task handoff; allow useful internal handoffs and honest capability limitations. Do not restart unrelated work or introduce another gate.",
                         ] : []),
                         ...(role === "Scrum Master" ? [
                             "You are accountable for Git reconciliation in this existing review role. Inspect all sprint task commits and their disposition: merged into the authorized feature branch, or retained on a branch with the task, commit IDs and abandonment reason recorded in a feature-branch commit message. Missing or uncommitted code requires the current do-er to reconcile it; remain read-only yourself. Do not accept chat-only abandonment or discard unmerged code.",
@@ -121,6 +138,10 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 }), { agent: agents.reviewer ?? "workflow-reviewer", label: `${key}:reviewer:${role}:${attempt}`, schema: reviewSchema }), priority);
                 if (!object(review) || typeof review.agree !== "boolean" || typeof review.feedback !== "string") {
                     throw new Error(`Invalid ${role} reviewer response in ${loop.id}`);
+                }
+                if (context.assignment && (typeof review.taskComplete !== "boolean" ||
+                    !Array.isArray(review.unmetCriteria) || review.unmetCriteria.some((item) => typeof item !== "string"))) {
+                    throw new Error(`Invalid ${role} assignment completion assessment in ${loop.id}`);
                 }
                 if (guarded && (!Array.isArray(review.verifiedProgress) ||
                     review.verifiedProgress.some((id) => typeof id !== "string" || !owner.progress.some((item) => item.id === id)) ||
@@ -137,11 +158,15 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 throw new Error(`Reviewer execution failed in ${loop.id}`);
             }
             const agreed = reviews.every((review) => review.agree);
-            if (agreed && owner.status === "complete" && !transportIssue) {
+            if (agreed && owner.status === "complete" && !transportIssue &&
+                (!context.assignment || reviews.every((review) => review.taskComplete))) {
                 return {
                     status: "agreed", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
                     ...(dispatched ? { dispatch: dispatched.context } : {}),
                 };
+            }
+            if (agreed && owner.status === "needs-replan") {
+                return { status: "needs-replan", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt };
             }
             if (agreed && owner.status === "needs-input") {
                 return {

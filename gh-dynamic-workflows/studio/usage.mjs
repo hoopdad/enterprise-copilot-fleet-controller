@@ -47,7 +47,7 @@ function ingest(state, line) {
             return;
         }
         const review = typeof result?.agree === "boolean" && typeof result.feedback === "string";
-        const work = ["complete", "rework", "needs-input"].includes(result?.status) && typeof result.summary === "string";
+        const work = ["complete", "rework", "needs-replan", "needs-input"].includes(result?.status) && typeof result.summary === "string";
         if (!review && !work) return;
         const names = [];
         for (const item of [...(Array.isArray(result.artifact?.ReleasePlan?.sprints) ? result.artifact.ReleasePlan.sprints : []),
@@ -57,6 +57,7 @@ function ingest(state, line) {
         state.results.set(event.agentId, {
             kind: review ? "review" : "work", agree: review ? result.agree : null,
             status: work ? result.status : null,
+            taskComplete: review && typeof result.taskComplete === "boolean" ? result.taskComplete : null,
             summary: (review ? result.feedback : result.summary).slice(0, 12_000), names,
         });
         return;
@@ -174,13 +175,17 @@ export function agentUsage(state, runId, agent) {
     };
 }
 
-export function agentWork(state, runId, agent) {
-    const ids = new Set([agent.id, agent.toolCallId].filter(Boolean));
-    const matches = (id) => {
-        const binding = state.bindings.get(id);
-        return binding ? binding.runId === runId && ids.has(binding.toolCallId) : ids.has(id);
+export function agentWork(state, runId, agent, agents = []) {
+    const resultFor = (target) => {
+        const ids = new Set([target.id, target.toolCallId].filter(Boolean));
+        return [...state.results].find(([id]) => {
+            const binding = state.bindings.get(id);
+            return binding ? binding.runId === runId && ids.has(binding.toolCallId) : ids.has(id);
+        })?.[1];
     };
-    const result = [...state.results].find(([id]) => matches(id))?.[1];
+    const result = resultFor(agent);
+    const ownerLabel = agent.label?.replace(/:reviewer:[^:]+:(\d+)$/, ":doer:$1");
+    const owner = ownerLabel !== agent.label ? agents.find((candidate) => candidate.label === ownerLabel) : null;
     const names = new Map();
     for (const [id, work] of state.results) {
         if (state.bindings.get(id)?.runId !== runId) continue;
@@ -203,6 +208,7 @@ export function agentWork(state, runId, agent) {
     }
     return { taskTitle, workResult: {
         kind: result.kind, agree: result.agree, status: result.status, summary,
+        ...(result.kind === "review" ? { taskComplete: result.taskComplete, ownerStatus: owner ? resultFor(owner)?.status ?? null : null } : {}),
         source: "Structured final agent response",
     } };
 }

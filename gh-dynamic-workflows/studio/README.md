@@ -78,8 +78,12 @@ raw IDs, source labels and timestamps collapsed under Technical details.
 Verbose context and
 outcomes use a local extractive summary: a few-word heading, a two-sentence
 description and at most two paragraphs of five sentences each. Phase progress
-is never used as an attributed agent reply. Reviewer `agree:true` is shown as
-agreement, not an invented PASS: agreement can accept an honestly reported FAIL.
+is never used as an attributed agent reply. Reviewer `agree:true` is report
+agreement, not an invented assignment PASS. Exact same-task/round owner outcomes
+and explicit `taskComplete` assessments distinguish agreed rework, scoped
+replanning, human input and completion reports. Missing completion context stays
+unconfirmed; a reviewer writing "PASS" does not override an owner's rework.
+No single review establishes combined assignment acceptance or live capability.
 Supported final work responses supply the agent's summary or reviewer feedback.
 Unambiguous task/sprint IDs are expanded using names from the same run's
 retained ReleasePlan/SprintPlan results; unavailable names are not guessed.

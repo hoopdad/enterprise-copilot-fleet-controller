@@ -94,10 +94,24 @@ test("uses recorded models/counters and distinguishes reviewer agreement from an
     assert.equal(tokenText(null), "Not recorded");
     assert.equal(processModel({ requestedModel: "wanted" }), "wanted (requested)");
     assert.equal(processModel({ model: "fallback", usage: { models: ["actual-a", "actual-b"] } }), "actual-a / actual-b");
-    assert.equal(workOutcome({ workResult: { kind: "review", agree: true, summary: "Agree with the reported FAIL." } }).title, "Reviewer agreed");
-    assert.equal(workOutcome({ workResult: { kind: "review", agree: true, summary: "PASS: Customer Activity Screen is correct." } }).title, "Reviewer stated PASS");
+    assert.equal(workOutcome({ workResult: { kind: "review", agree: true, summary: "Agree with the reported FAIL." } }).title, "Report agreed; completion unconfirmed");
+    assert.equal(workOutcome({ workResult: { kind: "review", agree: true, summary: "PASS: Customer Activity Screen is correct.", ownerStatus: "rework" } }).title, "Agrees: task still incomplete");
     assert.equal(outcome({ status: "completed", workResult: { kind: "review", agree: false, summary: "Filtering drops the selected customer." } }, { agent: true }).tone, "error");
     assert.equal(taskLabel({ taskTitle: "Customer Activity Screen" }), "Customer Activity Screen");
+});
+
+test("review agreement keeps task acceptance and live capability separate", () => {
+    for (const [ownerStatus, title] of [["rework", "Agrees: task still incomplete"],
+        ["needs-replan", "Agrees: scoped replanning needed"], ["needs-input", "Agrees: human input needed"]]) {
+        const result = workOutcome({ workResult: { kind: "review", agree: true, ownerStatus, summary: "PASS: accurate finding." } });
+        assert.equal(result.title, title);
+        assert.equal(result.tone, "waiting");
+        assert.match(result.summary, /not the assignment's combined acceptance or proof of live capability/);
+    }
+    assert.equal(workOutcome({ workResult: { kind: "review", agree: true, ownerStatus: "complete",
+        taskComplete: true, summary: "Bounded research complete; liveReady:false." } }).title, "Completion report agreed");
+    assert.equal(workOutcome({ workResult: { kind: "review", agree: true, ownerStatus: "complete",
+        taskComplete: false, summary: "Accurate report, missing handoff." } }).tone, "waiting");
 });
 
 test("describes unfinished tasks from recorded assignment, role and phase context instead of missing final output", () => {

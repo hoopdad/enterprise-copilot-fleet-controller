@@ -166,7 +166,7 @@ export class WorkflowStore {
             const usage = await this.usage.read(usageFile);
             detail.agents.forEach((agent) => {
                 agent.usage = agentUsage(usage, runId, agent);
-                Object.assign(agent, agentWork(usage, runId, agent));
+                Object.assign(agent, agentWork(usage, runId, agent, detail.agents));
             });
             detail.usageWarnings = [...usage.warnings];
         } catch (error) {

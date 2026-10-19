@@ -54,7 +54,7 @@ await joinSession({ workflows: [defineWorkflow({
                 if (input.kind === "reviewer") {
                     if (input.loop.id === "SprintPlanLoop" && input.dispatch?.status !== "dispatched")
                         throw new Error("Planning review preceded actual original-loop dispatch");
-                    return { agree: true, feedback: "Fixture review only" };
+                    return { agree: true, feedback: "Fixture review only", taskComplete: true, unmetCriteria: [] };
                 }
                 const artifact = input.loop.id === "ReleasePlanLoop" ? { ReleasePlan: { sprints: [{ id: "fixture" }] } }
                     : input.loop.id === "SprintPlanLoop" ? { SprintPlan: { tasks } } : {};

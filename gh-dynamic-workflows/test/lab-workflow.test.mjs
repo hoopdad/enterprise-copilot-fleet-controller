@@ -23,7 +23,11 @@ function fake({ tasks = [], artifact, review, args = {} } = {}) {
         agent: async (prompt, options) => {
             const input = JSON.parse(prompt);
             calls.push({ ...input, options });
-            if (input.kind === "reviewer") return review?.(input) ?? { agree: true, feedback: "Reviewed; observation retained" };
+            if (input.kind === "reviewer") return {
+                taskComplete: input.owner.status === "complete",
+                unmetCriteria: input.owner.status === "complete" ? [] : ["The assigned handoff remains incomplete."],
+                ...(await review?.(input) ?? { agree: true, feedback: "Reviewed; observation retained" }),
+            };
             let output = {};
             if (input.loop.id === "ReleasePlanLoop") output = { ReleasePlan: { sprints: [{ id: "s1" }] } };
             if (input.loop.id === "SprintPlanLoop") output = { SprintPlan: { tasks } };
@@ -91,6 +95,51 @@ test("ready work uses critical-path priority with bounded do-ers, and planning r
     assert.equal(work[0].context.scheduling.criticalPathMinutes, 23);
     assert.equal(work.length, 3);
     assert.ok(f.calls.some((call) => call.kind === "reviewer" && call.loop.id === "SprintPlanLoop"));
+});
+
+test("scoped Architect/plan amendments replace only the affected assignment and release its resources", { timeout: 5000 }, async () => {
+    const amended = Promise.withResolvers();
+    const f = fake({
+        args: { concurrency: { doers: 2, reviewers: 2 } },
+        tasks: [{ ...task("research"), exclusiveResources: ["contract"] }, task("independent"), task("consumer", "developer", ["research"])],
+        artifact: async (input, output) => {
+            if (input.context.scopeRevision && input.loop.id === "SprintArchitectureLoop") {
+                amended.resolve();
+                return { SprintArchitecture: { disposition: "Bounded research may finish with unresolved live capability." } };
+            }
+            if (input.context.scopeRevision && input.loop.id === "SprintPlanLoop") {
+                return { SprintPlan: { tasks: [{ ...task("research"), exclusiveResources: ["contract"],
+                    doneWhen: "Deliver actionable unresolved findings.", exclusions: ["A working live adapter."],
+                    handoff: "Capability findings and offline contract." }] } };
+            }
+            if (input.context.assignment?.id === "independent") await amended.promise;
+            if (input.context.assignment?.id === "research" && input.context.inherited?.assignment) {
+                return { research: { complete: true, liveReady: false } };
+            }
+            if (input.context.assignment?.id === "consumer") {
+                assert.equal(input.context.dependencies[0].artifact.research.complete, true);
+                assert.equal(input.context.dependencies[0].artifact.research.liveReady, false);
+            }
+            return output;
+        },
+    });
+    const original = f.ctx.agent;
+    f.ctx.agent = async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        const result = await original(prompt, options);
+        return input.kind === "doer" && input.context.assignment?.id === "research" && !input.context.inherited?.assignment
+            ? { ...result, status: "needs-replan", summary: "Separate bounded research from live implementation." } : result;
+    };
+    const result = await createLoopRunner()(f.ctx);
+    assert.equal(result.status, "completed");
+    assert.equal(f.calls.filter((call) => call.kind === "doer" && call.context.assignment?.id === "independent").length, 1);
+    assert.equal(f.calls.filter((call) => call.kind === "doer" && call.context.assignment?.id === "research").length, 2);
+    assert.ok(f.calls.some((call) => call.role === "Architect" && call.context.scopeRevision));
+    assert.ok(f.calls.some((call) => call.role === "Scrum Master" && call.context.scopeRevision));
+    assert.equal(new Set(f.calls.map((call) => call.options.label)).size, f.calls.length);
+    const callsBeforeReplay = f.calls.length;
+    assert.equal((await createLoopRunner()(f.ctx)).status, "completed");
+    assert.equal(f.calls.length, callsBeforeReplay);
 });
 
 test("review does not hold a do-er slot, reviewer capacity is independent, and resource locks include review", { timeout: 3000 }, async () => {

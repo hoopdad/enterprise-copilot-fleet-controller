@@ -2,7 +2,7 @@ import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import { definition as installedDefinition, loadWorkflow, flattenLoops } from "./loop-source.mjs";
 import { runLoop } from "./lab-loops.mjs";
-import { createAgentScheduler, criticalPathPriorities, scheduleTasks } from "./scheduling.mjs";
+import { createAgentScheduler, createResourceScheduler, criticalPathPriorities, scheduleTasks } from "./scheduling.mjs";
 
 export const ENGINE = "yaml-loops-v1";
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -33,6 +33,12 @@ export function sprintTasks(artifact) {
             throw new Error("Every task needs a unique id, title, kind, assigned owner and dependsOn array");
         }
         byId.set(task.id, task);
+        if (task.doneWhen !== undefined && (typeof task.doneWhen !== "string" || !task.doneWhen.trim()) ||
+            task.handoff !== undefined && (typeof task.handoff !== "string" || !task.handoff.trim()) ||
+            task.exclusions !== undefined && (!Array.isArray(task.exclusions) ||
+                task.exclusions.some((item) => typeof item !== "string" || !item.trim()))) {
+            throw new Error(`Task ${task.id} needs a nonempty doneWhen/handoff and string exclusions when supplied`);
+        }
         if (task.estimatedMinutes !== undefined && (!object(task.estimatedMinutes) ||
             Object.entries(task.estimatedMinutes).some(([key, value]) =>
                 !["implementation", "review", "integration"].includes(key) || !Number.isFinite(value) || value < 0))) {
@@ -99,6 +105,7 @@ export function createLoopRunner() {
         }
         const root = path.resolve(args.projectRoot);
         const scheduleAgent = createAgentScheduler(args.concurrency, ctx.signal);
+        const resources = createResourceScheduler(ctx.signal);
         if (typeof ctx.runId === "string") {
             try {
                 await stat(path.join(root, ".delivery-runs", ctx.runId, "lab-state.json"));
@@ -127,11 +134,18 @@ export function createLoopRunner() {
                     await decode?.(artifact);
                 },
                 attempts: attemptsFor(node.id), maxNoProgressRounds: args.maxNoProgressRounds, agents: args.agents, dispatch,
-                scheduleAgent, priority: extra.scheduling?.criticalPathMinutes ?? 0,
+                scheduleAgent: (kind, work, priority) => kind === "doer" && extra.scopeRevision
+                    ? resources(["workflow:scope-planning-edits"], () => scheduleAgent(kind, work, priority), priority)
+                    : scheduleAgent(kind, work, priority),
+                priority: extra.scheduling?.criticalPathMinutes ?? 0,
             });
             const outcome = { loopId: node.id, key, ...result };
             outcomes.push(outcome);
-            if (result.status === "agreed") Object.assign(documents, result.artifact);
+            if (result.status === "agreed") {
+                const accepted = { ...result.artifact };
+                if (extra.scopeRevision) delete accepted.SprintPlan;
+                Object.assign(documents, accepted);
+            }
             return outcome;
         };
         const stopped = (result) => ({
@@ -141,14 +155,52 @@ export function createLoopRunner() {
             ...(result.progress ? { stopCause: result.stopCause, progress: result.progress } : {}),
             completedSprints: [...completed], documents, outcomes,
         });
-        const assignedWork = async (container, sprint, tasks, iteration, planRound = 1) => {
+        const assignedWork = async (container, sprint, tasks, iteration, planRound = 1, scope = "", inherited = {}) => {
             ctx.phase(container.name);
             const assignments = tasks.filter((task) => task.kind !== "devops");
             return scheduleTasks(assignments, (task, dependencies, criticalPathMinutes) => {
                 const loop = all.get(taskKinds[task.kind][1]);
-                return perform(loop, `sprint/${iteration}/${sprint.id}/task/${task.id}${planRound > 1 ? `/plan-round/${planRound}` : ""}/${loop.id}`,
-                    { sprint, assignment: task, dependencies, scheduling: { criticalPathMinutes } }, undefined, false);
-            }, { priorities: criticalPathPriorities(tasks), signal: ctx.signal });
+                return perform(loop, `sprint/${iteration}/${sprint.id}${scope}/task/${task.id}${planRound > 1 ? `/plan-round/${planRound}` : ""}/${loop.id}`,
+                    { sprint, assignment: task, dependencies, inherited, scheduling: { criticalPathMinutes } }, undefined, false);
+            }, {
+                priorities: criticalPathPriorities(tasks), signal: ctx.signal, resources,
+                replan: async (task, request, dependencies) => {
+                    const revisionKey = `sprint/${iteration}/${sprint.id}${scope}/replan/${task.id}/plan-${planRound}`;
+                    const scopeRevision = { assignment: task, request, dependencies, inherited };
+                    const architecture = await perform(all.get("SprintArchitectureLoop"),
+                        `${revisionKey}/SprintArchitectureLoop`, { sprint, scopeRevision }, undefined, false);
+                    if (architecture.status !== "agreed") return architecture;
+                    let settle;
+                    const planning = await perform(all.get("SprintPlanLoop"),
+                        `${revisionKey}/SprintPlanLoop`, { sprint, scopeRevision }, (artifact) => {
+                            if (sprintTasks(artifact).some((item) => item.kind === "devops")) {
+                                throw new Error("Scoped replacements must keep DevOps in its original later stage");
+                            }
+                            if (!artifact.SprintPlan.tasks.length) throw new Error("A scope revision needs at least one bounded replacement handoff");
+                        }, false, (artifact, revisionRound) => {
+                            const replacements = sprintTasks(artifact);
+                            const pending = assignedWork(container, sprint, replacements, iteration, revisionRound,
+                                `${scope}/replan/${task.id}/plan-${planRound}`, scopeRevision)
+                                .then((results) => ({ results }), (error) => ({ error }));
+                            settle = async () => {
+                                const outcome = await pending;
+                                if (outcome.error) throw outcome.error;
+                                return outcome.results;
+                            };
+                            return { context: { status: "dispatched", taskIds: replacements.map((item) => item.id),
+                                replacesTask: task.id, preservesUnrelatedWork: true }, settle };
+                        });
+                    if (planning.status !== "agreed") return planning;
+                    const results = settle ? await settle() : await assignedWork(container, sprint,
+                        sprintTasks(planning.artifact), iteration, planning.rounds,
+                        `${scope}/replan/${task.id}/plan-${planRound}`, scopeRevision);
+                    const incomplete = results.find((result) => result.status !== "agreed");
+                    if (incomplete) return incomplete;
+                    return { status: "agreed", taskId: task.id, summary: "Scoped replacement handoffs accepted; capability readiness remains separate.",
+                        artifact: Object.assign({}, ...results.map((result) => result.artifact)),
+                        replacements: results.map((result) => ({ key: result.key, status: result.status })) };
+                },
+            });
         };
         for (const node of steps) {
             if (!node.substeps) {

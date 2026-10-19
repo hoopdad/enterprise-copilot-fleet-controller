@@ -43,6 +43,7 @@ test("SDK completion does not mask application stops; final loop and decisive fe
     assert.ok(text.split("\n").length <= 12);
     assert.equal(describeOutcome(envelope(), { status: "completed" }).exitCode, 0);
     assert.equal(describeOutcome(envelope(), { status: "needs-input" }).exitCode, 2);
+    assert.equal(describeOutcome(envelope(), { status: "needs-replan" }).exitCode, 2);
     assert.equal(describeOutcome(envelope(), { status: "blocked" }).exitCode, 2);
     assert.throws(() => describeOutcome(envelope(), {}), /no recognized application outcome/);
 });

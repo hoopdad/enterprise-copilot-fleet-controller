@@ -57,6 +57,17 @@ assigned-work steps join it. Before revising a rejected plan, already-dispatched
 work is joined to avoid old/revised assignments racing; its results feed rework.
 Saved JSON plan references and inline graphs use the same scheduler.
 
+Task doneWhen/exclusions/handoff distinguish bounded research completion from
+live capability. Assigned reviewers separately assess report agreement and
+task completion. Agreed needs-replan releases task resources, reuses the
+existing Sprint Architect and Scrum Master loops for a scoped replacement
+graph, and joins its accepted handoffs into the original dependency. Already
+accepted prerequisites are context; replacement dependencies stay internal.
+Unrelated work continues. Shared agent/resource queues cover replacements and
+only scoped planning do-er edits are serialized; no slot is held during review.
+Major YAML stage order and later DevOps placement are unchanged. SDK replay
+reuses scoped keys rather than redispatching accepted work.
+
 Every file-changing do-er turn commits owned changes before review; reviewers
 inspect those commits with read-only Git commands. The Scrum Master remains the
 existing planning do-er and sprint review/retro reviewer, assigning and auditing

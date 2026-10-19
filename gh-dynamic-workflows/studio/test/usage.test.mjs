@@ -98,3 +98,22 @@ test("projects structured final outcomes and unambiguous task names, never promp
     assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-/);
     assert.equal(agentWork(state, "other-run", { id: "review" }).workResult, null);
 });
+
+test("correlates review with the exact owner's round without importing other task or run outcomes", async (t) => {
+    const file = await logFixture(t);
+    await writeFile(file, lines([
+        started("owner", "owner-call"), started("reviewer", "review-call"),
+        workEvent("owner-result", "owner", { status: "needs-replan", summary: "Research scope needs correction.", artifact: {} }),
+        workEvent("review-result", "reviewer", { agree: true, taskComplete: false, unmetCriteria: ["Clarify bounded handoff."], feedback: "Accurate scope finding." }),
+    ]));
+    const state = await new UsageReader().read(file);
+    const agents = [
+        { id: "owner-call", label: "yaml:sprint/1/S1/task/research/DeveloperLoop:doer:3" },
+        { id: "review-call", label: "yaml:sprint/1/S1/task/research/DeveloperLoop:reviewer:Critic:3" },
+    ];
+    const projected = agentWork(state, "run", agents[1], agents).workResult;
+    assert.equal(projected.ownerStatus, "needs-replan");
+    assert.equal(projected.taskComplete, false);
+    assert.equal(agentWork(state, "run", { ...agents[1], label: agents[1].label.replace(":3", ":4") }, agents).workResult.ownerStatus, null);
+    assert.equal(agentWork(state, "different-run", agents[1], agents).workResult, null);
+});

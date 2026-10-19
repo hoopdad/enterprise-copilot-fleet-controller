@@ -1,6 +1,6 @@
 const active = new Set(["running", "queued", "pending", "in-progress", "needs-input", "awaiting-input", "paused"]);
 const failed = new Set(["error", "failed", "failure", "cancelled"]);
-const waiting = new Set(["needs-input", "awaiting-input", "limit-reached", "blocked", "paused", "halted", "stale", "unsettled"]);
+const waiting = new Set(["needs-input", "needs-replan", "awaiting-input", "limit-reached", "blocked", "paused", "halted", "stale", "unsettled"]);
 
 function words(value, count = 5) {
     return String(value ?? "").trim().split(/\s+/).slice(0, count).join(" ").slice(0, 100);
@@ -31,12 +31,17 @@ export function tokenText(value) {
 export function workOutcome(agent, { phase } = {}) {
     const work = agent.workResult;
     if (work?.kind === "review") {
-        const explicit = work.summary.match(/^\s*(PASS|FAIL)\b/i)?.[1]?.toUpperCase();
-        return { title: explicit ? `Reviewer stated ${explicit}` : work.agree ? "Reviewer agreed" : "Changes requested",
-            summary: work.summary, tone: work.agree && explicit !== "FAIL" ? "success" : "error" };
+        if (!work.agree) return { title: "Changes requested", summary: work.summary, tone: "error" };
+        const title = work.ownerStatus === "needs-replan" ? "Agrees: scoped replanning needed"
+            : work.ownerStatus === "needs-input" ? "Agrees: human input needed"
+            : work.ownerStatus === "rework" || work.taskComplete === false ? "Agrees: task still incomplete"
+            : work.ownerStatus === "complete" ? "Completion report agreed" : "Report agreed; completion unconfirmed";
+        return { title, summary: `${work.summary}\nReport agreement is not the assignment's combined acceptance or proof of live capability.`,
+            tone: work.ownerStatus === "complete" && work.taskComplete !== false ? "success" : "waiting" };
     }
     if (work) return {
-        title: work.status === "complete" ? "Work reported complete" : work.status === "needs-input" ? "Awaiting input" : "Work needs revision",
+        title: work.status === "complete" ? "Work reported complete" : work.status === "needs-input" ? "Awaiting input"
+            : work.status === "needs-replan" ? "Needs scoped replanning" : "Work needs revision",
         summary: work.summary, tone: work.status === "complete" ? "success" : "waiting",
     };
     const status = String(agent.status ?? "").toLowerCase().replaceAll(/[_\s]+/g, "-");

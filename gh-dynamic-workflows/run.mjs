@@ -42,7 +42,7 @@ export function describeOutcome(envelope, result) {
             exitCode: envelope.status === "cancelled" ? 130 : envelope.status === "paused" ? 3 : 1,
         };
     }
-    if (!object(result) || !["completed", "limit-reached", "needs-input", "blocked"].includes(result.status)) {
+    if (!object(result) || !["completed", "limit-reached", "needs-input", "needs-replan", "blocked"].includes(result.status)) {
         throw new Error("SDK completed, but its result has no recognized application outcome");
     }
     const stop = result.outcomes?.findLast((outcome) => outcome.status === result.status &&

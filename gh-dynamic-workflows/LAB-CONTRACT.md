@@ -38,10 +38,27 @@ Verified progress resets the counter even when completion is not yet agreed.
 The existing completion/human-input conditions take precedence. Legacy total
 round/sprint caps, if also supplied, remain independent limits.
 
-Do-er report: `{status:"complete"|"rework"|"needs-input",summary:string,artifact:object}`.
+Do-er report: `{status:"complete"|"rework"|"needs-replan"|"needs-input",summary:string,artifact:object}`.
 An optional `nextAction` can identify the exact decision needed for human input.
 Reviewer report: `{agree:boolean,feedback:string}`. No mandated empty findings,
 file evidence lists, cryptographic bindings or native PASS receipt.
+Assigned-work reviews additionally require `taskComplete:boolean` and
+`unmetCriteria:string[]`, separating accurate reports from completion judgments.
+Owner `complete`, reviewer agreement and completion endorsement are all needed
+for assignment acceptance. No reviewer promotes owner rework into completion.
+Agreed `needs-replan` is internal scoped Architect/Scrum Master coordination,
+not human input. The existing architecture/plan loops return bounded replacement
+assignments with internal dependency edges and accepted outer prerequisites in
+context; the outer graph and unrelated work are preserved. Replacement tasks
+cannot pull later DevOps work into implementation. Shared resources are released
+before routing and applied to replacements; SDK replay reuses amended steps.
+
+Planners supply `doneWhen`, `exclusions` and `handoff`; supplied fields are
+validated but absent legacy fields do not create a new admission gate. Completion
+is task-specific: sprint criteria may describe contribution rather than full
+ownership. Actionable unresolved research is a valid completed handoff when
+scoped that way, without implying live readiness. Concrete rework identifies an
+unmet criterion and closing action; material expansion uses `needs-replan`.
 
 When `maxNoProgressRounds` is supplied, do-ers additionally return
 `progress:[{id:string,evidence:string}]` (or `[]`). IDs identify stable
@@ -137,8 +154,11 @@ No-change turns need no artificial commit. Preserve other staged/dirty work:
 stage explicit owned paths and use path-scoped `git commit --only` in shared
 checkouts. Never commit secrets/ignored outputs, switch branches under active
 agents, discard work or remove another process's Git lock. Report commit
-failures instead of claiming completion. Reviewers inspect actual commits;
-their execute tool is restricted by instructions to read-only Git inspection,
+failures instead of claiming completion. Reviewers inspect actual commits.
+When available, record observed model name, input/cached/output counts and elapsed
+time with units/scope in commit messages. Omit unavailable values; a follow-up
+metadata commit can reference the code commit without amending reviewed history.
+Their execute tool is restricted by instructions to read-only Git inspection,
 not writable commands or an OS-enforced sandbox.
 
 The Scrum Master is the existing `SprintPlanLoop` do-er role, normally played

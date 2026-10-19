@@ -129,6 +129,38 @@ non-editing. Their command restrictions are instructions, not an OS sandbox.
 Committing and reconciliation are agent responsibilities checked in existing
 reviews, not a new engine admission or evidence framework.
 
+### Task completion and scoped amendments
+
+New plans supply each task's `doneWhen` string, `exclusions` array and `handoff`
+string. Legacy plans remain readable; owners/reviewers must clarify their actual
+bounded scope rather than silently substitute full sprint acceptance. A research
+task may finish with actionable unresolved/unsupported findings while the live
+capability remains unverified. Rework names the unmet task criterion and a
+closing action; additional interesting research alone is not a reason to loop.
+
+Assigned-work reviewers return `taskComplete:boolean` and `unmetCriteria:string[]`
+separately from report `agree`. Acceptance still requires owner `complete` and
+all reviewers agreeing and endorsing task completion. Reviews cannot promote
+owner `rework` into completion.
+
+An agreed owner `needs-replan` invokes the existing Sprint Architect and Scrum
+Master loops for a scoped amendment under Sprint Loop. They resolve only the
+affected architecture and return a self-contained replacement `SprintPlan` for
+that assignment. Existing accepted prerequisites are supplied as context; new
+dependencies stay within the replacement graph. Its accepted handoffs fulfill
+the original outer dependency. Unrelated accepted/running tasks are not restarted
+or cancelled. Replacement work dispatches before its planning reviews, joins
+before plan revision, and shares resource/agent queues with ordinary work.
+Source task resources are released before routing. DevOps stays in its original
+later stage. This is conditional reuse of existing roles, not a new standing
+approval stage or full architecture restart. Human `needs-input` stays distinct.
+
+When observed values are available, commit messages include model name, input,
+cached/cache-read and output tokens, and elapsed time with units/scope. Omit
+unknown values; do not estimate or invent zeroes. Later usage can be recorded in
+a follow-up metadata commit referencing the original, without amending reviewed
+history.
+
 E2E can report an accurate actionable **FAIL** and receive agreement. DevOps
 still requires agreement **and cloud-deployed tests passing**, because that is
 in the original YAML. Reviewers judge whether those conditions were really met.
