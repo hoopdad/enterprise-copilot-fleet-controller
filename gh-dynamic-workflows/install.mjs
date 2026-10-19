@@ -22,6 +22,7 @@ const files = [
     ["loops.yml", "gh-dynamic-workflows/loops.yml"],
     ["loop-source.mjs", "gh-dynamic-workflows/loop-source.mjs"],
     ["loop-workflow.mjs", "gh-dynamic-workflows/loop-workflow.mjs"],
+    ["scheduling.mjs", "gh-dynamic-workflows/scheduling.mjs"],
     ["run.mjs", "gh-dynamic-workflows/run.mjs"],
     ["workflow.mjs", "gh-dynamic-workflows/workflow.mjs"],
     ["extension.mjs", "gh-dynamic-workflows/extension.mjs"],
@@ -34,7 +35,7 @@ const files = [
     ["RESEARCH.md", "gh-dynamic-workflows/RESEARCH.md"],
     ...["extension.mjs", "workflow-doer.agent.md", "workflow-reviewer.agent.md"].map((file) =>
         [`templates/${file}`, `gh-dynamic-workflows/templates/${file}`]),
-    ...["install.test.mjs", "lab-loops.test.mjs", "lab-workflow.test.mjs", "lab-sdk.test.mjs", "run.test.mjs"].map((file) =>
+    ...["install.test.mjs", "lab-loops.test.mjs", "lab-workflow.test.mjs", "lab-sdk.test.mjs", "run.test.mjs", "scheduling.test.mjs"].map((file) =>
         [`test/${file}`, `gh-dynamic-workflows/test/${file}`]),
     ["templates/extension.mjs", ".github/extensions/autonomous-delivery/extension.mjs"],
     ["templates/workflow-doer.agent.md", ".github/agents/workflow-doer.agent.md"],

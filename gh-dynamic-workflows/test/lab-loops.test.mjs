@@ -7,6 +7,54 @@ const loops = flattenLoops(definition.workflows.ReleaseLoop.steps);
 function context(agent) {
     return { agent, step: async (_, fn) => fn(), parallel: (thunks) => Promise.all(thunks.map((fn) => fn())), log() {} };
 }
+test("every writing turn commits before review, and the existing Scrum Master reviews Git reconciliation", async () => {
+    const calls = [];
+    const ctx = context(async (prompt) => {
+        const input = JSON.parse(prompt);
+        calls.push(input);
+        return input.kind === "doer"
+            ? { status: "complete", summary: "Committed own changes as abc123 on feature/work", artifact: {} }
+            : { agree: true, feedback: "Inspected committed changes" };
+    });
+    await runLoop({ ctx, loop: loops.find((node) => node.id === "SprintReviewLoop"), key: "git", context: {} });
+    const owner = calls.find((call) => call.kind === "doer");
+    assert.match(owner.instructions.join("\n"), /every turn that changes files.*rework or needs-input/);
+    assert.match(owner.instructions.join("\n"), /git commit --only/);
+    assert.match(owner.instructions.join("\n"), /retain its code commits on a named branch/);
+    assert.match(owner.instructions.join("\n"), /abandonment reason in a commit message on the feature branch/);
+    for (const review of calls.filter((call) => call.kind === "reviewer")) {
+        assert.equal(review.owner.summary, "Committed own changes as abc123 on feature/work");
+        assert.match(review.instructions.join("\n"), /actual Git commits/);
+    }
+    const scrum = calls.find((call) => call.kind === "reviewer" && call.role === "Scrum Master");
+    assert.match(scrum.instructions.join("\n"), /accountable for Git reconciliation/);
+    assert.match(scrum.instructions.join("\n"), /remain read-only yourself/);
+});
+
+test("planning and its original reviewers favor contract handoffs, critical paths and economical integration", async () => {
+    const calls = [];
+    await runLoop({
+        ctx: context(async (prompt) => {
+            const input = JSON.parse(prompt);
+            calls.push(input);
+            return input.kind === "doer" ? { status: "complete", summary: "Plan ready", artifact: {} }
+                : { agree: true, feedback: "" };
+        }),
+        loop: loops.find((node) => node.id === "SprintPlanLoop"), key: "planning", context: {},
+        dispatch: async () => ({ context: { status: "dispatched" }, settle: async () => [] }),
+    });
+    assert.equal(calls[0].role, "Scrum Master");
+    assert.match(calls[0].instructions.join("\n"), /critical-path analysis/);
+    assert.match(calls[0].instructions.join("\n"), /smallest useful accepted handoff/);
+    assert.match(calls[0].instructions.join("\n"), /explicit integration\/refactoring tasks/);
+    assert.match(calls[0].instructions.join("\n"), /request.git.featureBranch/);
+    for (const call of calls.filter((input) => input.kind === "reviewer")) {
+        assert.match(call.instructions.join("\n"), /agreed interface\/fixture or the whole implementation/);
+        assert.match(call.instructions.join("\n"), /File overlap alone is not a dependency/);
+        assert.match(call.instructions.join("\n"), /Plan review does not wait/);
+    }
+});
+
 test("the original YAML's hierarchy, roles, reviewer order and completion conditions are retained", () => {
     assert.deepEqual(definition.workflows.ReleaseLoop.steps.map((node) => node.id),
         ["ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop", "SprintLoop", "ReleaseCloseoutLoop"]);

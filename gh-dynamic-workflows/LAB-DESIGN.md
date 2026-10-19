@@ -9,6 +9,8 @@
 task dependency graph and carries accepted artifacts forward. `lab-loops.mjs`
 implements the repeated do-er followed by independent original reviewers.
 Both workflow registration names use that same runner.
+`scheduling.mjs` owns the dependency-ready queue, longest-downstream estimates,
+named assignment resources and separate do-er/reviewer agent capacity.
 
 The 13 leaf loops are Architecture, User Experience, Release Plan, Sprint
 Design, Sprint Architecture, Sprint Plan, UI Developer Work, Developer Work,
@@ -17,7 +19,9 @@ Closeout. Sprint Loop is their source container, not another approval stage.
 Exact owners, reviewers, descriptions and conditions remain in YAML.
 
 Do-ers can edit and execute ordinary tools; reviewers independently inspect
-work read-only. Named roles are passed with their source descriptions. There
+work without editing, including read-only Git commands through their execute
+tool. That restriction is an instruction, not an OS sandbox. Named roles are
+passed with their source descriptions. There
 is no source/profile admission, native executor, ticket broker, workspace lease,
 separate operator, frozen artifact/plan, or engine-managed receipt protocol.
 The only progression agreement is the agreement in the original loop.
@@ -30,12 +34,37 @@ This validates scheduling data, not a new risk-policy review. No globally
 disjoint-file rule is imposed; planning/reviewers decide whether work is genuinely
 independent. Simultaneous tasks are labeled; SDK phase is set outside parallel
 work because it is run-global.
+The ready queue never starts dependency-waiting assignments. It ranks ready
+work by rough implementation/review/integration minutes plus the longest
+downstream path, with plan-order ties and no invented estimates. Optional
+`concurrency.doers` and `concurrency.reviewers` independently limit agent calls,
+not whole task loops, so review does not occupy do-er capacity. Named exclusive
+resources are acquired atomically for an assignment, including review/rework;
+resource waits consume no agent slots. Unrelated branches continue after an
+unsuccessful assignment; errors are surfaced after dispatched work settles.
+No capacity setting overrides host limits or inserts round/sprint ceilings.
+
+Planning and original reviewers favor development by contract: accepted
+interface/fixture handoffs unlock substantial parallel implementations, followed
+by explicit integration tasks. Small refactorings are expected; file overlap is
+not automatically a dependency, and no new proof or frozen-contract protocol is
+introduced. Shared mutable editing/testing resources need matching declarations;
+these are in-process scheduling controls, not worktrees or cross-run isolation.
 Planning submits a dispatch-ready graph; the scheduler dispatches its original
 work loops before planning reviewers verify actual assignment and dispatch.
 Implementation need not finish for that planning agreement. The following
 assigned-work steps join it. Before revising a rejected plan, already-dispatched
 work is joined to avoid old/revised assignments racing; its results feed rework.
 Saved JSON plan references and inline graphs use the same scheduler.
+
+Every file-changing do-er turn commits owned changes before review; reviewers
+inspect those commits with read-only Git commands. The Scrum Master remains the
+existing planning do-er and sprint review/retro reviewer, assigning and auditing
+Git reconciliation. Existing Product Owner turns perform needed merges/repairs.
+Task commits reach the feature branch or stay on retained branches with the task,
+commit IDs and abandonment reason in a feature-branch commit message. No code
+is silently discarded and no new role, stage or native Git gate is added. The
+scheduler does not run Git on the user's behalf or require a clean starting tree.
 
 Sprint Review may append work to ReleasePlan. Retro may update Architecture,
 UserExperience and ReleasePlan. Subsequent sprints use these accepted updates;

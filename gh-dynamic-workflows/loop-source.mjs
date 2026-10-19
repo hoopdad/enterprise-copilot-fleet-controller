@@ -47,6 +47,10 @@ export function workflowMetadata(name) {
             acceptance: { type: "array" }, repositories: { type: "array" },
             attempts: { type: "object" }, maxSprints: { type: "integer" },
             maxNoProgressRounds: { type: "integer", minimum: 1 },
+            concurrency: { type: "object", additionalProperties: false, properties: {
+                doers: { type: "integer", minimum: 1 }, reviewers: { type: "integer", minimum: 1 },
+            } },
+            git: { type: "object", properties: { featureBranch: { type: "string", minLength: 1 } } },
         } },
     };
 }

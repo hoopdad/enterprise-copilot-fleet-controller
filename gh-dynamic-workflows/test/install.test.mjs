@@ -14,6 +14,12 @@ test("fresh installations contain only ordinary YAML loop runtime and do-er/revi
     assert.equal(installed.status, 0, installed.stderr);
     const files = await readdir(path.join(root, "gh-dynamic-workflows"));
     assert.ok(files.includes("loops.yml") && files.includes("package-lock.json"));
+    assert.ok(files.includes("scheduling.mjs"));
+    assert.ok((await readdir(path.join(root, "gh-dynamic-workflows", "test"))).includes("scheduling.test.mjs"));
+    const reviewer = await readFile(path.join(root, ".github", "agents", "workflow-reviewer.agent.md"), "utf8");
+    assert.match(reviewer, /"execute"/);
+    assert.match(reviewer, /only for read-only Git inspection/);
+    assert.match(reviewer, /abandonment reason in a feature-branch commit message/);
     assert.ok(!files.some((file) => /executor|policy|preflight|scratch|runtime/.test(file)));
     assert.deepEqual((await readdir(path.join(root, ".github", "agents"))).sort(),
         ["workflow-doer.agent.md", "workflow-reviewer.agent.md"]);

@@ -74,6 +74,61 @@ do not wait for implementation to finish; the assigned-work steps join it.
 If planning needs revision, already-dispatched work is joined before revising
 assignments, so old and revised work cannot race.
 
+Planning and its original reviewers distinguish needing an **agreed interface
+or fixture** from needing a finished implementation. Broad foundations become
+useful handoffs, substantial parallel work and explicit integration/refactoring
+tasks. Rough critical-path estimates guide dispatch; small integration changes
+are preferable to unnecessary dependency chains. No extra proof stage or
+frozen-contract requirement is introduced, and the major YAML stages are unchanged.
+
+Optional task `estimatedMinutes:{implementation,review,integration}` supplies
+nonnegative estimates. Ready work is prioritized by its own total plus the
+longest downstream path; missing estimates contribute zero and ties retain plan
+order. Optional `exclusiveResources:["shared-module","test-db"]` prevents
+matching assignments from overlapping, including review/rework. Dependencies
+and resource waits consume no agent slots. Independent branches keep moving
+when another blocks; errors are surfaced after dispatched independent work is
+joined. File overlap alone creates neither a dependency nor an automatic lock.
+There is no automatic worktree/service isolation.
+
+Configure simultaneous agent calls explicitly, for example:
+
+```json
+{
+  "projectRoot": ".",
+  "concurrency": {"doers": 4, "reviewers": 2},
+  "git": {"featureBranch": "feature/customer-work"}
+}
+```
+
+Do-er slots are released before review; reviewers have their own capacity.
+These are example values, not defaults or new lifetime caps. Omitted capacities
+remain uncapped locally; actual host/session limits still apply.
+
+### Git responsibility
+
+Any do-er changing files commits its own intended changes **at the end of each
+turn, before review**, including useful partial work on rework/input stops.
+It reports actual branch/commit IDs and commit failures, preserves other dirty
+or staged work, and uses explicit owned paths (`git commit --only` in shared
+checkouts). Never commit secrets/ignored outputs, discard work, remove another
+process's Git lock or switch a shared branch under active agents.
+
+The **Scrum Master** is the normal do-er playing that role in `SprintPlanLoop`
+and an existing reviewer in sprint review/retro. It assigns Git integration
+responsibility and audits that all work is reconciled. The existing Product
+Owner do-er handles needed reconciliation in review/retro/closeout; no writable
+reviewer or new stage is added. All task commits must reach the authorized
+feature branch, or their code must stay on a retained branch with the task,
+branch/commit IDs and abandonment reason recorded in a **feature-branch commit
+message**. An empty documentation commit can record abandonment. Chat notes
+alone are insufficient; do not delete the retained code branch.
+
+Reviewers can execute **read-only Git inspection** and otherwise remain
+non-editing. Their command restrictions are instructions, not an OS sandbox.
+Committing and reconciliation are agent responsibilities checked in existing
+reviews, not a new engine admission or evidence framework.
+
 E2E can report an accurate actionable **FAIL** and receive agreement. DevOps
 still requires agreement **and cloud-deployed tests passing**, because that is
 in the original YAML. Reviewers judge whether those conditions were really met.

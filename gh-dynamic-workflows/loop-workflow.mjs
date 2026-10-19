@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import { definition as installedDefinition, loadWorkflow, flattenLoops } from "./loop-source.mjs";
 import { runLoop } from "./lab-loops.mjs";
+import { createAgentScheduler, criticalPathPriorities, scheduleTasks } from "./scheduling.mjs";
 
 export const ENGINE = "yaml-loops-v1";
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -32,6 +33,16 @@ export function sprintTasks(artifact) {
             throw new Error("Every task needs a unique id, title, kind, assigned owner and dependsOn array");
         }
         byId.set(task.id, task);
+        if (task.estimatedMinutes !== undefined && (!object(task.estimatedMinutes) ||
+            Object.entries(task.estimatedMinutes).some(([key, value]) =>
+                !["implementation", "review", "integration"].includes(key) || !Number.isFinite(value) || value < 0))) {
+            throw new Error(`Task ${task.id} estimatedMinutes accepts nonnegative implementation, review and integration durations`);
+        }
+        if (task.exclusiveResources !== undefined && (!Array.isArray(task.exclusiveResources) ||
+            task.exclusiveResources.some((name) => typeof name !== "string" || !name.trim() || name !== name.trim()) ||
+            new Set(task.exclusiveResources).size !== task.exclusiveResources.length)) {
+            throw new Error(`Task ${task.id} exclusiveResources needs unique nonempty resource names`);
+        }
     }
     const visited = new Set(), visiting = new Set();
     const walk = (task) => {
@@ -87,6 +98,7 @@ export function createLoopRunner() {
             throw new Error("An explicitly supplied maxSprints must be a positive integer");
         }
         const root = path.resolve(args.projectRoot);
+        const scheduleAgent = createAgentScheduler(args.concurrency, ctx.signal);
         if (typeof ctx.runId === "string") {
             try {
                 await stat(path.join(root, ".delivery-runs", ctx.runId, "lab-state.json"));
@@ -115,6 +127,7 @@ export function createLoopRunner() {
                     await decode?.(artifact);
                 },
                 attempts: attemptsFor(node.id), maxNoProgressRounds: args.maxNoProgressRounds, agents: args.agents, dispatch,
+                scheduleAgent, priority: extra.scheduling?.criticalPathMinutes ?? 0,
             });
             const outcome = { loopId: node.id, key, ...result };
             outcomes.push(outcome);
@@ -130,25 +143,12 @@ export function createLoopRunner() {
         });
         const assignedWork = async (container, sprint, tasks, iteration, planRound = 1) => {
             ctx.phase(container.name);
-            const promises = new Map();
-            const implement = (task) => {
-                if (promises.has(task.id)) return promises.get(task.id);
-                const promise = Promise.all(task.dependsOn.map((id) => implement(tasks.find((item) => item.id === id))))
-                    .then(async (dependencies) => {
-                        const incomplete = dependencies.find((result) => result.status !== "agreed");
-                        if (incomplete) return { status: "not-run", taskId: task.id, reason: "A dependency did not finish", dependency: incomplete };
-                        const loop = all.get(taskKinds[task.kind][1]);
-                        return perform(loop, `sprint/${iteration}/${sprint.id}/task/${task.id}${planRound > 1 ? `/plan-round/${planRound}` : ""}/${loop.id}`,
-                            { sprint, assignment: task, dependencies }, undefined, false);
-                    });
-                promises.set(task.id, promise);
-                return promise;
-            };
             const assignments = tasks.filter((task) => task.kind !== "devops");
-            const results = await ctx.parallel(assignments.map((task) => () => implement(task)));
-            const failed = assignments.filter((_, index) => results[index] === null);
-            if (failed.length) throw new Error(`Assigned work execution failed for ${failed.map((task) => task.id).join(", ")}; no completion was recorded`);
-            return results;
+            return scheduleTasks(assignments, (task, dependencies, criticalPathMinutes) => {
+                const loop = all.get(taskKinds[task.kind][1]);
+                return perform(loop, `sprint/${iteration}/${sprint.id}/task/${task.id}${planRound > 1 ? `/plan-round/${planRound}` : ""}/${loop.id}`,
+                    { sprint, assignment: task, dependencies, scheduling: { criticalPathMinutes } }, undefined, false);
+            }, { priorities: criticalPathPriorities(tasks), signal: ctx.signal });
         };
         for (const node of steps) {
             if (!node.substeps) {

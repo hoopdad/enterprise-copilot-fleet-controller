@@ -77,6 +77,68 @@ test("independent tasks overlap, dependent work starts after its own reviews, no
     assert.ok(f.calls.some((call) => call.kind === "doer" && call.context.assignment?.id === "design" && call.loop.owner === "Designer"));
 });
 
+test("ready work uses critical-path priority with bounded do-ers, and planning reviewers still run", async () => {
+    const tasks = [
+        { ...task("short"), estimatedMinutes: { implementation: 1 } },
+        { ...task("critical"), estimatedMinutes: { implementation: 2, review: 1 } },
+        { ...task("integration", "developer", ["critical"]), estimatedMinutes: { integration: 20 } },
+    ];
+    const f = fake({ tasks, args: { concurrency: { doers: 1, reviewers: 1 } } });
+    const result = await createLoopRunner()(f.ctx);
+    assert.equal(result.status, "completed");
+    const work = f.calls.filter((call) => call.kind === "doer" && call.context.assignment);
+    assert.equal(work[0].context.assignment.id, "critical");
+    assert.equal(work[0].context.scheduling.criticalPathMinutes, 23);
+    assert.equal(work.length, 3);
+    assert.ok(f.calls.some((call) => call.kind === "reviewer" && call.loop.id === "SprintPlanLoop"));
+});
+
+test("review does not hold a do-er slot, reviewer capacity is independent, and resource locks include review", { timeout: 3000 }, async () => {
+    const reviewing = Promise.withResolvers(), implemented = Promise.withResolvers();
+    const started = new Set();
+    const f = fake({
+        args: { concurrency: { doers: 1, reviewers: 1 } },
+        tasks: [
+            { ...task("first"), exclusiveResources: ["shared-module"] },
+            { ...task("conflicting"), exclusiveResources: ["shared-module"] },
+            task("independent"),
+        ],
+        artifact: async (input, output) => {
+            const id = input.context.assignment?.id;
+            if (id) started.add(id);
+            if (id === "independent") {
+                await reviewing.promise;
+                implemented.resolve();
+            }
+            return output;
+        },
+        review: async (input) => {
+            if (input.context.assignment?.id === "first" && input.role === "Architect") {
+                assert.ok(!started.has("conflicting"));
+                reviewing.resolve();
+                await implemented.promise;
+            }
+            return { agree: true, feedback: "" };
+        },
+    });
+    assert.equal((await createLoopRunner()(f.ctx)).status, "completed");
+    assert.deepEqual([...started], ["first", "independent", "conflicting"]);
+});
+
+test("invalid scheduling options fail explicitly without changing the original task kinds", async () => {
+    for (const extra of [
+        { estimatedMinutes: null }, { estimatedMinutes: { implementation: -1 } },
+        { estimatedMinutes: { review: "10" } }, { estimatedMinutes: { integration: Infinity } },
+        { estimatedMinutes: { guessing: 10 } }, { exclusiveResources: "db" },
+        { exclusiveResources: ["db", "db"] }, { exclusiveResources: [" db"] }, { exclusiveResources: [""] },
+    ]) {
+        assert.throws(() => sprintTasks({ SprintPlan: { tasks: [{ ...task("bad"), ...extra }] } }), /Task bad/);
+    }
+    const f = fake({ args: { concurrency: { doers: 0 } } });
+    await assert.rejects(createLoopRunner()(f.ctx), /concurrency/);
+    assert.equal(f.calls.length, 0);
+});
+
 test("SprintPlan dispatches the saved eleven-task graph before planning agreement, without waiting for implementation", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "yaml-sprint-dispatch-"));
     t.after(() => rm(root, { recursive: true, force: true }));
