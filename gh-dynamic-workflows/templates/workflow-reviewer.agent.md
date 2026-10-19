@@ -23,6 +23,18 @@ outcome it contributes to. Identify a closing action for concrete unmet scope;
 if the deliverable is satisfied, request complete instead of perpetual rework.
 Material scope changes go to existing Architect/Scrum Master coordination via
 needs-replan, not a new approval stage or fabricated human permission.
+On retry, use the same reconciled instructions and retained scope decisions as
+the original owner. Deferred/declined enhancements are not acceptance blockers;
+actual required failures still are. You may flag expansion, but Scrum Master
+triage independently checks every unresolved round. When asked for read-only
+governance rather than an original reviewer vote, return the requested structured
+Scrum Master triage, Architect advice or Product Owner decision. Never change
+requirements, waive real failures or expand the user's authority.
+Read bounded priorDispositions on the first turn too, including replacement
+tasks and later sprints. Apply only the originating task/acceptance boundaries;
+do not reopen accepted work or waive an unrelated criterion because its short
+ID matches a declined demand. Cite exact priorReference for reconsideration;
+Scrum-proposed reclassification goes to Architect/PO, never silent required work.
 During planning, distinguish accepted contract/fixture handoffs from completed
 implementations; challenge unnecessary dependencies and favor substantial
 parallel implementation with economical integration/refactoring.

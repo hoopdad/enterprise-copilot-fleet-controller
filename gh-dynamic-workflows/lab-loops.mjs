@@ -1,3 +1,5 @@
+import { dispositionContext, priorDispositionInstructions, reconcileFeedback } from "./scope-governance.mjs";
+
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 export const ownerSchema = {
     type: "object", required: ["status", "summary", "artifact"],
@@ -35,6 +37,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
         ...(guarded ? ["verifiedProgress"] : []), ...(context.assignment ? ["taskComplete", "unmetCriteria"] : [])] };
     return ctx.step(key, async () => {
         let feedback = null;
+        const governanceHistory = [];
         let noProgressRounds = 0;
         const creditedProgress = new Map();
         const creditedEvidence = new Set();
@@ -45,14 +48,20 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
             ctx.log(`${loop.name}: ${loop.owner}, round ${attempt}`);
             const owner = await scheduleAgent("doer", () => ctx.agent(JSON.stringify({
                 kind: "doer", role: loop.owner, loop, context, feedback,
+                priorDispositions: dispositionContext(context, governanceHistory.at(-1)?.governance),
                 ...(guarded ? { progressState: progressState() } : {}),
                 instructions: [
                     "Carry out this loop's work, not just a proposal. Use ordinary repository tools as needed, including commands and deployment when authorized.",
                     "Follow actual project instructions and the supplied user authority. This workflow does not expand permissions.",
+                    ...priorDispositionInstructions,
+                    "When feedback exists, act on its governance.instructions as ONE reconciled set, reflecting decisions in your next report/artifact. Raw feedback.owner/reviews and governanceHistory are audit evidence, not extra mandatory suggestions. Deferred/declined enhancements in governance.nonBlocking cannot block original acceptance. Preserve previous scope decisions unless explicitly superseded; do not replay conflicting or discarded demands. Never waive actual failures or rewrite requirements. If no correction remains, accurately report the original deliverable complete for the original reviewers to verify.",
                     "Research and resolve technical issues within your work loop; do not invent prerequisite approval stages.",
                     "Return complete only when you consider this loop's completeWhen condition satisfied. Return rework for work you can continue, or needs-input for a decision or authority only the user can supply.",
                     "Judge completion against the assigned task's doneWhen, exclusions and handoff, not the whole product ambition or all sprint-level criteria it contributes to. Bounded research can complete with actionable negative or unresolved findings when that satisfies its scope; task completion never asserts a working or live-ready capability.",
                     "Use rework only for a concrete unmet assigned criterion and a next action that can close it, not merely because further useful investigation is possible. Return needs-replan when a finding materially changes architecture, contracts, feasibility or task scope; identify the decision and affected deliverable in summary. This is internal Architect/Scrum Master coordination, not human needs-input.",
+                    ...(!context.assignment ? [
+                        "For an unassigned planning/release loop, resolve internal replanning in this existing owner loop using the retained feedback and artifacts. Correct architecture/ownership here when you are Architect; describe concrete downstream work for the original ReleasePlan/Scrum Master stages. Do not repeatedly return needs-replan merely to request those later stages or other parallel reviewers' votes. Do not claim complete until this loop's own deliverable is satisfied.",
+                    ] : []),
                     "Use artifact keys matching the YAML outputs. ReleasePlan contains sprints with unique ids; SprintPlan contains assigned tasks with id, title, kind (ui/developer/designer/devops), owner and dependsOn.",
                     "Report actual failures and uncertainty. Accurate FAIL with feedback can satisfy the EndToEndTestLoop's agreement condition; do not turn it into a fabricated PASS.",
                     "Before ending every turn that changes files, including rework or needs-input, commit your own intended changes before reviewers inspect them. Include documentation, tests and partial work worth retaining; never commit secrets or ignored build outputs. Report the branch and commit IDs in your summary/artifact. If committing fails, report the actual problem; do not claim complete.",
@@ -83,7 +92,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                         "For abandoned work, retain its code commits on a named branch and record the task, retained branch/commit IDs and concrete abandonment reason in a commit message on the feature branch (an empty documentation commit is acceptable). Do not delete the retained branch. A chat note or uncommitted explanation is not sufficient. Report actual merged/abandoned dispositions for the Scrum Master reviewer.",
                     ] : []),
                 ],
-            }), { agent: agents.doer ?? "workflow-doer", label: `${key}:doer:${attempt}`, schema: doerSchema }), priority);
+            }), { agent: agents.owner ?? agents.doer ?? "workflow-owner", label: `${key}:doer:${attempt}`, schema: doerSchema }), priority);
             if (!object(owner) || !["complete", "rework", "needs-replan", "needs-input"].includes(owner.status) ||
                 typeof owner.summary !== "string" || !object(owner.artifact)) {
                 throw new Error(`Invalid do-er response in ${loop.id}; no completion was recorded`);
@@ -100,15 +109,19 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 catch (error) { transportIssue = error.message; }
             }
             const dispatched = owner.status === "complete" && !transportIssue && dispatch
-                ? await dispatch(owner.artifact, attempt) : undefined;
+                ? await dispatch(owner.artifact, attempt, dispositionContext(context, governanceHistory.at(-1)?.governance)) : undefined;
             let reviews;
             try { reviews = await ctx.parallel(loop.reviewers.map((role) => async () => {
                 const review = await scheduleAgent("reviewer", () => ctx.agent(JSON.stringify({
-                    kind: "reviewer", role, loop, context, owner, transportIssue, dispatch: dispatched?.context,
-                    ...(guarded ? { progressState: progressState(), feedback } : {}),
+                    kind: "reviewer", role, loop, context, owner, transportIssue, dispatch: dispatched?.context, feedback,
+                    priorDispositions: dispositionContext(context, governanceHistory.at(-1)?.governance),
+                    ...(guarded ? { progressState: progressState() } : {}),
                     instructions: [
                         "Independently review the actual work and the YAML completeWhen condition. Read the relevant files, not just the do-er's summary.",
+                        ...priorDispositionInstructions,
                         "Return agree:true when you agree with the reported outcome. Feedback may include observations even when you agree; there is no zero-findings requirement.",
+                        "Judge only your own independent vote. The orchestrator collects the other parallel reviewers' votes; their pending responses are not an unmet owner criterion and must not require another round.",
+                        "Use the same reconciled feedback.governance.instructions and retained scope decisions as the owner. Deferred/declined enhancements cannot block original acceptance; raw suggestions are audit evidence only. Independently verify required corrections and approved bounded acceptance; never waive actual failures or rewrite requirements. Flag suspected expansion, but Scrum Master triage also checks independently.",
                         "Separately judge report accuracy and assignment completion. For assigned work return taskComplete:boolean and unmetCriteria:[specific assigned criteria still unmet]. Agreement with an accurate incomplete report is not task acceptance. Do not demand full product/live readiness from a bounded contract or research handoff.",
                         "If continued rework is justified, identify a specific unmet doneWhen criterion and a closing next action. If the assigned deliverable is already satisfied, ask the owner to report complete rather than endorsing indefinite investigation. Material scope changes should be reported as needs-replan for existing Architect/Scrum Master coordination, not invented human permission.",
                         "Disagree with concrete feedback when more work is needed. Judge risk and evidence in context using the project's instructions, not an invented global policy.",
@@ -162,21 +175,39 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 (!context.assignment || reviews.every((review) => review.taskComplete))) {
                 return {
                     status: "agreed", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
+                    ...(governanceHistory.length ? { governanceHistory } : {}),
                     ...(dispatched ? { dispatch: dispatched.context } : {}),
                 };
-            }
-            if (agreed && owner.status === "needs-replan") {
-                return { status: "needs-replan", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt };
             }
             if (agreed && owner.status === "needs-input") {
                 return {
                     status: "needs-input", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
+                    ...(governanceHistory.length ? { governanceHistory } : {}),
                     nextAction: owner.nextAction ?? "Resolve the reported missing decision or authority, then start a new run against the existing project work.",
                 };
             }
             // Join dispatched work before revising its plan, so old and revised assignments cannot race.
             const dispatchedWork = await dispatched?.settle();
-            feedback = { owner, reviews, transportIssue, ...(dispatchedWork ? { dispatchedWork } : {}) };
+            const previousGovernance = feedback?.governance;
+            feedback = { owner, reviews, transportIssue, ...(dispatchedWork ? { dispatchedWork } : {}),
+                ...(previousGovernance ? { governance: previousGovernance } : {}),
+                governanceHistory: [...governanceHistory] };
+            const needsReplan = agreed && owner.status === "needs-replan" && context.assignment;
+            if (attempt !== attempts || needsReplan) {
+                const governance = await reconcileFeedback({
+                    ctx, loop, key, context, feedback, attempt, agents, scheduleAgent, priority,
+                });
+                governanceHistory.push({ round: attempt, owner, reviews, transportIssue,
+                    ...(dispatchedWork ? { dispatchedWork } : {}), governance });
+                feedback = { ...feedback, governance, governanceHistory: [...governanceHistory] };
+            }
+            const governance = feedback.governance;
+            if (agreed && owner.status === "needs-replan" && context.assignment &&
+                (!governance.nonBlocking.length || governance.instructions.length)) {
+                return { status: "needs-replan", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
+                    feedback, governanceHistory,
+                    nextAction: owner.nextAction ?? "Resolve the affected assignment through the existing Architect and Scrum Master loops." };
+            }
             if (guarded) {
                 const advances = owner.progress.filter((item) => !creditedProgress.has(item.id) && !creditedEvidence.has(evidenceKey(item)) &&
                     reviews.every((review) => review.verifiedProgress.includes(item.id)));

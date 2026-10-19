@@ -100,6 +100,24 @@ test("uses recorded models/counters and distinguishes reviewer agreement from an
     assert.equal(taskLabel({ taskTitle: "Customer Activity Screen" }), "Customer Activity Screen");
 });
 
+test("new owner profiles retain historical doer attribution; read-only feedback roles are not acceptance reviewers", () => {
+    const label = "yaml-loops-v1:sprint/1/s1/task/api/AssignedWorkDeveloperLoop";
+    for (const agentType of ["workflow-doer", "workflow-owner"]) {
+        assert.equal(taskLabel({ agentType, label: `${label}:doer:2` }), "Assigned Work Developer doer");
+    }
+    for (const [stage, role, title] of [
+        ["triage", "Scrum Master", "Scrum Master triage"],
+        ["scope-advice", "Architect", "Architect scope advice"],
+        ["scope-decision", "Product Owner", "Product Owner scope decision"],
+    ]) {
+        const record = { status: "running", agentType: "workflow-reviewer", label: `${label}:governance:${stage}:${role}:2` };
+        assert.equal(taskLabel(record), title);
+        const result = workOutcome(record);
+        assert.match(result.summary, new RegExp(`${role} read-only ${stage} feedback coordination`));
+        assert.match(result.summary, /not an original acceptance vote/);
+    }
+});
+
 test("review agreement keeps task acceptance and live capability separate", () => {
     for (const [ownerStatus, title] of [["rework", "Agrees: task still incomplete"],
         ["needs-replan", "Agrees: scoped replanning needed"], ["needs-input", "Agrees: human input needed"]]) {

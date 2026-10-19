@@ -10,6 +10,8 @@ export function taskLabel(agent) {
     if (agent.taskTitle) return words(agent.taskTitle);
     const text = String(agent.label ?? "").replaceAll(/[a-f0-9]{64}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}/gi, "")
         .replaceAll(/:{2,}/g, ":").replace(/^:|:$/g, "");
+    const governance = text.match(/:governance:([^:]+):([^:]+):\d+$/);
+    if (governance) return words(`${governance[2]} ${governance[1].replaceAll("-", " ")}`);
     const loop = [...text.matchAll(/\b([A-Za-z][A-Za-z0-9]*Loop)\b/g)].at(-1)?.[1];
     if (loop) {
         const name = loop.replace(/Loop$/, "").replaceAll(/([a-z])([A-Z])/g, "$1 $2").replaceAll(/([A-Z])([A-Z][a-z])/g, "$1 $2");
@@ -48,6 +50,7 @@ export function workOutcome(agent, { phase } = {}) {
     if (active.has(status) || ["stale", "unsettled"].includes(status)) {
         const taskId = agent.label?.match(/\/task\/([^/:]+)/)?.[1];
         const reviewer = agent.label?.match(/:reviewer:([^:]+)/)?.[1];
+        const governance = agent.label?.match(/:governance:([^:]+):([^:]+):\d+$/);
         const structured = /\b[A-Za-z][A-Za-z0-9]*Loop\b/.test(agent.label ?? "");
         const task = agent.taskTitle?.trim() || taskId ||
             (structured ? taskLabel(agent) : agent.label?.trim()) || phase?.title || agent.agentType || "Recorded agent task";
@@ -61,6 +64,7 @@ export function workOutcome(agent, { phase } = {}) {
                 `Assigned task: ${task}.`,
                 `Recorded execution state: ${status}.`,
                 reviewer ? `Responsibility: ${reviewer} reviewer.` : null,
+                governance ? `Responsibility: ${governance[2]} read-only ${governance[1]} feedback coordination, not an original acceptance vote.` : null,
                 phase?.title ? `Recorded phase: ${phase.title}.` : null,
                 phase?.detail ? `Phase context: ${phase.detail}` : null,
                 "This is recorded task context, not a final work outcome or proof of completion.",

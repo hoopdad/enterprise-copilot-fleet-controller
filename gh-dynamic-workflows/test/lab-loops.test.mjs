@@ -2,10 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { definition, flattenLoops, parseWorkflow } from "../loop-source.mjs";
 import { runLoop } from "../lab-loops.mjs";
+import { governanceResponse } from "./scope-governance.fixture.mjs";
 
 const loops = flattenLoops(definition.workflows.ReleaseLoop.steps);
 function context(agent) {
-    return { agent, step: async (_, fn) => fn(), parallel: (thunks) => Promise.all(thunks.map((fn) => fn())), log() {} };
+    return { agent: async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        return input.kind === "governance" ? governanceResponse(input) : agent(prompt, options);
+    }, step: async (_, fn) => fn(), parallel: (thunks) => Promise.all(thunks.map((fn) => fn())), log() {} };
 }
 test("every writing turn commits before review, and the existing Scrum Master reviews Git reconciliation", async () => {
     const calls = [];
@@ -25,6 +29,7 @@ test("every writing turn commits before review, and the existing Scrum Master re
     for (const review of calls.filter((call) => call.kind === "reviewer")) {
         assert.equal(review.owner.summary, "Committed own changes as abc123 on feature/work");
         assert.match(review.instructions.join("\n"), /actual Git commits/);
+        assert.match(review.instructions.join("\n"), /pending responses are not an unmet owner criterion/);
     }
     const scrum = calls.find((call) => call.kind === "reviewer" && call.role === "Scrum Master");
     assert.match(scrum.instructions.join("\n"), /accountable for Git reconciliation/);

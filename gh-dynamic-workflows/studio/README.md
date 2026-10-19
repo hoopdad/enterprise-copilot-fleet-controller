@@ -60,6 +60,11 @@ In design mode, literal phase titles can also be edited from the node inspector;
 this changes only the declaration in the source draft, not matching `phase()`
 calls or other references. Preview pending source edits before node edits.
 Select a run to pin it; **Follow latest live run** returns to automatic selection.
+Feedback-governance labels identify read-only Scrum Master triage, Architect
+scope advice and Product Owner scope decisions, not extra acceptance reviewers.
+The `workflow-owner` profile retains stable doer labels; historical
+`workflow-doer` activity remains readable.
+
 Live/history charts show only agents with a recorded start, never future source
 phases or an inferred plan. Repeated agent invocations are separate activities.
 Dashed arrows encode timestamp order, **not causal dependencies or proven

@@ -119,9 +119,16 @@ export function createLoopRunner() {
         const common = {
             projectRoot: root, request: args, specification: await specification(args, root),
             roleDescriptions: source.roles, engine: ENGINE,
-            orchestration: "Only YAML do-er/reviewer loops govern progression. Former ticket, hash, lease, frozen-input, native-receipt and admission protocols are retired. Ordinary CLI permissions and actual project authority still apply.",
+            orchestration: "Original YAML owners and reviewers govern acceptance. Every unresolved round receives read-only Scrum Master feedback triage, with Architect advice and Product Owner decisions for ambiguous scope, before retry or scoped replanning. No new YAML stages. Former ticket, hash, lease, frozen-input, native-receipt and admission protocols are retired. Ordinary CLI permissions and actual project authority still apply.",
         };
-        const context = (extra = {}) => structuredClone({ ...common, documents, outcomes, ...extra });
+        const context = (extra = {}) => structuredClone({
+            ...common, documents,
+            outcomes: outcomes.map(({ governanceHistory, ...outcome }) => ({
+                ...outcome,
+                ...(governanceHistory?.length ? { governance: governanceHistory.at(-1).governance } : {}),
+            })),
+            ...extra,
+        });
         const attemptsFor = (id) => args.attempts?.[id] ?? args.attempts?.[
             ["AssignedWorkUIDeveloperLoop", "AssignedWorkDeveloperLoop", "DevOpsWorkLoop"].includes(id) ? "implementation" : "planning"];
         const perform = async (node, key, extra = {}, decode, phase = true, dispatch) => {
@@ -148,25 +155,25 @@ export function createLoopRunner() {
             }
             return outcome;
         };
-        const stopped = (result) => ({
+        const stopped = (result) => Object.fromEntries(Object.entries({
             status: result.status, engine: ENGINE, runId: ctx.runId, summary: result.summary ?? result.reason,
             stoppedAt: result.loopId, stoppedKey: result.key, reason: result.reason, nextAction: result.nextAction,
             rounds: result.rounds, limit: result.limit,
             ...(result.progress ? { stopCause: result.stopCause, progress: result.progress } : {}),
             completedSprints: [...completed], documents, outcomes,
-        });
-        const assignedWork = async (container, sprint, tasks, iteration, planRound = 1, scope = "", inherited = {}) => {
+        }).filter(([, value]) => value !== undefined));
+        const assignedWork = async (container, sprint, tasks, iteration, planRound = 1, scope = "", inherited = {}, priorDispositions = []) => {
             ctx.phase(container.name);
             const assignments = tasks.filter((task) => task.kind !== "devops");
             return scheduleTasks(assignments, (task, dependencies, criticalPathMinutes) => {
                 const loop = all.get(taskKinds[task.kind][1]);
                 return perform(loop, `sprint/${iteration}/${sprint.id}${scope}/task/${task.id}${planRound > 1 ? `/plan-round/${planRound}` : ""}/${loop.id}`,
-                    { sprint, assignment: task, dependencies, inherited, scheduling: { criticalPathMinutes } }, undefined, false);
+                    { sprint, assignment: task, dependencies, inherited, priorDispositions, scheduling: { criticalPathMinutes } }, undefined, false);
             }, {
                 priorities: criticalPathPriorities(tasks), signal: ctx.signal, resources,
                 replan: async (task, request, dependencies) => {
                     const revisionKey = `sprint/${iteration}/${sprint.id}${scope}/replan/${task.id}/plan-${planRound}`;
-                    const scopeRevision = { assignment: task, request, dependencies, inherited };
+                    const scopeRevision = { assignment: task, request, dependencies, inherited, priorDispositions };
                     const architecture = await perform(all.get("SprintArchitectureLoop"),
                         `${revisionKey}/SprintArchitectureLoop`, { sprint, scopeRevision }, undefined, false);
                     if (architecture.status !== "agreed") return architecture;
@@ -177,10 +184,10 @@ export function createLoopRunner() {
                                 throw new Error("Scoped replacements must keep DevOps in its original later stage");
                             }
                             if (!artifact.SprintPlan.tasks.length) throw new Error("A scope revision needs at least one bounded replacement handoff");
-                        }, false, (artifact, revisionRound) => {
+                        }, false, (artifact, revisionRound, dispositions) => {
                             const replacements = sprintTasks(artifact);
                             const pending = assignedWork(container, sprint, replacements, iteration, revisionRound,
-                                `${scope}/replan/${task.id}/plan-${planRound}`, scopeRevision)
+                                `${scope}/replan/${task.id}/plan-${planRound}`, scopeRevision, dispositions)
                                 .then((results) => ({ results }), (error) => ({ error }));
                             settle = async () => {
                                 const outcome = await pending;
@@ -226,9 +233,9 @@ export function createLoopRunner() {
                 let tasks = [];
                 let workDispatched = false;
                 let settleAssignments;
-                const dispatchAssignments = (artifact, round) => {
+                const dispatchAssignments = (artifact, round, dispositions) => {
                     const assignments = sprintTasks(artifact);
-                    const pending = assignedWork(node, sprint, assignments, iteration, round)
+                    const pending = assignedWork(node, sprint, assignments, iteration, round, "", {}, dispositions)
                         .then((results) => ({ results }), (error) => ({ error }));
                     const settle = async () => {
                         const outcome = await pending;

@@ -146,9 +146,14 @@ It covers choosing a reviewed framework checkout, preserving project instruction
 safe installation and registration checks. Installation does not run fleet
 initialization, execute a workflow or authorize cloud changes.
 
-The standalone workflows execute the original YAML's nested do-er/reviewer
-loops without an additional engine admission pipeline. This does not change
-the generated fleet's separate governance or deployment policy.
+The standalone workflows execute the original YAML's nested owner/reviewer
+loops without an additional engine admission pipeline. Unresolved feedback is
+triaged by a read-only Scrum Master before retry; ambiguous scope receives
+Architect advice and a Product Owner decision, then one reconciled instruction
+set goes to the original owner and reviewers. This requested runtime coordination
+adds no YAML stages and does not change the generated fleet's separate governance
+or deployment policy. The shared writing profile is `workflow-owner`; the
+concrete loop roles remain unchanged.
 
 The optional [Workflow Studio canvas](gh-dynamic-workflows/studio/README.md)
 combines design drafts, live observation and historical workflow results.

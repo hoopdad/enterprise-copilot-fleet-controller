@@ -34,6 +34,14 @@ Minimal structured report and task-DAG checks are needed to transport/schedule
 the YAML work, not additional risk or approval gates. Format corrections go back
 to the same original do-er/reviewers. Reviewer agreement may contain feedback.
 
+The user subsequently authorized runtime feedback coordination: mandatory
+read-only Scrum Master triage before unresolved work returns to its owner,
+Architect advice and Product Owner decisions for ambiguous scope, then one
+reconciled instruction set for the original owner and reviewers. This is an
+explicit exception to earlier no-added-gate prose, not a new YAML stage or
+permission expansion. Actual defects remain blockers; deferred/declined
+enhancements do not. See LAB-CONTRACT.md for structured decision validation.
+
 ## Platform versus project policy
 
 The installed CLI `1.0.100-1` SDK `docs/workflows.md` documents `defineWorkflow`,

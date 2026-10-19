@@ -7,9 +7,13 @@ commands, deployment/publication destinations and restrictions. They are context
 for do-ers/reviewers, not a second engine-admission language.
 
 Optional `workflowPath` selects an edited YAML file relative to projectRoot;
-otherwise the installed `loops.yml` is used. Optional `agents.doer` and
+otherwise the installed `loops.yml` is used. Optional `agents.owner` (or legacy `agents.doer`) and
 `agents.reviewer` select ordinary agent profiles; the engine does not inspect
-their exact tools or source. Defaults are `workflow-doer` and `workflow-reviewer`.
+their exact tools or source. Defaults are `workflow-owner` and `workflow-reviewer`.
+`agents.owner` wins over `agents.doer`; the latter remains supported for existing
+custom profiles. Original concrete YAML roles and stable doer event/label
+protocol remain unchanged. Fresh installs ship the owner profile; explicit
+upgrades retain old installed doer profiles only as legacy overrides.
 CLI permissions and project instructions remain authoritative.
 
 Optional `concurrency:{doers,reviewers}` sets separate positive integer
@@ -38,6 +42,77 @@ Verified progress resets the counter even when completion is not yet agreed.
 The existing completion/human-input conditions take precedence. Legacy total
 round/sprint caps, if also supplied, remain independent limits.
 
+## Mandatory feedback coordination
+
+Every unresolved round is joined to any dispatched work, then receives a
+read-only Scrum Master triage before owner retry or assigned scope routing.
+Acceptance and confirmed human needs-input exit without triage. This applies
+even without progress guards or expansion flags. Governance roles use
+`agents.reviewer`/`workflow-reviewer` and individual reviewer-capacity slots;
+no slot is held across joins or between role calls.
+The final explicit hard-cap round skips governance when no retry remains
+(assigned needs-replan routing is the exception). It still joins dispatch and
+retains the raw feedback; stagnation accounting runs once and retains its normal
+precedence. Governance never consumes an extra round or credits progress.
+
+Structured role contracts (validated at runtime; failed/malformed calls are
+errors, never implicit acceptance):
+
+- Scrum Master: `{summary,requiredCorrections:[{id,requirement,evidence,action}],
+  scopeQuestions:[{id,request,evidence}]}`. Inspect all existing criteria,
+  evidence and conflicts independently; choose the smallest sufficient
+  correction. IDs are unique across both lists. Either record can additionally
+  supply `priorReference:string` to identify an existing disposition precisely.
+  A correction referencing prior scope is moved to scopeQuestions for conditional
+  Architect/PO reconsideration, not silently promoted to required work.
+- When scopeQuestions is nonempty, Architect:
+  `{assessments:[{id,necessity:"required"|"enhancement",rationale,simplestOption}]}`.
+  Assess correctness, safety and integration necessity, not product authority.
+- Then Product Owner: `{decisions:[{id,disposition:"required"|"approve"|"defer"|"decline",
+  rationale,action,acceptance,taskBoundary}]}`. Each question must have exactly
+  one advice and decision entry. Required/approved entries need nonempty action,
+  acceptance and task boundary. Required work cites existing scope; enhancements
+  must stay within existing user authority. Architect-confirmed required failures
+  cannot be deferred/declined. Defer/decline is for optional work only.
+
+The runtime supplies ONE reconciled `feedback.governance.instructions` set to
+the next owner and all original reviewers, regardless of the guard option.
+`governance.nonBlocking` retains deferred/declined enhancements; raw feedback
+and structured role reports stay in `governanceHistory` for audit, including
+on eventual acceptance. PO decisions persist across later rounds; revisiting
+a decided ID must use an explicit new PO decision, never a Scrum correction.
+Owners reflect decisions rather than replaying raw suggestions; reviewers may
+not reintroduce discarded enhancements as blockers. Real failures still block
+acceptance, and original reviewer agreement/task completion remains required.
+No role may rewrite requirements to waive failures. New human authority is
+resolved only through the original needs-input path.
+
+Every owner/reviewer/governance prompt also receives authoritative bounded
+`priorDispositions`, including on the first turn of a new invocation. The
+projection uses existing `context.outcomes` governance, scoped/inherited request
+feedback and current plan dispositions passed at dispatch. Entries carry
+`reference` (origin key plus local ID), origin loop/task/sprint and task acceptance/
+boundaries; source outcome status is included when available. Required/approved
+and nonblocking dispositions cross replacements and later sprints without copying
+raw audit histories. There is no separate persistence database/registry.
+
+Apply prior instructions only within their actual boundaries; accepted upstream
+work is not reopened, and unrelated criteria with matching short IDs remain
+required. Reconsideration requires the exact provenance-qualified priorReference.
+Unknown/duplicate references or reusing a local decided ID for unrelated scope
+is an explicit error; use a new ID for unrelated criteria. Runtime-generated
+`supersedes` references record explicit PO changes transitively, so subsequent
+contexts expose the latest disposition rather than resurrecting old ones.
+Applicability and completion remain reviewer-judged: no criterion-proof protocol
+or automatic semantic matching is added.
+
+This requested runtime coordination is an explicit exception to prior
+no-added-gate prose, not a new YAML stage, owner or reviewer set. Progress is
+still judged independently by each original reviewer. Existing assigned
+needs-replan routing receives the reconciled feedback; when only discarded
+enhancements remain, retry the original owner instead of replacing its DAG.
+Unassigned needs-replan still retries the same owner.
+
 Do-er report: `{status:"complete"|"rework"|"needs-replan"|"needs-input",summary:string,artifact:object}`.
 An optional `nextAction` can identify the exact decision needed for human input.
 Reviewer report: `{agree:boolean,feedback:string}`. No mandated empty findings,
@@ -46,12 +121,17 @@ Assigned-work reviews additionally require `taskComplete:boolean` and
 `unmetCriteria:string[]`, separating accurate reports from completion judgments.
 Owner `complete`, reviewer agreement and completion endorsement are all needed
 for assignment acceptance. No reviewer promotes owner rework into completion.
-Agreed `needs-replan` is internal scoped Architect/Scrum Master coordination,
+Agreed assigned-work `needs-replan` is internal scoped Architect/Scrum Master coordination,
 not human input. The existing architecture/plan loops return bounded replacement
 assignments with internal dependency edges and accepted outer prerequisites in
 context; the outer graph and unrelated work are preserved. Replacement tasks
 cannot pull later DevOps work into implementation. Shared resources are released
 before routing and applied to replacements; SDK replay reuses amended steps.
+Unassigned planning/release `needs-replan` remains feedback to the existing
+owner until its own deliverable is resolved; downstream original roles then
+plan their work normally. Reviewers assess their own votes, not whether other
+parallel votes have arrived. Stopped results omit absent optional properties
+rather than returning SDK-invalid `undefined` values.
 
 Planners supply `doneWhen`, `exclusions` and `handoff`; supplied fields are
 validated but absent legacy fields do not create a new admission gate. Completion
@@ -162,7 +242,7 @@ Their execute tool is restricted by instructions to read-only Git inspection,
 not writable commands or an OS-enforced sandbox.
 
 The Scrum Master is the existing `SprintPlanLoop` do-er role, normally played
-by `workflow-doer`, and an existing read-only sprint review/retro reviewer.
+by `workflow-owner`, and an existing read-only sprint review/retro reviewer.
 It assigns Git integration responsibility in planning and audits reconciliation
 in review. The existing Product Owner do-er performs any reconciliation needed
 in sprint review/retro and release closeout; no writable Scrum Master reviewer

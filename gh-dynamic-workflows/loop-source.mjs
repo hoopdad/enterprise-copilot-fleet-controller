@@ -35,7 +35,7 @@ export const definition = loadWorkflow();
 export function workflowMetadata(name) {
     return {
         name,
-        description: "Execute the nested do-er/reviewer loops in loops.yml; no additional delivery admission stages.",
+        description: "Execute original YAML owner/reviewer loops with reconciled Scrum Master feedback and Architect-advised Product Owner scope decisions.",
         phases: flattenLoops(definition.workflows.ReleaseLoop.steps).map((node) => ({
             title: node.name,
             detail: `${node.completeWhen ?? node.description}${["AssignedWorkUIDeveloperLoop", "AssignedWorkDeveloperLoop"].includes(node.id)
@@ -51,6 +51,10 @@ export function workflowMetadata(name) {
                 doers: { type: "integer", minimum: 1 }, reviewers: { type: "integer", minimum: 1 },
             } },
             git: { type: "object", properties: { featureBranch: { type: "string", minLength: 1 } } },
+            agents: { type: "object", additionalProperties: false, properties: {
+                owner: { type: "string", minLength: 1 }, doer: { type: "string", minLength: 1 },
+                reviewer: { type: "string", minLength: 1 },
+            } },
         } },
     };
 }

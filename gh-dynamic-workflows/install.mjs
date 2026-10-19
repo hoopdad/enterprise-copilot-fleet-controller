@@ -27,18 +27,20 @@ const files = [
     ["workflow.mjs", "gh-dynamic-workflows/workflow.mjs"],
     ["extension.mjs", "gh-dynamic-workflows/extension.mjs"],
     ["lab-loops.mjs", "gh-dynamic-workflows/lab-loops.mjs"],
+    ["scope-governance.mjs", "gh-dynamic-workflows/scope-governance.mjs"],
     ["lab-workflow.mjs", "gh-dynamic-workflows/lab-workflow.mjs"],
     ["LAB-CONTRACT.md", "gh-dynamic-workflows/LAB-CONTRACT.md"],
     ["LAB-DESIGN.md", "gh-dynamic-workflows/LAB-DESIGN.md"],
     ["README.md", "gh-dynamic-workflows/README.md"],
     ["QUICKSTART.md", "gh-dynamic-workflows/QUICKSTART.md"],
     ["RESEARCH.md", "gh-dynamic-workflows/RESEARCH.md"],
-    ...["extension.mjs", "workflow-doer.agent.md", "workflow-reviewer.agent.md"].map((file) =>
+    ...["extension.mjs", "workflow-owner.agent.md", "workflow-reviewer.agent.md"].map((file) =>
         [`templates/${file}`, `gh-dynamic-workflows/templates/${file}`]),
-    ...["install.test.mjs", "lab-loops.test.mjs", "lab-workflow.test.mjs", "lab-sdk.test.mjs", "run.test.mjs", "scheduling.test.mjs"].map((file) =>
+    ...["install.test.mjs", "lab-loops.test.mjs", "lab-workflow.test.mjs", "lab-sdk.test.mjs", "run.test.mjs", "scheduling.test.mjs",
+        "scope-governance.test.mjs", "scope-governance.fixture.mjs"].map((file) =>
         [`test/${file}`, `gh-dynamic-workflows/test/${file}`]),
     ["templates/extension.mjs", ".github/extensions/autonomous-delivery/extension.mjs"],
-    ["templates/workflow-doer.agent.md", ".github/agents/workflow-doer.agent.md"],
+    ["templates/workflow-owner.agent.md", ".github/agents/workflow-owner.agent.md"],
     ["templates/workflow-reviewer.agent.md", ".github/agents/workflow-reviewer.agent.md"],
 ];
 const retired = [

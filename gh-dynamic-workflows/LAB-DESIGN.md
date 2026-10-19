@@ -8,7 +8,36 @@
 `loop-workflow.mjs` iterates the release/sprint hierarchy, schedules the assigned
 task dependency graph and carries accepted artifacts forward. `lab-loops.mjs`
 implements the repeated do-er followed by independent original reviewers.
-Both workflow registration names use that same runner.
+`scope-governance.mjs` coordinates unresolved feedback: Scrum Master triage
+on every retry, plus Architect advice then Product Owner decisions only when
+scope is ambiguous. It validates structured responses and builds one actionable
+instruction set plus nonblocking deferred/declined decisions. Decisions persist
+across retries; raw owner/review/role evidence remains audit history, not competing
+instructions. Both owner and original reviewers receive the same reconciliation,
+even without a stagnation guard. Actual failures cannot be waived or requirements
+rewritten. Acceptance and confirmed human input skip triage. This is requested
+runtime coordination, the explicit exception to earlier no-added-gate prose;
+no YAML stages or original owner/reviewer sets change.
+Full audit history is retained in final outcomes, not recursively recopied into
+every later loop's context. Later loops receive each outcome's latest reconciled
+governance; the current loop still receives its own full round audit. This keeps
+unlimited productive runs from amplifying prior audit evidence in every prompt.
+`priorDispositions` projects bounded instructions from these existing outcomes
+and scoped/inherited request feedback onto every invocation's first owner,
+reviewer and governance turns. Plan dispatch also passes the current plan's
+projection before its result is recorded. Provenance-qualified references,
+origin task/sprint, source status and explicit acceptance/task boundaries prevent
+short-ID collisions from waiving unrelated work; applicability remains role
+judgment. Reconsidering an exact priorReference routes through Architect/PO,
+including a Scrum-proposed required reclassification. Explicit supersession
+references carry forward transitively. No separate registry/database or raw
+audit fanout is introduced. Final hard-cap rounds skip unnecessary triage while
+retaining raw feedback and normal once-per-round stagnation accounting; assigned
+needs-replan still receives governance before routing.
+Both workflow registration names use that same runner. Its default shared writing
+profile is `workflow-owner` (`agents.owner`, then legacy `agents.doer` overrides);
+concrete YAML roles, stable doer kinds/labels and historical Studio remain intact.
+Read-only coordination uses the ordinary reviewer profile/tools.
 `scheduling.mjs` owns the dependency-ready queue, longest-downstream estimates,
 named assignment resources and separate do-er/reviewer agent capacity.
 
@@ -54,12 +83,14 @@ Planning submits a dispatch-ready graph; the scheduler dispatches its original
 work loops before planning reviewers verify actual assignment and dispatch.
 Implementation need not finish for that planning agreement. The following
 assigned-work steps join it. Before revising a rejected plan, already-dispatched
-work is joined to avoid old/revised assignments racing; its results feed rework.
+work is joined before governance or plan rework to avoid old/revised assignments
+racing; its results feed the reconciliation. Each governance call individually
+uses reviewer capacity; no agent slot spans a join or the coordination sequence.
 Saved JSON plan references and inline graphs use the same scheduler.
 
 Task doneWhen/exclusions/handoff distinguish bounded research completion from
 live capability. Assigned reviewers separately assess report agreement and
-task completion. Agreed needs-replan releases task resources, reuses the
+task completion. After triage, agreed needs-replan releases task resources, reuses the
 existing Sprint Architect and Scrum Master loops for a scoped replacement
 graph, and joins its accepted handoffs into the original dependency. Already
 accepted prerequisites are context; replacement dependencies stay internal.
@@ -67,6 +98,12 @@ Unrelated work continues. Shared agent/resource queues cover replacements and
 only scoped planning do-er edits are serialized; no slot is held during review.
 Major YAML stage order and later DevOps placement are unchanged. SDK replay
 reuses scoped keys rather than redispatching accepted work.
+Unassigned planning/release scope corrections feed back to the existing owner,
+not terminal needs-replan or an added stage. Original later roles retain their
+responsibilities. Stopped results omit absent optional fields for SDK JSON
+compatibility; parallel reviewers never wait on one another's votes.
+When the only scope demands are deferred/declined enhancements, retry the same
+owner against original acceptance rather than forcing a replacement graph.
 
 Every file-changing do-er turn commits owned changes before review; reviewers
 inspect those commits with read-only Git commands. The Scrum Master remains the

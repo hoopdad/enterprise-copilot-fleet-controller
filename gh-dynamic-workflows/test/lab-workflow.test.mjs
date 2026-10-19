@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createLoopRunner, sprintTasks, releasePlan } from "../loop-workflow.mjs";
+import { governanceResponse } from "./scope-governance.fixture.mjs";
 
 const task = (id, kind = "developer", dependsOn = []) => ({
     id, title: id, kind, owner: kind === "designer" ? "Designer" : kind === "devops" ? "DevOps Engineer" : "Developer", dependsOn,
@@ -23,6 +24,7 @@ function fake({ tasks = [], artifact, review, args = {} } = {}) {
         agent: async (prompt, options) => {
             const input = JSON.parse(prompt);
             calls.push({ ...input, options });
+            if (input.kind === "governance") return governanceResponse(input);
             if (input.kind === "reviewer") return {
                 taskComplete: input.owner.status === "complete",
                 unmetCriteria: input.owner.status === "complete" ? [] : ["The assigned handoff remains incomplete."],
@@ -51,6 +53,57 @@ test("only source loops run; E2E FAIL can be agreed; DevOps retains its original
     assert.match(devops.loop.completeWhen, /cloud-deployed system passes tests/);
     assert.ok(!f.phases.some((name) => /bootstrap|publication|discovery|recovery|exact.plan|reconciliation/i.test(name)));
     assert.ok(f.calls.filter((call) => call.context.assignment).every((call) => call.options.label.includes(call.loop.id)));
+});
+test("agreed Architecture needs-replan is resolved internally before downstream planning", async () => {
+    const f = fake({ tasks: [task("adapter")] });
+    const agent = f.ctx.agent;
+    let rounds = 0;
+    f.ctx.agent = async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        const result = await agent(prompt, options);
+        if (input.kind === "doer" && input.loop.id === "ArchitectureLoop") {
+            rounds++;
+            if (rounds === 1) return { status: "needs-replan", summary: "Assign Hosted adapter implementation explicitly.",
+                artifact: { Architecture: { missingOwner: "Hosted adapter" } } };
+            assert.equal(input.feedback.owner.artifact.Architecture.missingOwner, "Hosted adapter");
+            assert.equal(input.feedback.reviews.length, 3);
+            assert.match(input.instructions.join("\n"), /resolve internal replanning in this existing owner loop/);
+            return { ...result, artifact: { Architecture: { owner: "Developer", deliveryStage: "SprintPlanLoop" } } };
+        }
+        return result;
+    };
+    const result = await createLoopRunner()(f.ctx);
+    assert.equal(result.status, "completed");
+    assert.equal(rounds, 2);
+    assert.equal(result.documents.Architecture.owner, "Developer");
+    assert.equal(f.calls.filter((call) => call.kind === "doer" && call.context.assignment?.id === "adapter").length, 1);
+    const count = f.calls.length;
+    assert.equal((await createLoopRunner()(f.ctx)).status, "completed");
+    assert.equal(f.calls.length, count);
+});
+
+test("every stopped result is SDK JSON-safe without invented optional fields", async () => {
+    const check = (value, location = "$") => {
+        assert.notEqual(value, undefined, `nested undefined at ${location}`);
+        if (value !== null && typeof value === "object") {
+            for (const [key, item] of Object.entries(value)) check(item, `${location}.${key}`);
+        }
+    };
+    for (const status of ["needs-input", "rework", "needs-replan"]) {
+        const f = fake({ args: { attempts: { planning: 1 } } });
+        const agent = f.ctx.agent;
+        f.ctx.agent = async (prompt, options) => {
+            const input = JSON.parse(prompt);
+            const result = await agent(prompt, options);
+            return input.kind === "doer" ? { ...result, status, summary: "Concrete unresolved criterion" } : result;
+        };
+        const result = await createLoopRunner()(f.ctx);
+        assert.equal(result.status, status === "needs-input" ? status : "limit-reached");
+        check(result);
+        assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+        assert.ok(!Object.hasOwn(result, "reason") || typeof result.reason === "string");
+        assert.ok(!Object.hasOwn(result, "limit") || result.limit === 1);
+    }
 });
 test("independent tasks overlap, dependent work starts after its own reviews, not a batch barrier", async () => {
     let releaseSlow, fastFinished = false;
@@ -104,6 +157,8 @@ test("scoped Architect/plan amendments replace only the affected assignment and 
         tasks: [{ ...task("research"), exclusiveResources: ["contract"] }, task("independent"), task("consumer", "developer", ["research"])],
         artifact: async (input, output) => {
             if (input.context.scopeRevision && input.loop.id === "SprintArchitectureLoop") {
+                assert.ok(input.context.scopeRevision.request.feedback.governance.instructions.length);
+                assert.ok(input.context.scopeRevision.request.governanceHistory.length);
                 amended.resolve();
                 return { SprintArchitecture: { disposition: "Bounded research may finish with unresolved live capability." } };
             }
@@ -392,6 +447,7 @@ test("stagnation settings reach planning and implementation, with per-assignment
         if (input.kind === "reviewer") {
             return { ...result, agree: id === "stalled" ? false : result.agree, verifiedProgress: [] };
         }
+        if (input.kind === "governance") return result;
         rounds.set(id ?? input.loop.id, (rounds.get(id ?? input.loop.id) ?? 0) + 1);
         return { ...result, status: id === "stalled" ? "rework" : result.status, progress: [] };
     };
@@ -427,6 +483,7 @@ test("productive planning and implementation exceed ten rounds and six sprints w
         const input = JSON.parse(prompt);
         const result = await original(prompt, options);
         const key = `${input.context.sprint?.id ?? "release"}/${input.loop.id}`;
+        if (input.kind === "governance") return result;
         if (input.kind === "doer") {
             const round = (rounds.get(key) ?? 0) + 1;
             rounds.set(key, round);
@@ -439,4 +496,63 @@ test("productive planning and implementation exceed ten rounds and six sprints w
     assert.equal(result.status, "completed");
     assert.equal(result.completedSprints.length, 7);
     assert.ok(result.outcomes.every((outcome) => outcome.rounds === 12));
+    assert.ok(result.outcomes.every((outcome) => outcome.governanceHistory.length === 11));
+    const later = f.calls.find((call) => call.kind === "doer" && call.loop.id === "UserExperienceLoop");
+    assert.ok(later.context.outcomes[0].governance.instructions.length);
+    assert.equal(Object.hasOwn(later.context.outcomes[0], "governanceHistory"), false);
+});
+
+test("release dispositions reach later first turns and replanned dispatch inherits current plan decisions before plan acceptance", async () => {
+    const f = fake({ tasks: [task("consumer")], artifact: (input, output) => input.loop.id === "ReleasePlanLoop"
+        ? { ReleasePlan: { sprints: [{ id: "s1" }, { id: "s2" }] } } : output });
+    const original = f.ctx.agent;
+    let architectureRound = 0, planRound = 0;
+    f.ctx.agent = async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        const result = await original(prompt, options);
+        if (input.kind === "doer" && input.loop.id === "ArchitectureLoop") architectureRound++;
+        if (input.kind === "doer" && input.loop.id === "SprintPlanLoop" && input.context.sprint.id === "s1") planRound++;
+        const release = input.loop.id === "ArchitectureLoop";
+        const planning = input.loop.id === "SprintPlanLoop" && input.context.sprint?.id === "s1";
+        if (input.kind === "reviewer" && input.role === "Critic" &&
+            ((release && architectureRound === 1) || (planning && planRound === 1))) {
+            return { ...result, agree: false, feedback: "Additional optional scope proposed." };
+        }
+        if (input.stage === "triage" && (release || planning)) return {
+            summary: "Resolve optional expansion without changing original scope.", requiredCorrections: [],
+            scopeQuestions: (release ? ["later", "declined"] : ["planned-extra"]).map((id) =>
+                ({ id, request: `Optional enhancement ${id}`, evidence: "Not necessary for original acceptance." })),
+        };
+        if (input.stage === "scope-decision") return { decisions: input.triage.scopeQuestions.map((item) => ({
+            id: item.id, disposition: item.id === "declined" ? "decline" : "defer",
+            rationale: "Original user requirements do not need this.",
+            action: "", acceptance: "", taskBoundary: release ? "Release-wide optional dashboard polish only."
+                : "Optional consumer display redesign for s1 only.",
+        })) };
+        return result;
+    };
+    const result = await createLoopRunner()(f.ctx);
+    assert.equal(result.status, "completed");
+    const ux = f.calls.filter((input) => input.loop.id === "UserExperienceLoop");
+    assert.ok(ux.some((input) => input.kind === "doer"));
+    assert.ok(ux.some((input) => input.kind === "reviewer"));
+    for (const input of ux) {
+        assert.deepEqual(input.priorDispositions.map((item) => item.disposition), ["defer", "decline"]);
+        assert.equal(input.priorDispositions[0].origin.loopId, "ArchitectureLoop");
+    }
+    const revisedDispatch = f.calls.filter((input) => input.context.assignment && input.options.label.includes("/plan-round/2/"));
+    assert.ok(revisedDispatch.some((input) => input.kind === "doer"));
+    assert.ok(revisedDispatch.some((input) => input.kind === "reviewer"));
+    for (const input of revisedDispatch) {
+        assert.equal(input.priorDispositions.find((item) => item.id === "planned-extra").disposition, "defer");
+        assert.equal(input.priorDispositions.find((item) => item.id === "planned-extra").origin.sprintId, "s1");
+    }
+    const laterSprint = f.calls.filter((input) => input.context.assignment && input.context.sprint.id === "s2");
+    assert.ok(laterSprint.some((input) => input.kind === "doer"));
+    assert.ok(laterSprint.some((input) => input.kind === "reviewer"));
+    for (const input of laterSprint) {
+        assert.equal(input.priorDispositions.find((item) => item.id === "declined").disposition, "decline");
+        assert.equal(input.priorDispositions.find((item) => item.id === "planned-extra").taskBoundary,
+            "Optional consumer display redesign for s1 only.");
+    }
 });
