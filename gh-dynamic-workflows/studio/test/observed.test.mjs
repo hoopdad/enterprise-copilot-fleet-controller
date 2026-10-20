@@ -1,6 +1,49 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { observedFlow, outcome, stopReason, summarizeEvidence, queryTeam, taskLabel, processModel, tokenText, workOutcome } from "../observed.mjs";
+import { observedFlow, outcome, stopReason, summarizeEvidence, queryTeam, taskLabel, processModel, tokenText, workOutcome, cardContext, cardLocation, cardFields } from "../observed.mjs";
+import { workCard } from "./fixture.mjs";
+
+test("semantic headings retain the full role/action and expose scoped goals, failure evidence and unverified state", () => {
+    const record = { id: "api", startedAt: 2, status: "completed", taskCard: workCard(), taskCardSource: "Structured final agent response",
+        workResult: { kind: "work", status: "rework", summary: "Permission denied." } };
+    assert.equal(taskLabel(record), "Developer: Fix database-write access in QuestionAnswer API");
+    const fields = cardFields(record);
+    assert.equal(fields.Components, "QuestionAnswer API");
+    assert.equal(fields.Flows, "Question-Answer");
+    assert.equal(fields["Failure category"], "Identity/access");
+    assert.equal(fields.Location, "infra\\");
+    assert.equal(fields.Verification, "Not yet verified");
+    assert.equal(fields["Action required from you"], "");
+    assert.equal(outcome(record, { agent: true }).tone, "waiting");
+    assert.match(JSON.stringify(queryTeam(run([record]), "Question-Answer")), /database-write/);
+    const human = cardFields({ ...record, taskCard: workCard({
+        humanAction: "Approve the requested scope.", humanActionEvidence: "The requested scope exceeds authorized deployment.",
+    }) });
+    assert.equal(human["Action required from you"], "Approve the requested scope.");
+    assert.equal(cardFields({ taskCard: workCard({ humanAction: "Unsupported request." }) })["Action required from you"], "");
+});
+
+test("pending reviews and triage identify their own work rather than pretending to implement the plan", () => {
+    const planned = { taskCard: workCard(), taskCardSource: "Recorded assignment" };
+    assert.equal(taskLabel({ ...planned, label: "yaml:DeveloperLoop:reviewer:Critic:2" }),
+        "Critic: Review Fix database-write access in QuestionAnswer API");
+    assert.equal(cardContext({ ...planned, label: "yaml:DeveloperLoop:reviewer:Critic:2" }).mustAct, "");
+    assert.equal(taskLabel({ ...planned, label: "yaml:DeveloperLoop:governance:triage:Scrum Master:2" }),
+        "Scrum Master: Reconcile feedback for Fix database-write access in QuestionAnswer API");
+    assert.equal(taskLabel({ taskTitle: "Fix database-write access in QuestionAnswer API",
+        label: "yaml:AssignedWorkDeveloperLoop:doer:1" }),
+        "Fix database-write access in QuestionAnswer API");
+});
+
+test("code location is one file or one meaningful folder, not an overly broad shared ancestor", () => {
+    assert.equal(cardLocation(["api\\write.ts"]), "api\\write.ts");
+    assert.equal(cardLocation(["api\\write.ts", "api\\read.ts"]), "api\\");
+    assert.equal(cardLocation(["api/write.ts", "api/read.ts"]), "api\\");
+    assert.equal(cardLocation(["api\\one\\write.ts", "api\\two\\read.ts"]), "");
+    assert.equal(cardLocation(["api\\one\\", "api\\two\\"]), "");
+    assert.equal(cardLocation(["one.ts", "two.ts"]), "");
+    assert.equal(cardLocation([]), "");
+});
 
 const agent = (id, startedAt, completedAt, status = "completed") => ({
     id, startedAt, completedAt, status, agentType: "developer", label: `Developer: Build feature ${id}`, phaseId: "sprint",

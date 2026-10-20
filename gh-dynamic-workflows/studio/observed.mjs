@@ -7,7 +7,12 @@ function words(value, count = 5) {
 }
 
 export function taskLabel(agent) {
-    if (agent.taskTitle) return words(agent.taskTitle);
+    const card = cardContext(agent);
+    if (card) return `${card.role}: ${card.action}`;
+    if (agent.taskTitle) {
+        const role = recordedRole(agent);
+        return role ? `${role}: ${agent.taskTitle}` : agent.taskTitle;
+    }
     const text = String(agent.label ?? "").replaceAll(/[a-f0-9]{64}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}/gi, "")
         .replaceAll(/:{2,}/g, ":").replace(/^:|:$/g, "");
     const governance = text.match(/:governance:([^:]+):([^:]+):\d+$/);
@@ -19,6 +24,63 @@ export function taskLabel(agent) {
         return words(`${name}${role ? ` ${role}` : ""}`);
     }
     return words(text.replaceAll(/[:/_-]+/g, " ")) || words(agent.agentType) || "Agent activity";
+}
+
+function recordedRole(agent) {
+    const reviewer = agent.label?.match(/:reviewer:([^:]+):\d+$/)?.[1];
+    const governance = agent.label?.match(/:governance:[^:]+:([^:]+):\d+$/)?.[1];
+    return reviewer ?? governance ?? null;
+}
+
+export function cardContext(agent) {
+    const card = agent.taskCard;
+    if (!card) return null;
+    if (agent.taskCardSource !== "Recorded assignment") return card;
+    const reviewer = agent.label?.match(/:reviewer:([^:]+):\d+$/)?.[1];
+    const governance = agent.label?.match(/:governance:[^:]+:([^:]+):\d+$/)?.[1];
+    if (reviewer || governance) return {
+        ...card, role: reviewer ?? governance,
+        action: `${reviewer ? "Review" : "Reconcile feedback for"} ${card.action}`,
+        mustAct: "",
+    };
+    return card;
+}
+
+export function cardScope(agent) {
+    const card = cardContext(agent);
+    return card ? [...card.components, ...card.flows].join(" / ") : "";
+}
+
+export function cardLocation(locations = []) {
+    if (locations.length === 1) return locations[0];
+    if (!locations.length) return "";
+    const folders = locations.map((location) => {
+        const normalized = location.replaceAll("\\", "/");
+        const parts = normalized.replace(/\/$/, "").split("/");
+        return normalized.endsWith("/") ? parts : parts.slice(0, -1);
+    });
+    // A shared ancestor of several different folders is too broad for the short card.
+    if (!folders[0].length || !folders.every((folder) => folder.join("/") === folders[0].join("/"))) return "";
+    return `${folders[0].join("\\")}\\`;
+}
+
+export function cardFields(agent) {
+    const card = cardContext(agent);
+    if (!card) return {};
+    return {
+        Components: card.components.join(", "), Flows: card.flows.join(", "),
+        "Affected steps": card.flowSteps.join("; "), "Failure category": card.failureCategories.join(", "),
+        "Must act": card.mustAct, Goal: card.goal, "Done when": card.doneWhen,
+        Location: cardLocation(card.locations), Evidence: card.evidence, Cause: card.cause,
+        Verification: ({
+            "not-yet-verified": "Not yet verified", passed: "Passed recorded checks",
+            failed: "Failed recorded checks", partial: "Partially verified",
+        })[card.verification.status],
+        "Verification evidence": card.verification.evidence,
+        "Action required from you": card.humanAction && card.humanActionEvidence ? card.humanAction : "",
+        "Human-action evidence": card.humanAction ? card.humanActionEvidence : "",
+        "Card context source": agent.taskCardSource,
+    };
 }
 
 export function processModel(agent) {
@@ -57,7 +119,7 @@ export function workOutcome(agent, { phase } = {}) {
         const reviewer = agent.label?.match(/:reviewer:([^:]+)/)?.[1];
         const governance = agent.label?.match(/:governance:([^:]+):([^:]+):\d+$/);
         const structured = /\b[A-Za-z][A-Za-z0-9]*Loop\b/.test(agent.label ?? "");
-        const task = agent.taskTitle?.trim() || taskId ||
+        const task = cardContext(agent)?.action || agent.taskTitle?.trim() || taskId ||
             (structured ? taskLabel(agent) : agent.label?.trim()) || phase?.title || agent.agentType || "Recorded agent task";
         const title = ["queued", "pending"].includes(status) ? "Task pending"
             : ["stale", "unsettled"].includes(status) ? "Task activity unconfirmed"
@@ -153,13 +215,13 @@ export function observedFlow(run) {
         if (!levels.has(node.level)) levels.set(node.level, []);
         levels.get(node.level).push(node);
     }
-    const width = Math.max(300, ...[...levels.values()].map((row) => row.length * 212 + 24));
+    const width = Math.max(340, ...[...levels.values()].map((row) => row.length * 312 + 24));
     for (const row of levels.values()) {
         row.forEach((node, index) => {
-            node.width = node.kind === "task" ? 180 : 170;
-            node.height = node.kind === "task" ? 180 : 58;
-            node.x = (width - row.length * 212) / 2 + index * 212 + (212 - node.width) / 2;
-            node.y = node.level === 0 ? 24 : 138 + (node.level - 1) * 236;
+            node.width = node.kind === "task" ? 280 : 170;
+            node.height = node.kind === "task" ? 280 : 58;
+            node.x = (width - row.length * 312) / 2 + index * 312 + (312 - node.width) / 2;
+            node.y = node.level === 0 ? 24 : 138 + (node.level - 1) * 340;
         });
     }
     return { nodes, edges, width, height: Math.max(...nodes.map((node) => node.y + node.height)) + 24 };
@@ -212,7 +274,7 @@ export function queryTeam(run, question, progress = []) {
     } else if (/\b(done|finished|completed)\b/.test(query)) {
         matches = agents.filter((agent) => !active.has(agent.status) && !["stale", "unsettled"].includes(agent.status));
     } else {
-        matches = agents.filter((agent) => `${agent.id} ${agent.label} ${agent.agentType} ${agent.taskTitle ?? ""}`.toLowerCase().includes(query));
+        matches = agents.filter((agent) => `${agent.id} ${agent.label} ${agent.agentType} ${taskLabel(agent)} ${cardScope(agent)}`.toLowerCase().includes(query));
     }
     if (!matches.length) return {
         title: "No matching recorded activity",
@@ -221,7 +283,7 @@ export function queryTeam(run, question, progress = []) {
     };
     return summarizeEvidence({
         observation: run.stale ? "Lease expired; not confirmed live" : `Observed at ${new Date(run.observedAt).toISOString()}`,
-        tasks: matches.map((agent) => `${agent.taskTitle ?? (agent.label || agent.agentType)}: ${agent.status}${
+        tasks: matches.map((agent) => `${taskLabel(agent)}: ${agent.status}${
             agent.workResult ? `. ${workOutcome(agent).title}: ${agent.workResult.summary}` : ""}`),
         "Recent run context (not agent replies)": progress.slice(-2).map((line) => line.text),
     });

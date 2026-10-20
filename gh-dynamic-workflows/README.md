@@ -7,6 +7,15 @@ workflow from [loops.yml](loops.yml). The source is the root `loops.yml` in
 reviewers and completion conditions; the SDK supplies agents and durable steps.
 This is a Copilot Dynamic Workflow extension, not GitHub Actions.
 
+The agreed [solution component, flow, and work-card definitions](WORK-CARD-DEFINITIONS.md)
+guide planning and reporting. Architects name the components and trigger-driven
+flows; assignments, owners, reviewers and feedback coordinators reuse those names.
+Structured cards lead with **role: meaningful action**, preserving scope,
+failure category, responsibility, bounded acceptance, code location, evidence
+and verification rather than opaque task IDs or generic blocked messages.
+The corresponding Studio update displays this metadata; old runs without it
+remain readable without invented diagnoses.
+
 ## Install and launch
 
 From this framework checkout, into a different existing project:

@@ -1,13 +1,16 @@
 import { dispositionContext, promptFeedback, priorDispositionInstructions, reconcileFeedback } from "./scope-governance.mjs";
 import { contextInstructions } from "./task-context.mjs";
+import { workCardSchema, taskCardsSchema, validateWorkCard, validateTaskCards, workCardInstructions, architectureCardInstructions, planningCardInstructions } from "./work-cards.mjs";
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 export const ownerSchema = {
-    type: "object", required: ["status", "summary", "artifact"],
+    type: "object", required: ["status", "summary", "artifact", "workCard"],
     properties: {
         status: { type: "string", enum: ["complete", "rework", "needs-replan", "needs-input"] },
         summary: { type: "string" }, artifact: { type: "object" },
         nextAction: { type: "string" },
+        workCard: workCardSchema,
+        taskCards: taskCardsSchema,
         progress: { type: "array", items: {
             type: "object", required: ["id", "evidence"],
             properties: { id: { type: "string", minLength: 1 }, evidence: { type: "string", minLength: 1 } },
@@ -15,9 +18,10 @@ export const ownerSchema = {
     },
 };
 export const reviewerSchema = {
-    type: "object", required: ["agree", "feedback"],
+    type: "object", required: ["agree", "feedback", "workCard"],
     properties: {
         agree: { type: "boolean" }, feedback: { type: "string" },
+        workCard: workCardSchema,
         taskComplete: { type: "boolean" },
         unmetCriteria: { type: "array", items: { type: "string" } },
         verifiedProgress: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true },
@@ -37,7 +41,8 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
         "ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop",
         "SprintDesignLoop", "SprintArchitectureLoop", "SprintPlanLoop",
     ].includes(loop.id);
-    const doerSchema = guarded ? { ...ownerSchema, required: [...ownerSchema.required, "progress"] } : ownerSchema;
+    const doerSchema = { ...ownerSchema, required: [...ownerSchema.required,
+        ...(guarded ? ["progress"] : []), ...(loop.id === "SprintPlanLoop" ? ["taskCards"] : [])] };
     const reviewSchema = { ...reviewerSchema, required: [...reviewerSchema.required,
         ...(guarded ? ["verifiedProgress"] : []), ...(context.assignment ? ["taskComplete", "unmetCriteria"] : [])] };
     return ctx.step(key, async () => {
@@ -57,6 +62,9 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 ...(guarded ? { progressState: progressState() } : {}),
                 instructions: [
                     ...contextInstructions,
+                    ...workCardInstructions,
+                    ...(["ArchitectureLoop", "SprintArchitectureLoop"].includes(loop.id) ? architectureCardInstructions : []),
+                    ...(loop.id === "SprintPlanLoop" ? planningCardInstructions : []),
                     "Carry out this loop's work, not just a proposal. Use ordinary repository tools as needed, including commands and deployment when authorized.",
                     "Follow actual project instructions and the supplied user authority. This workflow does not expand permissions.",
                     ...priorDispositionInstructions,
@@ -106,6 +114,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 typeof owner.summary !== "string" || !object(owner.artifact)) {
                 throw new Error(`Invalid do-er response in ${loop.id}; no completion was recorded`);
             }
+            validateWorkCard(owner.workCard, `${loop.id} owner`);
             if (guarded && (!Array.isArray(owner.progress) || owner.progress.some((item) =>
                 !object(item) || typeof item.id !== "string" || !item.id.trim() || item.id !== item.id.trim() ||
                 typeof item.evidence !== "string" || !item.evidence.trim()) ||
@@ -114,7 +123,10 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
             }
             let transportIssue = null;
             if (owner.status === "complete" && decode) {
-                try { await decode(owner.artifact); }
+                try {
+                    await decode(owner.artifact);
+                    if (loop.id === "SprintPlanLoop") validateTaskCards(owner.taskCards, owner.artifact.SprintPlan?.tasks, loop.id);
+                }
                 catch (error) { transportIssue = error.message; }
             }
             const dispatched = owner.status === "complete" && !transportIssue && dispatch
@@ -127,6 +139,8 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     ...(guarded ? { progressState: progressState() } : {}),
                     instructions: [
                         ...contextInstructions,
+                        ...workCardInstructions,
+                        "Independently check the owner's workCard against the actual assignment, Architect-established names and evidence. Your card describes your review action and findings, not invented implementation work; mustAct names the actual next responsible role. A missing legacy card alone does not change substantive acceptance.",
                         "Independently review the actual work and the YAML completeWhen condition. Read the relevant files, not just the do-er's summary.",
                         ...priorDispositionInstructions,
                         "Return agree:true when you agree with the reported outcome. Feedback may include observations even when you agree; there is no zero-findings requirement.",
@@ -162,6 +176,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 if (!object(review) || typeof review.agree !== "boolean" || typeof review.feedback !== "string") {
                     throw new Error(`Invalid ${role} reviewer response in ${loop.id}`);
                 }
+                validateWorkCard(review.workCard, `${loop.id} ${role} reviewer`);
                 if (context.assignment && (typeof review.taskComplete !== "boolean" ||
                     !Array.isArray(review.unmetCriteria) || review.unmetCriteria.some((item) => typeof item !== "string"))) {
                     throw new Error(`Invalid ${role} assignment completion assessment in ${loop.id}`);
@@ -185,6 +200,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 (!context.assignment || reviews.every((review) => review.taskComplete))) {
                 return {
                     status: "agreed", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
+                    ...(owner.workCard ? { workCard: owner.workCard } : {}),
                     ...(governanceHistory.length ? { governanceHistory } : {}),
                     ...(dispatched ? { dispatch: dispatched.context } : {}),
                 };
@@ -192,6 +208,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
             if (agreed && owner.status === "needs-input") {
                 return {
                     status: "needs-input", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
+                    ...(owner.workCard ? { workCard: owner.workCard } : {}),
                     ...(governanceHistory.length ? { governanceHistory } : {}),
                     nextAction: owner.nextAction ?? "Resolve the reported missing decision or authority, then start a new run against the existing project work.",
                 };
@@ -215,6 +232,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
             if (needsReplan &&
                 (!governance.nonBlocking.length || governance.instructions.length)) {
                 return { status: "needs-replan", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
+                    ...(owner.workCard ? { workCard: owner.workCard } : {}),
                     feedback, governanceHistory,
                     nextAction: owner.nextAction ?? "Resolve the affected assignment through the existing Architect and Scrum Master loops." };
             }
@@ -230,6 +248,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 if (noProgressRounds >= maxNoProgressRounds) {
                     return {
                         status: "blocked", rounds: attempt, stopCause: "no-progress",
+                        ...(owner.workCard ? { workCard: owner.workCard } : {}),
                         summary: `${loop.id} stopped after ${noProgressRounds} consecutive rounds without reviewer-verified new progress.`,
                         reason: transportIssue ?? `No new advance was verified by every original reviewer. ${owner.summary}`,
                         nextAction: "Inspect the unresolved feedback and evidence, resolve the blocker or change approach, then explicitly start a new run against the existing work.",
@@ -241,6 +260,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
         const disagreements = feedback.reviews.filter((review) => !review.agree).map((review) => review.role);
         return {
             status: "limit-reached", rounds: attempts, limit: attempts,
+            ...(feedback.owner.workCard ? { workCard: feedback.owner.workCard } : {}),
             summary: `${loop.id} stopped at the explicitly supplied ${attempts}-round limit.`,
             reason: feedback.transportIssue ?? (disagreements.length
                 ? `Reviewers still disagreed: ${disagreements.join(", ")}. ${feedback.owner.summary}`

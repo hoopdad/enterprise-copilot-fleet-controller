@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import { definition as installedDefinition, loadWorkflow, flattenLoops } from "./loop-source.mjs";
 import { runLoop } from "./lab-loops.mjs";
+import { validateWorkCard } from "./work-cards.mjs";
 import { dispositionContext, scopeContext } from "./scope-governance.mjs";
 import { archiveContext, documentContext, historyLocation, outcomeContext, outcomeIndex } from "./task-context.mjs";
 import { createAgentScheduler, createResourceScheduler, criticalPathPriorities, scheduleTasks } from "./scheduling.mjs";
@@ -35,6 +36,11 @@ export function sprintTasks(artifact) {
             throw new Error("Every task needs a unique id, title, kind, assigned owner and dependsOn array");
         }
         byId.set(task.id, task);
+        validateWorkCard(task.workCard, `SprintPlan task ${task.id}`);
+        if (task.workCard && (task.workCard.role !== task.owner || task.workCard.action !== task.title ||
+            task.workCard.doneWhen !== task.doneWhen)) {
+            throw new Error(`Task ${task.id} workCard must match its owner, title and doneWhen`);
+        }
         if (task.doneWhen !== undefined && (typeof task.doneWhen !== "string" || !task.doneWhen.trim()) ||
             task.handoff !== undefined && (typeof task.handoff !== "string" || !task.handoff.trim()) ||
             task.exclusions !== undefined && (!Array.isArray(task.exclusions) ||
@@ -179,6 +185,7 @@ export function createLoopRunner() {
         const stopped = (result) => Object.fromEntries(Object.entries({
             status: result.status, engine: ENGINE, runId: ctx.runId, summary: result.summary ?? result.reason,
             stoppedAt: result.loopId, stoppedKey: result.key, reason: result.reason, nextAction: result.nextAction,
+            workCard: result.workCard,
             rounds: result.rounds, limit: result.limit,
             ...(result.progress ? { stopCause: result.stopCause, progress: result.progress } : {}),
             completedSprints: [...completed], documents, outcomes,

@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, appendFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { UsageReader, agentUsage, agentWork } from "../usage.mjs";
-import { usageEvent, workEvent } from "./fixture.mjs";
+import { usageEvent, workEvent, workCard } from "./fixture.mjs";
 
 async function logFixture(t) {
     const dir = await mkdtemp(path.join(os.tmpdir(), "studio-usage-"));
@@ -14,6 +14,66 @@ async function logFixture(t) {
 const lines = (events, newline = "\n") => events.map((event) => JSON.stringify(event)).join(newline) + newline;
 const started = (agentId, toolCallId, workflowRunId = "run") => ({
     type: "subagent.started", agentId, data: { toolCallId, workflowRunId },
+});
+
+test("projects bounded semantic cards, drops unrelated fields and preserves uncertainty and explicit human action", async (t) => {
+    const file = await logFixture(t);
+    await writeFile(file, lines([
+        started("owner", "owner-call"),
+        workEvent("result", "owner", { status: "rework", summary: "Write access is unresolved.",
+            workCard: { ...workCard(), secret: "PRIVATE-CARD-EXTRA" }, artifact: { secret: "PRIVATE-ARTIFACT" } }),
+    ]));
+    const reader = new UsageReader();
+    const state = await reader.read(file);
+    const projected = agentWork(state, "run", { id: "owner-call" });
+    assert.equal(projected.taskCard.action, "Fix database-write access in QuestionAnswer API");
+    assert.equal(projected.taskCardSource, "Structured final agent response");
+    assert.match(projected.taskCard.cause, /not yet identified/);
+    assert.equal(projected.taskCard.verification.status, "not-yet-verified");
+    assert.equal(projected.taskCard.humanAction, "");
+    assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-/);
+    assert.equal(agentWork(state, "other-run", { id: "owner-call" }).taskCard, null);
+    await appendFile(file, lines([workEvent("bad-card", "owner", {
+        status: "rework", summary: "Actual outcome is still retained.",
+        workCard: workCard({ verification: { status: "passed", evidence: "" } }),
+    })]));
+    const updated = await reader.read(file);
+    assert.equal(agentWork(updated, "run", { id: "owner-call" }).taskCard, null);
+    assert.equal(agentWork(updated, "run", { id: "owner-call" }).workResult.summary, "Actual outcome is still retained.");
+    assert.match([...updated.warnings].join(), /Malformed work-card metadata/);
+});
+
+test("pending assignment cards use only their exact sprint, replacement scope and plan round; final cards supersede plans", async (t) => {
+    const file = await logFixture(t);
+    const prefix = "yaml-loops-v1:sprint/1/S1/replan/old/plan-1";
+    const pendingCard = workCard({ failureCategories: [], evidence: "", cause: "" });
+    await writeFile(file, lines([
+        started("plan", "plan-call"), started("plan-old", "old-plan-call"),
+        workEvent("plan-result", "plan", { status: "complete", summary: "Assigned.",
+            artifact: { SprintPlan: { path: "docs/sprint-plan.json" } },
+            taskCards: [{ id: "api", workCard: pendingCard }] }),
+        workEvent("old-plan-result", "plan-old", { status: "complete", summary: "Old plan.", artifact: {
+            SprintPlan: { tasks: [{ id: "api", title: "Unrelated older task", workCard: workCard({ action: "Unrelated older task" }) }] },
+        } }),
+    ]));
+    const reader = new UsageReader();
+    const agents = [
+        { id: "plan-call", label: `${prefix}/SprintPlanLoop:doer:2` },
+        { id: "old-plan-call", label: `${prefix}/SprintPlanLoop:doer:1` },
+        { id: "task", label: `${prefix}/task/api/plan-round/2/AssignedWorkDeveloperLoop:doer:1` },
+    ];
+    const state = await reader.read(file);
+    const projected = agentWork(state, "run", agents[2], agents);
+    assert.deepEqual(projected.taskCard, pendingCard);
+    assert.equal(projected.taskCardSource, "Recorded assignment");
+    assert.equal(agentWork(state, "run", { ...agents[2], label: agents[2].label.replace("/S1/", "/S2/") }, agents).taskCard, null);
+    assert.equal(agentWork(state, "run", { ...agents[2], label: agents[2].label.replace("/plan-round/2/", "/plan-round/3/") }, agents).taskCard, null);
+    assert.equal(agentWork(state, "run", { ...agents[2], label: agents[2].label.replace("/replan/old/plan-1", "") }, agents).taskCard, null);
+    await appendFile(file, lines([workEvent("task-result", "task", {
+        status: "rework", summary: "Write denied.", workCard: workCard({ action: "Investigate database-write permission failure" }),
+    })]));
+    assert.equal(agentWork(await reader.read(file), "run", agents[2], agents).taskCard.action,
+        "Investigate database-write permission failure");
 });
 
 test("attributes exact agent usage, excludes parents/nested/other runs, preserves zero and deduplicates event IDs", async (t) => {
@@ -132,12 +192,15 @@ test("projects all governance formats without artifacts, acceptance votes or cro
     ];
     await writeFile(file, lines(cases.flatMap(([stage, result]) => [
         started(stage, `${stage}-call`),
-        workEvent(stage, stage, { ...result, artifact: { secret: "PRIVATE-ARTIFACT" } }),
+        workEvent(stage, stage, { ...result, workCard: workCard({ role: "Scrum Master", action: "Reconcile Question-Answer feedback" }),
+            artifact: { secret: "PRIVATE-ARTIFACT" } }),
     ])));
     const state = await new UsageReader().read(file);
     for (const [stage, , summary] of cases) {
         const agent = { id: `${stage}-call`, label: `yaml:DeveloperLoop:governance:${stage}:Role:1` };
-        const work = agentWork(state, "run", agent).workResult;
+        const projected = agentWork(state, "run", agent);
+        const work = projected.workResult;
+        assert.equal(projected.taskCard.action, "Reconcile Question-Answer feedback");
         assert.equal(work.kind, "governance");
         assert.equal(work.stage, stage);
         assert.match(work.summary, summary);

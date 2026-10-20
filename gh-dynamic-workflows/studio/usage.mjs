@@ -9,6 +9,31 @@ const text = (value) => typeof value === "string";
 const entries = (value, fields) => Array.isArray(value) && value.every((item) =>
     item !== null && typeof item === "object" && fields.every((field) => text(item[field])));
 
+// Deliberately project only display fields, never arbitrary report artifacts.
+function projectCard(value, state) {
+    if (value === undefined) return null;
+    const scalar = ["role", "action", "goal", "doneWhen", "mustAct", "evidence", "cause", "humanAction", "humanActionEvidence"];
+    const lists = ["components", "flows", "flowSteps", "locations", "failureCategories"];
+    const categories = ["Identity/access", "Network/connectivity", "Configuration", "Deployment/build",
+        "Application logic", "UI/presentation", "Data", "Unknown"];
+    if (!value || scalar.some((key) => !text(value[key])) ||
+        ["role", "action", "goal", "doneWhen"].some((key) => !value[key].trim()) ||
+        lists.some((key) => !Array.isArray(value[key]) || value[key].some((item) => !text(item) || !item.trim())) ||
+        value.failureCategories.some((category) => !categories.includes(category)) ||
+        !["not-yet-verified", "passed", "failed", "partial"].includes(value.verification?.status) ||
+        !text(value.verification.evidence) ||
+        (value.verification.status !== "not-yet-verified" && !value.verification.evidence.trim()) ||
+        (Boolean(value.humanAction.trim()) !== Boolean(value.humanActionEvidence.trim()))) {
+        state.warnings.add("Malformed work-card metadata was skipped; component/flow context may be unavailable.");
+        return null;
+    }
+    return {
+        ...Object.fromEntries(scalar.map((key) => [key, value[key].slice(0, 4000)])),
+        ...Object.fromEntries(lists.map((key) => [key, value[key].slice(0, 100).map((item) => item.slice(0, 1000))])),
+        verification: { status: value.verification.status, evidence: value.verification.evidence.slice(0, 4000) },
+    };
+}
+
 function governanceResult(result) {
     if (text(result?.summary) &&
         entries(result.requiredCorrections, ["id", "requirement", "evidence", "action"]) &&
@@ -86,21 +111,32 @@ function ingest(state, line) {
         const work = ["complete", "rework", "needs-replan", "needs-input"].includes(result?.status) && typeof result.summary === "string";
         const governance = governanceResult(result);
         if (!review && !work && !governance) return;
+        const card = projectCard(result.workCard, state);
         if (!review && !work) {
             state.results.set(event.agentId, { kind: "governance", ...governance,
-                summary: governance.summary.slice(0, 12_000), names: [] });
+                summary: governance.summary.slice(0, 12_000), names: [], card });
             return;
         }
         const names = [];
+        const assignments = [];
         for (const item of [...(Array.isArray(result.artifact?.ReleasePlan?.sprints) ? result.artifact.ReleasePlan.sprints : []),
             ...(Array.isArray(result.artifact?.SprintPlan?.tasks) ? result.artifact.SprintPlan.tasks : [])]) {
             if (identifier(item?.id) && identifier(item.title ?? item.name)) names.push([item.id, item.title ?? item.name]);
+        }
+        const taskMetadata = Array.isArray(result.taskCards) ? result.taskCards
+            : Array.isArray(result.artifact?.SprintPlan?.tasks) ? result.artifact.SprintPlan.tasks : [];
+        for (const task of taskMetadata) {
+            const plannedCard = projectCard(task?.workCard, state);
+            if (identifier(task?.id) && plannedCard) {
+                assignments.push([task.id, plannedCard]);
+                if (!names.some(([id]) => id === task.id)) names.push([task.id, plannedCard.action]);
+            }
         }
         state.results.set(event.agentId, {
             kind: review ? "review" : "work", agree: review ? result.agree : null,
             status: work ? result.status : null,
             taskComplete: review && typeof result.taskComplete === "boolean" ? result.taskComplete : null,
-            summary: (review ? result.feedback : result.summary).slice(0, 12_000), names,
+            summary: (review ? result.feedback : result.summary).slice(0, 12_000), names, card, assignments,
         });
         return;
     }
@@ -240,11 +276,17 @@ export function agentWork(state, runId, agent, agents = []) {
     const taskId = agent.label?.match(/\/task\/([^/:]+)/)?.[1];
     const sprintId = agent.label?.match(/sprint\/\d+\/([^/:]+)/)?.[1];
     const taskTitle = known.find(([id]) => id === (taskId ?? sprintId))?.[1] ?? null;
+    const assignment = agent.label?.match(/^(.*)\/task\/([^/:]+)(?:\/plan-round\/(\d+))?\/[^:]+:/);
+    const planner = assignment ? agents.find((candidate) =>
+        candidate.label === `${assignment[1]}/SprintPlanLoop:doer:${assignment[3] ?? 1}`) : null;
+    const plannedCard = planner ? resultFor(planner)?.assignments?.find(([id]) => id === taskId)?.[1] : null;
+    const taskCard = result?.card ?? plannedCard ?? null;
     if (!result || result.kind === "unavailable") return {
-        taskTitle, workResult: null, workOutcomeState: result?.status ?? "missing",
+        taskTitle, taskCard, taskCardSource: taskCard ? "Recorded assignment" : null,
+        workResult: null, workOutcomeState: result?.status ?? "missing",
     };
     if (result.kind === "governance" && agent.label?.match(/:governance:([^:]+):[^:]+:\d+$/)?.[1] !== result.stage) {
-        return { taskTitle, workResult: null, workOutcomeState: "unsupported" };
+        return { taskTitle, taskCard: null, workResult: null, workOutcomeState: "unsupported" };
     }
     let summary = result.summary;
     const replacements = new Map(known);
@@ -253,7 +295,8 @@ export function agentWork(state, runId, agent, agents = []) {
         const pattern = new RegExp(`(?<![\\w-])(?:${alternatives.join("|")})(?![\\w-])`, "g");
         summary = summary.replace(pattern, (id) => replacements.get(id));
     }
-    return { taskTitle, workResult: {
+    return { taskTitle, taskCard, taskCardSource: result.card ? "Structured final agent response"
+        : taskCard ? "Recorded assignment" : null, workResult: {
         kind: result.kind, agree: result.agree, status: result.status, summary,
         ...(result.kind === "governance" ? { stage: result.stage } : {}),
         ...(result.kind === "review" ? { taskComplete: result.taskComplete, ownerStatus: owner ? resultFor(owner)?.status ?? null : null } : {}),

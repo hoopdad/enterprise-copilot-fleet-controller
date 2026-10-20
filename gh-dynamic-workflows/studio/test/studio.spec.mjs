@@ -2,11 +2,48 @@ import { test, expect } from "@playwright/test";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { startStudio } from "../server.mjs";
-import { fixture, SOURCE, usageEvent, workEvent } from "./fixture.mjs";
+import { fixture, SOURCE, usageEvent, workEvent, workCard } from "./fixture.mjs";
 
 let f;
 let studio;
 let yamlSource;
+test("renders component/flow work cards with full role/action headings and evidence in the drawer", async ({ page }) => {
+    const local = await fixture();
+    let instance;
+    try {
+        local.mutate((db) => db.prepare("UPDATE workflow_agents SET label=?,status='completed' WHERE run_id='live-run'")
+            .run("yaml:sprint/1/S1/task/api/AssignedWorkDeveloperLoop:doer:1"));
+        await appendFile(path.join(path.dirname(local.dbFile), "events.jsonl"),
+            JSON.stringify(workEvent("semantic-card", "a1", { status: "rework", summary: "Database write failed.",
+                artifact: {}, workCard: workCard() })) + "\n");
+        instance = await startStudio(local.project, { sessionsRoot: local.sessionsRoot });
+        await page.goto(instance.url);
+        const task = page.locator('[data-task="agent:a1"]');
+        await expect(task).toContainText("Developer: Fix database-write access in QuestionAnswer API");
+        await expect(task).toContainText("Question-Answer");
+        await expect(task).toContainText("Identity/access");
+        await expect(task).toContainText("Must act: Developer");
+        await task.click();
+        await expect(page.locator("#task-drawer-title")).toHaveText("Developer: Fix database-write access in QuestionAnswer API");
+        await expect(page.locator("#task-details")).toContainText("Missing permission not yet identified.");
+        await expect(page.locator("#task-details")).toContainText("Not yet verified");
+        await expect(page.locator("#task-details")).toContainText("infra\\");
+        await expect(page.locator("#task-details")).not.toContainText("Action required from you");
+        await expect(page.locator("#error")).toBeHidden();
+        const fits = await task.evaluate((node) => {
+            const bounds = node.getBoundingClientRect();
+            return [...node.children].every((child) => {
+                const rect = child.getBoundingClientRect();
+                return rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+            });
+        });
+        expect(fits).toBe(true);
+    } finally {
+        await page.close();
+        await instance?.close();
+        await local.cleanup();
+    }
+});
 test("renders completed governance outcomes rather than missing-result warnings", async ({ page }) => {
     const local = await fixture();
     let instance;
@@ -114,7 +151,7 @@ test("shows unfinished task context, opens unstarted pending tasks, and refreshe
             const task = pending ? page.locator("#agents .agent-open") : page.locator("#graph .flow-node.task");
             await task.click();
             await expect(page.locator("#task-drawer")).toBeVisible();
-            await expect(page.locator("#task-drawer-title")).toHaveText("Customer Activity Screen");
+            await expect(page.locator("#task-drawer-title")).toHaveText("Critic: Customer Activity Screen");
             const summary = page.locator("#task-details .evidence-summary");
             await expect(summary).toContainText("RECORDED TASK CONTEXT");
             await expect(summary).toContainText(pending ? "Task pending" : "Work in progress");
@@ -305,7 +342,7 @@ test("opens compact outcome details without page scrolling and refreshes exact m
         await task.click();
         await expect(page.locator("#task-drawer")).toBeVisible();
         expect(await page.evaluate(() => window.scrollY)).toBe(before);
-        await expect(page.locator("#task-drawer-title")).toHaveText("Customer Activity Screen");
+        await expect(page.locator("#task-drawer-title")).toHaveText("Critic: Customer Activity Screen");
         await expect(page.locator("#task-details")).toContainText("Reviewer found a processing bug in Customer Activity Screen.");
         await expect(page.locator("#task-details")).toContainText("Changes requested");
         await expect(page.locator("#task-details")).toContainText("Critic reviewer");

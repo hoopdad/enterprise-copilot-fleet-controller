@@ -80,6 +80,22 @@ scrolling away from the flowchart or opening a browser window. Close it with
 Close, Escape, or the backdrop; keyboard focus returns to the selected activity.
 Its compact label/value layout leads with the recorded work outcome, with
 raw IDs, source labels and timestamps collapsed under Technical details.
+New workflow reports supply component/flow-aware cards headed by the concrete
+role and meaningful action, such as **Developer: Fix database-write access in
+QuestionAnswer API**. The graph shows affected scope, failure category and who
+must act; the drawer also exposes the affected flow steps, goal, bounded
+acceptance, concise code location, evidence, cause/uncertainty and verification.
+One file is shown directly, several files in one folder collapse to that folder,
+and locations spanning multiple folders stay in Technical details. User action
+appears only with an explicit action and supporting evidence. Report agreement
+does not change a card's unverified flow into a working one.
+
+Pending assignments can reuse their exact retained SprintPlan task card,
+including replacement scope and planning round. Reviewer/feedback-coordinator
+context describes review/coordination rather than pretending to implement the
+planned change. Actual final cards supersede planned context; historical tasks
+without semantic fields keep their supported legacy details, not guessed causes.
+
 Verbose context and
 outcomes use a local extractive summary: a few-word heading, a two-sentence
 description and at most two paragraphs of five sentences each. Phase progress
@@ -160,8 +176,10 @@ adapter**, not a cross-session SDK attachment:
   model names, exact subagent/run attribution and supported structured
   `final_answer` outcomes are projected. Final JSON can be plain, fenced, or
   wrapped in `<<<WORKFLOW_JSON>>>` markers. Only reviewer agreement/feedback,
-  do-er status/summary and planning ID/title pairs are retained; arbitrary
-  artifacts and the rest of the response are discarded.
+  do-er status/summary, governance outcomes, planning ID/title pairs and bounded,
+  allowlisted work-card fields (including SprintPlan assignment cards) are retained;
+  arbitrary artifacts and the rest of the response are discarded. Malformed card
+  metadata is reported explicitly without discarding the supported final outcome.
 - The scanner discards prompts, reasoning, intermediate conversation, tool
   arguments and other message text rather than exposing or retaining them.
   It never reads workflow journal payloads, credentials or authentication caches.

@@ -13,6 +13,16 @@ export const workEvent = (id, agentId, result) => ({
     id, type: "assistant.message", agentId,
     data: { phase: "final_answer", toolRequests: [], content: `<<<WORKFLOW_JSON>>>\n${JSON.stringify(result)}\n<<<END_WORKFLOW_JSON>>>` },
 });
+export const workCard = (changes = {}) => ({
+    role: "Developer", action: "Fix database-write access in QuestionAnswer API",
+    goal: "Allow the API identity to save questions and answers.",
+    components: ["QuestionAnswer API"], flows: ["Question-Answer"],
+    flowSteps: ["API -> database: save question/answer"], doneWhen: "Both writes succeed.",
+    failureCategories: ["Identity/access"], mustAct: "Developer", locations: ["infra\\access.tf", "infra\\identity.tf"],
+    evidence: "Write attempt returned permission denied.", cause: "Missing permission not yet identified.",
+    verification: { status: "not-yet-verified", evidence: "" }, humanAction: "", humanActionEvidence: "",
+    ...changes,
+});
 export const SOURCE = `globalThis.__studioExecuted = true;
 export const metadata = {
   name: "example",

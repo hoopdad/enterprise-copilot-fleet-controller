@@ -1,4 +1,4 @@
-import { observedFlow, outcome, stopReason, summarizeEvidence, queryTeam, processModel, tokenText, workOutcome, taskLabel } from "./observed.mjs";
+import { observedFlow, outcome, stopReason, summarizeEvidence, queryTeam, processModel, tokenText, workOutcome, taskLabel, cardContext, cardScope, cardFields } from "./observed.mjs";
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -276,8 +276,14 @@ function renderObservedGraph() {
         status.setAttribute("aria-hidden", "true");
         button.append(status, element("strong", node.title));
         if (node.agent) {
-            button.append(element("span", `${node.agent.agentType} / ${shortId(node.agent.id)}`, "small muted"),
-                element("span", node.label, "task-status"), element("span", `Model: ${processModel(node.agent)}`, "task-model"));
+            const card = cardContext(node.agent);
+            if (card) {
+                button.append(element("span", cardScope(node.agent), "task-scope"));
+                if (card.failureCategories.length) button.append(element("span", card.failureCategories.join(", "), "task-category"));
+                if (card.mustAct) button.append(element("span", `Must act: ${card.mustAct}`, "task-model"));
+            }
+            button.append(element("span", node.label, "task-status"),
+                element("span", `Model: ${processModel(node.agent)}`, "task-model"));
             const tokens = element("span", null, "task-usage");
             for (const [title, field] of [["Input", "inputTokens"], ["Cached", "cacheReadTokens"], ["Output", "outputTokens"]]) {
                 const row = element("span");
@@ -286,7 +292,7 @@ function renderObservedGraph() {
             }
             tokens.title = node.agent.usage?.message ?? "No per-agent token records retained.";
             button.append(tokens);
-            button.title = `${node.agent.label}\n${node.agent.agentType} / ${node.agent.id}\n${node.label}\nModel: ${processModel(node.agent)}`;
+            button.title = `${node.title}\n${cardScope(node.agent)}\n${node.label}\n${node.agent.label}\nModel: ${processModel(node.agent)}`;
         }
         button.setAttribute("aria-label", `${node.kind === "task" ? `${node.agent.agentType} ${node.agent.id}: ` : ""}${node.title} / ${node.label ?? "Run started"}`);
         if (state.phase && node.agent && node.agent.phaseId !== state.phase) button.classList.add("dimmed");
@@ -323,11 +329,12 @@ function renderTaskInspector(container, current) {
     const node = observedFlow(current).nodes.find((item) => item.id === state.task) ??
         (selectedAgent ? { kind: "task", agent: selectedAgent, title: taskLabel(selectedAgent) } : null);
     if (!node) { state.task = null; return false; }
-    $("task-drawer-title").textContent = node.kind === "task" ? node.agent.taskTitle ?? node.title : node.kind === "start" ? "Workflow started" : "Workflow stop";
+    $("task-drawer-title").textContent = node.kind === "task" ? node.title : node.kind === "start" ? "Workflow started" : "Workflow stop";
     if (node.agent) {
         const agent = node.agent;
         const phase = current.phases.find((item) => item.id === agent.phaseId);
         const result = workOutcome(agent, { phase });
+        inspectFields(container, cardFields(agent));
         const summary = summarizeEvidence(result.summary);
         summary.title = result.title;
         appendSummary(container, summary, agent.workResult ? "RECORDED AGENT OUTCOME"
@@ -350,6 +357,7 @@ function renderTaskInspector(container, current) {
             Started: date(agent.startedAt), Completed: agent.completedAt ? date(agent.completedAt) : "Not recorded",
             "Requested model": agent.requestedModel, "Resolved model": agent.resolvedModel,
             "Outcome source": agent.workResult?.source ?? "No structured final work response retained",
+            "Code locations": agent.taskCard?.locations,
         });
         container.append(technical, element("p", "An agent's completion is not proof of successful delivery. Reviewer agreement is not automatically a PASS.", "small muted"));
     } else if (node.kind === "end") {
@@ -467,7 +475,7 @@ function renderAgents() {
     const current = detail();
     const search = $("agent-search").value.toLowerCase();
     const agents = current?.agents.filter((agent) => (!state.phase || agent.phaseId === state.phase) &&
-        `${agent.label} ${agent.agentType} ${agent.status}`.toLowerCase().includes(search)) ?? [];
+        `${taskLabel(agent)} ${cardScope(agent)} ${agent.label} ${agent.agentType} ${agent.status}`.toLowerCase().includes(search)) ?? [];
     $("agent-count").textContent = `${agents.length} shown / ${current?.agents.length ?? 0} total`;
     const container = $("agents");
     container.replaceChildren();
@@ -477,7 +485,8 @@ function renderAgents() {
     for (const agent of agents) {
         const row = element("div", null, "agent-row");
         const title = element("div", null, "agent-label");
-        const name = element("button", label(agent.label) || agent.agentType, "agent-open");
+        const name = element("button", agent.taskCard || agent.taskTitle
+            ? taskLabel(agent) : label(agent.label) || agent.agentType, "agent-open");
         name.dataset.agentTask = `agent:${agent.id}`;
         name.title = agent.label;
         name.addEventListener("click", () => {

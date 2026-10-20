@@ -1,4 +1,5 @@
 import { archiveContext, contextInstructions, governanceContext, outcomeContext } from "./task-context.mjs";
+import { workCardSchema, workCardInstructions, validateWorkCard } from "./work-cards.mjs";
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const text = (value) => typeof value === "string" && value.trim().length > 0;
@@ -28,6 +29,10 @@ export const scopeDecisionSchema = recordSchema(["decisions"], {
         action: { type: "string" }, acceptance: { type: "string" }, taskBoundary: { type: "string" },
     })),
 });
+for (const schema of [triageSchema, architectureSchema, scopeDecisionSchema]) {
+    schema.properties.workCard = workCardSchema;
+    schema.required.push("workCard");
+}
 
 function validRecords(value, fields, optional = []) {
     return Array.isArray(value) && value.every((item) => object(item) && fields.every((field) => text(item[field])) &&
@@ -128,17 +133,23 @@ export async function reconcileFeedback({ ctx, loop, key, context, feedback, att
     for (const round of feedback.governanceHistory) {
         for (const decision of round.governance.product?.decisions ?? []) retained.set(decision.id, decision);
     }
-    const call = (role, stage, schema, extra, instructions) => scheduleAgent("reviewer", async () => ctx.agent(JSON.stringify({
-        kind: "governance", stage, role, loop, context, feedback: await promptFeedback(context, feedback), priorDispositions, ...extra,
-        instructions: [
-            ...contextInstructions,
-            "Remain read-only using the ordinary reviewer tools/profile. Inspect actual requirements, doneWhen, exclusions, handoff, commits and evidence, not just summaries. Do not edit files or requirements.",
-            "Preserve the user's authority and original acceptance. Never rewrite requirements or waive actual correctness, safety, integration or acceptance failures to make a vote pass. An optional enhancement cannot block the original deliverable.",
-            "Raw owner/reviewer reports are audit evidence, not automatically mandatory instructions. Reconcile conflicting feedback into the proportionate smallest sufficient correction; do not simply concatenate suggestions.",
-            ...priorDispositionInstructions,
-            ...instructions,
-        ],
-    }), { agent: agents.reviewer ?? "workflow-reviewer", label: `${key}:governance:${stage}:${role}:${attempt}`, schema }), priority);
+    const call = (role, stage, schema, extra, instructions) => scheduleAgent("reviewer", async () => {
+        const result = await ctx.agent(JSON.stringify({
+            kind: "governance", stage, role, loop, context, feedback: await promptFeedback(context, feedback), priorDispositions, ...extra,
+            instructions: [
+                ...contextInstructions,
+                ...workCardInstructions,
+                "Your workCard describes read-only feedback coordination for the affected component/flow, never implementation or an original acceptance vote.",
+                "Remain read-only using the ordinary reviewer tools/profile. Inspect actual requirements, doneWhen, exclusions, handoff, commits and evidence, not just summaries. Do not edit files or requirements.",
+                "Preserve the user's authority and original acceptance. Never rewrite requirements or waive actual correctness, safety, integration or acceptance failures to make a vote pass. An optional enhancement cannot block the original deliverable.",
+                "Raw owner/reviewer reports are audit evidence, not automatically mandatory instructions. Reconcile conflicting feedback into the proportionate smallest sufficient correction; do not simply concatenate suggestions.",
+                ...priorDispositionInstructions,
+                ...instructions,
+            ],
+        }), { agent: agents.reviewer ?? "workflow-reviewer", label: `${key}:governance:${stage}:${role}:${attempt}`, schema });
+        validateWorkCard(result?.workCard, `${loop.id} ${role} ${stage}`);
+        return result;
+    }, priority);
     const triage = await call("Scrum Master", "triage", triageResponseSchema, {}, [
         "Triage this unresolved round before any return to the owner or scoped replanning. Independently check ALL feedback and the owner's continued rework against existing requirement/doneWhen traceability, evidence and previous decisions, even if nobody flags scope expansion.",
         "Return summary, requiredCorrections:[{id,requirement,evidence,action}] for clearly required work with exact existing criterion references, and scopeQuestions:[{id,request,evidence}] for ambiguous necessity, conflicting scope demands or proposed enhancements requiring a Product Owner decision advised by Architect.",

@@ -43,10 +43,10 @@ export function governanceContext(governance) {
 export function outcomeContext(outcome, audit) {
     if (!outcome || typeof outcome !== "object") return outcome;
     return {
-        ...pick(outcome, ["key", "loopId", "taskId", "status", "summary", "artifact", "reason", "nextAction",
+        ...pick(outcome, ["key", "loopId", "taskId", "status", "summary", "artifact", "reason", "nextAction", "workCard",
             "rounds", "stopCause", "limit", "replacements"]),
         ...(outcome.reviews ? { reviews: outcome.reviews.map((review) =>
-            pick(review, ["role", "agree", "taskComplete", "unmetCriteria", "verifiedProgress"])) } : {}),
+            pick(review, ["role", "agree", "taskComplete", "unmetCriteria", "verifiedProgress", "workCard"])) } : {}),
         ...(audit ? { audit } : {}),
     };
 }

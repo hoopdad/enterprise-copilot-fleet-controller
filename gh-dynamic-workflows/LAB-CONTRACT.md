@@ -113,14 +113,38 @@ needs-replan routing receives the reconciled feedback; when only discarded
 enhancements remain, retry the original owner instead of replacing its DAG.
 Unassigned needs-replan still retries the same owner.
 
-Do-er report: `{status:"complete"|"rework"|"needs-replan"|"needs-input",summary:string,artifact:object}`.
+Do-er report: `{status:"complete"|"rework"|"needs-replan"|"needs-input",summary:string,artifact:object,workCard:object}`.
 An optional `nextAction` can identify the exact decision needed for human input.
-Reviewer report: `{agree:boolean,feedback:string}`. No mandated empty findings,
+Reviewer report: `{agree:boolean,feedback:string,workCard:object}`. No mandated empty findings,
 file evidence lists, cryptographic bindings or native PASS receipt.
 Assigned-work reviews additionally require `taskComplete:boolean` and
 `unmetCriteria:string[]`, separating accurate reports from completion judgments.
 Owner `complete`, reviewer agreement and completion endorsement are all needed
 for assignment acceptance. No reviewer promotes owner rework into completion.
+
+All newly requested owner, reviewer and feedback-governance reports require a
+`workCard` using `work-cards.mjs`'s shared schema. Legacy replay may omit it;
+supplied malformed metadata is an explicit error. The card contains
+`role`, `action`, `goal`, `components`, `flows`, `flowSteps`, `doneWhen`,
+`failureCategories`, `mustAct`, `locations`, `evidence`, `cause`,
+`verification:{status,evidence}`, `humanAction` and `humanActionEvidence`.
+Verification status is `not-yet-verified`, `passed`, `failed` or `partial`;
+anything other than unverified needs concrete evidence. Human action and its
+supporting evidence must both be present or both empty. A blocked task does
+not establish a user-only action.
+
+The Architect maintains `solutionModel` in Architecture/SprintArchitecture
+or their referenced design files: named components with stable IDs,
+implementation children and shared-support links, and named flows with triggers,
+steps referencing components, and optional personas. Downstream roles reuse
+these names without requiring user naming. SprintPlan task cards match their
+assigned owner, title/action and doneWhen, and survive saved planning documents
+and scoped replanning. See [definitions and examples](WORK-CARD-DEFINITIONS.md).
+SprintPlan reports also request `taskCards:[{id,workCard}]`, matching every
+resolved plan assignment. This display-only projection supports file-backed
+plans without Studio reading arbitrary files. Supplied projections are checked
+against the resolved plan before dispatch.
+
 Agreed assigned-work `needs-replan` is internal scoped Architect/Scrum Master coordination,
 not human input. The existing architecture/plan loops return bounded replacement
 assignments with internal dependency edges and accepted outer prerequisites in

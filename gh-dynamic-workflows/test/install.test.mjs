@@ -26,6 +26,8 @@ test("fresh installations contain the ordinary YAML runtime and owner/reviewer p
     assert.match(await readFile(path.join(root, ".github", "agents", "workflow-owner.agent.md"), "utf8"), /name: workflow-owner/);
     assert.ok(files.includes("scope-governance.mjs"));
     assert.ok(files.includes("task-context.mjs"));
+    assert.ok(files.includes("work-cards.mjs") && files.includes("WORK-CARD-DEFINITIONS.md"));
+    assert.ok((await readdir(path.join(root, "gh-dynamic-workflows", "test"))).includes("work-cards.test.mjs"));
     assert.ok((await readdir(path.join(root, "gh-dynamic-workflows", "test"))).includes("task-context.test.mjs"));
     const before = await readFile(path.join(root, "gh-dynamic-workflows", "loops.yml"), "utf8");
     const repeated = spawnSync(process.execPath, [installer, root], { encoding: "utf8" });
