@@ -119,6 +119,12 @@ test("assignment errors are named, independent work is joined, and descendants a
         await Promise.resolve();
         joined = true;
         return { status: "agreed" };
-    }), /Assigned work execution failed for failed/);
+    }), (error) => {
+        assert.ok(error instanceof AggregateError);
+        assert.match(error.message, /Assigned work execution failed for failed/);
+        assert.match(error.message, /failed: Actual failure/);
+        assert.equal(error.errors[0].message, "Actual failure");
+        return true;
+    });
     assert.ok(joined);
 });

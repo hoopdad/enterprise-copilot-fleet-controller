@@ -1,4 +1,5 @@
-import { dispositionContext, priorDispositionInstructions, reconcileFeedback } from "./scope-governance.mjs";
+import { dispositionContext, promptFeedback, priorDispositionInstructions, reconcileFeedback } from "./scope-governance.mjs";
+import { contextInstructions } from "./task-context.mjs";
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 export const ownerSchema = {
@@ -32,6 +33,10 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
         throw new Error("An explicitly supplied maxNoProgressRounds must be a positive integer");
     }
     const guarded = maxNoProgressRounds !== undefined;
+    const unassignedPlanning = !context.assignment && [
+        "ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop",
+        "SprintDesignLoop", "SprintArchitectureLoop", "SprintPlanLoop",
+    ].includes(loop.id);
     const doerSchema = guarded ? { ...ownerSchema, required: [...ownerSchema.required, "progress"] } : ownerSchema;
     const reviewSchema = { ...reviewerSchema, required: [...reviewerSchema.required,
         ...(guarded ? ["verifiedProgress"] : []), ...(context.assignment ? ["taskComplete", "unmetCriteria"] : [])] };
@@ -46,21 +51,25 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
         for (let attempt = 1; attempts === undefined || attempt <= attempts; attempt++) {
             ctx.signal?.throwIfAborted();
             ctx.log(`${loop.name}: ${loop.owner}, round ${attempt}`);
-            const owner = await scheduleAgent("doer", () => ctx.agent(JSON.stringify({
-                kind: "doer", role: loop.owner, loop, context, feedback,
+            const owner = await scheduleAgent("doer", async () => ctx.agent(JSON.stringify({
+                kind: "doer", role: loop.owner, loop, context, feedback: await promptFeedback(context, feedback),
                 priorDispositions: dispositionContext(context, governanceHistory.at(-1)?.governance),
                 ...(guarded ? { progressState: progressState() } : {}),
                 instructions: [
+                    ...contextInstructions,
                     "Carry out this loop's work, not just a proposal. Use ordinary repository tools as needed, including commands and deployment when authorized.",
                     "Follow actual project instructions and the supplied user authority. This workflow does not expand permissions.",
                     ...priorDispositionInstructions,
                     "When feedback exists, act on its governance.instructions as ONE reconciled set, reflecting decisions in your next report/artifact. Raw feedback.owner/reviews and governanceHistory are audit evidence, not extra mandatory suggestions. Deferred/declined enhancements in governance.nonBlocking cannot block original acceptance. Preserve previous scope decisions unless explicitly superseded; do not replay conflicting or discarded demands. Never waive actual failures or rewrite requirements. If no correction remains, accurately report the original deliverable complete for the original reviewers to verify.",
                     "Research and resolve technical issues within your work loop; do not invent prerequisite approval stages.",
-                    "Return complete only when you consider this loop's completeWhen condition satisfied. Return rework for work you can continue, or needs-input for a decision or authority only the user can supply.",
+                    "Return complete when you accept your deliverable and have satisfied this loop's substantive completeWhen criteria. Owner status complete is your own acceptance, not a claim that reviewers have already agreed. Pending reviewer votes are not owner rework: the orchestrator collects the original reviews after your response and records agreement only when the original reviewers agree. Never claim collective acceptance before those votes or waive substantive criteria such as passing cloud-deployed tests. Return rework for a concrete unmet criterion you can address, or needs-input for a decision or authority only the user can supply.",
                     "Judge completion against the assigned task's doneWhen, exclusions and handoff, not the whole product ambition or all sprint-level criteria it contributes to. Bounded research can complete with actionable negative or unresolved findings when that satisfies its scope; task completion never asserts a working or live-ready capability.",
                     "Use rework only for a concrete unmet assigned criterion and a next action that can close it, not merely because further useful investigation is possible. Return needs-replan when a finding materially changes architecture, contracts, feasibility or task scope; identify the decision and affected deliverable in summary. This is internal Architect/Scrum Master coordination, not human needs-input.",
-                    ...(!context.assignment ? [
+                    ...(unassignedPlanning ? [
                         "For an unassigned planning/release loop, resolve internal replanning in this existing owner loop using the retained feedback and artifacts. Correct architecture/ownership here when you are Architect; describe concrete downstream work for the original ReleasePlan/Scrum Master stages. Do not repeatedly return needs-replan merely to request those later stages or other parallel reviewers' votes. Do not claim complete until this loop's own deliverable is satisfied.",
+                    ] : []),
+                    ...(!context.assignment && !unassignedPlanning ? [
+                        "For an execution, test or deployment loop, report a material prerequisite/architecture/contract change as needs-replan for the existing Architect/Scrum Master roles. Do not repeatedly reread an unchanged prerequisite blocker or claim substantive completion just because its report is accurate. Original stage order, reviewers and deployed-test conditions remain required.",
                     ] : []),
                     "Use artifact keys matching the YAML outputs. ReleasePlan contains sprints with unique ids; SprintPlan contains assigned tasks with id, title, kind (ui/developer/designer/devops), owner and dependsOn.",
                     "Report actual failures and uncertainty. Accurate FAIL with feedback can satisfy the EndToEndTestLoop's agreement condition; do not turn it into a fabricated PASS.",
@@ -112,11 +121,12 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 ? await dispatch(owner.artifact, attempt, dispositionContext(context, governanceHistory.at(-1)?.governance)) : undefined;
             let reviews;
             try { reviews = await ctx.parallel(loop.reviewers.map((role) => async () => {
-                const review = await scheduleAgent("reviewer", () => ctx.agent(JSON.stringify({
-                    kind: "reviewer", role, loop, context, owner, transportIssue, dispatch: dispatched?.context, feedback,
+                const review = await scheduleAgent("reviewer", async () => ctx.agent(JSON.stringify({
+                    kind: "reviewer", role, loop, context, owner, transportIssue, dispatch: dispatched?.context, feedback: await promptFeedback(context, feedback),
                     priorDispositions: dispositionContext(context, governanceHistory.at(-1)?.governance),
                     ...(guarded ? { progressState: progressState() } : {}),
                     instructions: [
+                        ...contextInstructions,
                         "Independently review the actual work and the YAML completeWhen condition. Read the relevant files, not just the do-er's summary.",
                         ...priorDispositionInstructions,
                         "Return agree:true when you agree with the reported outcome. Feedback may include observations even when you agree; there is no zero-findings requirement.",
@@ -192,7 +202,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
             feedback = { owner, reviews, transportIssue, ...(dispatchedWork ? { dispatchedWork } : {}),
                 ...(previousGovernance ? { governance: previousGovernance } : {}),
                 governanceHistory: [...governanceHistory] };
-            const needsReplan = agreed && owner.status === "needs-replan" && context.assignment;
+            const needsReplan = agreed && owner.status === "needs-replan" && !unassignedPlanning;
             if (attempt !== attempts || needsReplan) {
                 const governance = await reconcileFeedback({
                     ctx, loop, key, context, feedback, attempt, agents, scheduleAgent, priority,
@@ -202,7 +212,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 feedback = { ...feedback, governance, governanceHistory: [...governanceHistory] };
             }
             const governance = feedback.governance;
-            if (agreed && owner.status === "needs-replan" && context.assignment &&
+            if (needsReplan &&
                 (!governance.nonBlocking.length || governance.instructions.length)) {
                 return { status: "needs-replan", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
                     feedback, governanceHistory,

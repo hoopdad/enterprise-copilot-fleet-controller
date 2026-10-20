@@ -91,6 +91,15 @@ available. Plan redispatch carries the current plan's dispositions before its
 acceptance result exists; replacement tasks and later sprints retain them too.
 No database or separate registry is added, and raw audits are not fanned out.
 
+Triage response schemas constrain structured references to the supplied
+`priorDispositions`; with no registered entries, reuse must be empty. File-backed
+decisions and original Product Owner review text remain inspectable task
+evidence, not automatically imported ledger entries. Cite their origins in
+evidence and preserve the current contract without requesting the same approval
+again. Unknown structured references still fail validation. Parallel assignment
+errors retain their underlying task/error messages in the terminal SDK error,
+after independent work settles, rather than only naming the failed assignment.
+
 Owners/reviewers apply only relevant boundaries: neither reopen an accepted
 handoff nor impose another task's approved enhancement on unrelated criteria.
 An unrelated genuine defect is never waived because its short ID matches a
@@ -103,12 +112,53 @@ decisions. Unknown/duplicate references and ambiguous local ID reuse fail clearl
 Semantic applicability still relies on the original roles' judgment, not a
 criterion-proof protocol or text-similarity detector.
 
+Scrum explicitly audits recurring demands before escalating. Optional
+`reusedDispositions:[{priorReference,evidence}]` cites an unchanged applicable
+disposition and current evidence that its boundaries still apply, without
+another Architect/PO call. Unknown, duplicate, modified or simultaneously
+reconsidered reuse references fail explicitly. Required acceptance remains
+binding and both original assigned-work reviewers still run on every round.
+Materially changed evidence uses the existing `priorReference` reconsideration
+path; reuse cannot change a disposition or waive a real defect. Retry feedback
+prompts carry the latest owner/reviewer evidence, reconciled instructions and
+`governanceRounds`, not the repeated raw `governanceHistory` or full prior
+advice/decision reports. Full audits remain in durable loop results.
+These runtime changes take effect only in a subsequently adopted/launched
+workflow, not in an already-running installation.
+
+### Bounded task context and readable history
+
+`task-context.mjs` separates current instructions from historical audit payloads.
+Global outcomes are status/reference entries; only direct dependency handoffs
+carry artifacts, original completion votes and limitations. File-backed planning
+documents retain paths and revision metadata rather than expanded content.
+The current assignment, user authority and scientific controls remain unchanged.
+Owners and original reviewers must read the relevant referenced files/commits;
+reference presence is not acceptance, readiness or an independent quality pass.
+
+Before projection, the runner computes effective scope dispositions from the
+original outcomes and inherited requests, preserving exact origin-qualified
+references, boundaries and explicit supersession. Scoped replanning retains
+current feedback and parent criteria, not nested raw histories. Retry/governance
+prompts retain the latest owner/reviewer evidence and reconciled instructions.
+Raw dispatched-work results and earlier governance rounds are not recursively
+copied into another task's prompt.
+
+Exact original outcomes, scoped requests and retry feedback are written as
+additive JSON artifacts under
+`gh-dynamic-workflows/.delivery-runs/<run-id>/context/`; packets include readable
+relative paths. Content-derived filenames deduplicate identical snapshots and
+never replace different historical bytes. These are ordinary audit files, not
+receipts, source freezes or execution-approval gates. SDK journals and complete
+final results are retained unchanged. No model summarizer, arbitrary truncation,
+new acceptance stage or guessed model-token limit is introduced.
+
 Governance uses the ordinary read-only reviewer profile/tools; it cannot edit
 requirements, waive actual defects, accept work on behalf of original reviewers
 or expand human authority. Malformed/missing/failed role calls fail explicitly.
 Legitimate acceptance and reviewer-confirmed human `needs-input` need no triage.
 The final explicitly capped round also skips triage if no retry can occur,
-unless assigned `needs-replan` still needs scoped routing. Dispatch is joined,
+unless assigned/execution `needs-replan` still needs reconciliation and routing. Dispatch is joined,
 raw feedback is retained, and opt-in stagnation accounting still runs exactly
 once; governance calls never count as extra rounds or progress.
 This user-requested **runtime feedback coordination** is the explicit exception
@@ -197,6 +247,10 @@ Assigned-work reviewers return `taskComplete:boolean` and `unmetCriteria:string[
 separately from report `agree`. Acceptance still requires owner `complete` and
 all reviewers agreeing and endorsing task completion. Reviews cannot promote
 owner `rework` into completion.
+Owner `complete` expresses the owner's acceptance of a ready deliverable, not
+a claim that reviewers have already voted. Pending votes alone are not owner
+rework; the runner collects every original vote before recording agreement.
+Substantive conditions, including actual deployed tests, remain binding.
 
 After feedback triage, an agreed assigned-work owner `needs-replan` invokes the existing Sprint Architect and Scrum
 Master loops for a scoped amendment under Sprint Loop. They resolve only the
@@ -216,6 +270,12 @@ In unassigned planning/release loops, `needs-replan` instead feeds the report
 and original reviews back to that same owner to resolve its own deliverable.
 An Architect corrects architecture/ownership before later original planning
 stages assign implementation; no extra stage or automatic acceptance is added.
+Only the six original architecture/design/release/sprint planning loops use
+that in-owner behavior. Unassigned execution/test/deployment loops return an
+agreed, triaged `needs-replan` as an incomplete application stop. Their existing
+prerequisites can then be corrected through original planning against current
+work; they do not repeat unchanged blocker reports until stagnation, skip later
+reviews or turn an accurate deployment failure into success.
 Parallel reviewers judge their own votes; orchestration aggregates peer votes.
 Stopped results omit unavailable optional fields so SDK JSON validation retains
 the real outcome rather than failing on nested `undefined`.

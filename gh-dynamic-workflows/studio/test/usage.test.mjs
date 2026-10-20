@@ -117,3 +117,55 @@ test("correlates review with the exact owner's round without importing other tas
     assert.equal(agentWork(state, "run", { ...agents[1], label: agents[1].label.replace(":3", ":4") }, agents).workResult.ownerStatus, null);
     assert.equal(agentWork(state, "different-run", agents[1], agents).workResult, null);
 });
+
+test("projects all governance formats without artifacts, acceptance votes or cross-run attribution", async (t) => {
+    const file = await logFixture(t);
+    const cases = [
+        ["triage", { summary: "Original defect remains.", requiredCorrections: [
+            { id: "null", requirement: "Safe handoff", evidence: "Failing null check", action: "Handle null." },
+        ], scopeQuestions: [{ id: "polish", request: "Add polish", evidence: "Outside handoff" }],
+        reusedDispositions: [{ priorReference: "original-reference", evidence: "Unchanged original boundary." }] }, /Handle null[\s\S]*Add polish[\s\S]*Unchanged original boundary/],
+        ["scope-advice", { assessments: [{ id: "polish", necessity: "enhancement",
+            rationale: "Not required.", simplestOption: "Keep current behavior." }] }, /enhancement.*Not required.*Keep current behavior/],
+        ["scope-decision", { decisions: [{ id: "polish", disposition: "defer", rationale: "Outside handoff.",
+            action: "", acceptance: "", taskBoundary: "" }] }, /defer.*Outside handoff/],
+    ];
+    await writeFile(file, lines(cases.flatMap(([stage, result]) => [
+        started(stage, `${stage}-call`),
+        workEvent(stage, stage, { ...result, artifact: { secret: "PRIVATE-ARTIFACT" } }),
+    ])));
+    const state = await new UsageReader().read(file);
+    for (const [stage, , summary] of cases) {
+        const agent = { id: `${stage}-call`, label: `yaml:DeveloperLoop:governance:${stage}:Role:1` };
+        const work = agentWork(state, "run", agent).workResult;
+        assert.equal(work.kind, "governance");
+        assert.equal(work.stage, stage);
+        assert.match(work.summary, summary);
+        assert.equal(work.agree, undefined);
+        assert.equal(work.taskComplete, undefined);
+        assert.equal(agentWork(state, "different-run", agent).workResult, null);
+        assert.equal(agentWork(state, "run", { ...agent, label: "yaml:DeveloperLoop:reviewer:Critic:1" }).workResult, null);
+    }
+    assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-/);
+});
+
+test("distinguishes missing, unsupported and malformed final responses and replaces them after append", async (t) => {
+    const file = await logFixture(t);
+    const malformed = workEvent("bad", "bad", {});
+    malformed.data.content = "<<<WORKFLOW_JSON>>>{broken<<<END_WORKFLOW_JSON>>>";
+    await writeFile(file, lines([
+        workEvent("unknown", "unknown", { unrecognized: "PRIVATE-UNSUPPORTED" }), malformed,
+        workEvent("invalid", "invalid", { assessments: [{ id: "bad", necessity: "invented", rationale: "No.", simplestOption: "No." }] }),
+        workEvent("null", "null", null),
+    ]));
+    const reader = new UsageReader();
+    const state = await reader.read(file);
+    for (const [id, expected] of [["missing", "missing"], ["unknown", "unsupported"], ["bad", "malformed"], ["invalid", "unsupported"], ["null", "unsupported"]]) {
+        const projected = agentWork(state, "run", { id });
+        assert.equal(projected.workOutcomeState, expected);
+        assert.equal(projected.workResult, null);
+    }
+    assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-UNSUPPORTED/);
+    await appendFile(file, lines([workEvent("fixed", "bad", { status: "complete", summary: "Fixed.", artifact: {} })]));
+    assert.equal(agentWork(await reader.read(file), "run", { id: "bad" }).workResult.summary, "Fixed.");
+});

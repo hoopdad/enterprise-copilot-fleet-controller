@@ -1,3 +1,5 @@
+import { archiveContext, contextInstructions, governanceContext, outcomeContext } from "./task-context.mjs";
+
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const text = (value) => typeof value === "string" && value.trim().length > 0;
 const recordSchema = (fields, properties = {}) => ({
@@ -14,6 +16,7 @@ export const triageSchema = recordSchema(["summary", "requiredCorrections", "sco
     requiredCorrections: records(correctionSchema),
     scopeQuestions: records(questionSchema),
 });
+triageSchema.properties.reusedDispositions = records(recordSchema(["priorReference", "evidence"]));
 export const architectureSchema = recordSchema(["assessments"], {
     assessments: records(recordSchema(["id", "necessity", "rationale", "simplestOption"], {
         necessity: { type: "string", enum: ["required", "enhancement"] },
@@ -41,6 +44,34 @@ export const priorDispositionInstructions = [
     "Use the latest reconciled feedback.governance.instructions together with applicable priorDispositions as ONE bounded set, not raw owner/reviewer suggestions. Cite the exact prior reference when reporting or reconsidering an existing disposition. Only explicit Product Owner reconsideration may supersede it; user authority is unchanged.",
 ];
 
+export function feedbackContext(feedback) {
+    if (!feedback) return feedback;
+    const { governanceHistory = [], governance, dispatchedWork, ...current } = feedback;
+    return { ...current, governanceRounds: governanceHistory.length,
+        ...(governance ? { governance: governanceContext(governance) } : {}),
+        ...(dispatchedWork ? { dispatchedWork: dispatchedWork.map((outcome) => outcomeContext(outcome)) } : {}),
+    };
+}
+
+export async function promptFeedback(context, feedback) {
+    if (!feedback) return feedback;
+    const audit = await archiveContext(context.history, "retry feedback", feedback);
+    return { ...feedbackContext(feedback), ...(audit ? { audit } : {}) };
+}
+
+export async function scopeContext(context, scope) {
+    if (!scope?.request) return scope;
+    const audit = await archiveContext(context.history, "scoped replanning", scope);
+    return {
+        ...scope,
+        request: { ...outcomeContext(scope.request, audit),
+            ...(scope.request.feedback ? { feedback: await promptFeedback(context, scope.request.feedback) } : {}) },
+        dependencies: (scope.dependencies ?? []).map((outcome) => outcomeContext(outcome, audit)),
+        inherited: await scopeContext(context, scope.inherited),
+        ...(audit ? { audit } : {}),
+    };
+}
+
 export function dispositionContext(context, localGovernance) {
     const inherited = [...(context.priorDispositions ?? [])];
     const sources = (context.outcomes ?? []).map((outcome) => ({
@@ -58,11 +89,12 @@ export function dispositionContext(context, localGovernance) {
     for (const { governance, status } of sources) {
         if (!governance?.origin) continue;
         for (const item of [...governance.instructions, ...governance.nonBlocking]) {
-            const reference = JSON.stringify([governance.origin.key, item.id]);
-            items.set(reference, { ...item, reference, origin: { ...governance.origin,
+            const reference = item.reference ?? JSON.stringify([governance.origin.key, item.id]);
+            const itemOrigin = item.origin ?? governance.origin;
+            items.set(reference, { ...item, reference, origin: { ...itemOrigin,
                 ...(status !== undefined ? { outcomeStatus: status } : {}) },
-                taskBoundary: item.taskBoundary || governance.origin.assignment?.doneWhen ||
-                    governance.origin.completeWhen || governance.origin.loopId });
+                taskBoundary: item.taskBoundary || itemOrigin.assignment?.doneWhen ||
+                    itemOrigin.completeWhen || itemOrigin.loopId });
             for (const previous of item.supersedes ?? []) {
                 if (previous !== reference) superseded.add(previous);
             }
@@ -80,13 +112,26 @@ export async function reconcileFeedback({ ctx, loop, key, context, feedback, att
                 .map((field) => [field, context.assignment[field]])) } : {}),
     };
     const priorDispositions = dispositionContext(context, feedback.governanceHistory.at(-1)?.governance);
+    const priorReferences = priorDispositions.map((item) => item.reference);
+    const triageResponseSchema = structuredClone(triageSchema);
+    for (const field of ["requiredCorrections", "scopeQuestions"]) {
+        const properties = triageResponseSchema.properties[field].items.properties;
+        if (priorReferences.length) properties.priorReference.enum = priorReferences;
+        else delete properties.priorReference;
+    }
+    if (priorReferences.length) {
+        triageResponseSchema.properties.reusedDispositions.items.properties.priorReference.enum = priorReferences;
+    } else {
+        triageResponseSchema.properties.reusedDispositions.maxItems = 0;
+    }
     const retained = new Map();
     for (const round of feedback.governanceHistory) {
         for (const decision of round.governance.product?.decisions ?? []) retained.set(decision.id, decision);
     }
-    const call = (role, stage, schema, extra, instructions) => scheduleAgent("reviewer", () => ctx.agent(JSON.stringify({
-        kind: "governance", stage, role, loop, context, feedback, priorDispositions, ...extra,
+    const call = (role, stage, schema, extra, instructions) => scheduleAgent("reviewer", async () => ctx.agent(JSON.stringify({
+        kind: "governance", stage, role, loop, context, feedback: await promptFeedback(context, feedback), priorDispositions, ...extra,
         instructions: [
+            ...contextInstructions,
             "Remain read-only using the ordinary reviewer tools/profile. Inspect actual requirements, doneWhen, exclusions, handoff, commits and evidence, not just summaries. Do not edit files or requirements.",
             "Preserve the user's authority and original acceptance. Never rewrite requirements or waive actual correctness, safety, integration or acceptance failures to make a vote pass. An optional enhancement cannot block the original deliverable.",
             "Raw owner/reviewer reports are audit evidence, not automatically mandatory instructions. Reconcile conflicting feedback into the proportionate smallest sufficient correction; do not simply concatenate suggestions.",
@@ -94,9 +139,12 @@ export async function reconcileFeedback({ ctx, loop, key, context, feedback, att
             ...instructions,
         ],
     }), { agent: agents.reviewer ?? "workflow-reviewer", label: `${key}:governance:${stage}:${role}:${attempt}`, schema }), priority);
-    const triage = await call("Scrum Master", "triage", triageSchema, {}, [
+    const triage = await call("Scrum Master", "triage", triageResponseSchema, {}, [
         "Triage this unresolved round before any return to the owner or scoped replanning. Independently check ALL feedback and the owner's continued rework against existing requirement/doneWhen traceability, evidence and previous decisions, even if nobody flags scope expansion.",
         "Return summary, requiredCorrections:[{id,requirement,evidence,action}] for clearly required work with exact existing criterion references, and scopeQuestions:[{id,request,evidence}] for ambiguous necessity, conflicting scope demands or proposed enhancements requiring a Product Owner decision advised by Architect.",
+        "Audit repeated demands against priorDispositions before asking for new scope advice. For an applicable unchanged prior disposition, return reusedDispositions:[{priorReference,evidence}] citing its exact reference and current evidence that its boundary and acceptance still apply. Do not copy it into scopeQuestions or requiredCorrections, rename it, or ask Architect/Product Owner to repeat the same decision. Independently verify required/approved acceptance; reuse is not completion or permission to waive a defect.",
+        "Structured priorReference and reusedDispositions fields may cite ONLY exact entries in the supplied priorDispositions array. When it is empty, omit priorReference and return reusedDispositions:[] or omit that array. A decision found only in documents or an original Product Owner review is still inspectable task evidence, not a registered runtime reference: cite its exact audit/document origin in evidence and apply the current task contract without fabricating ledger membership or requesting the same approval again. An actual unresolved scope conflict still requires scopeQuestions.",
+        "Send only genuinely unresolved scope or a materially changed requirement, boundary, conflict or technical finding for Architect/Product Owner consideration. For reconsideration cite priorReference and explain the changed evidence in evidence; do not reopen a disposition merely because a reviewer repeated it. Keep corrections/evidence concise and actionable; raw prior audit history remains durable outside this prompt.",
         "Resolve clear conflicting implementation suggestions yourself with the smallest sufficient action. Do not disguise ambiguous new scope as required. Use distinct stable IDs across both lists. Check priorDispositions for applicable decisions from other tasks, replacements and sprints, not just local history. When reconsidering a prior disposition, include its exact priorReference in scopeQuestions (or requiredCorrections if proposing required reclassification); the runtime routes reconsideration to Architect and Product Owner. Never infer applicability from a matching short ID alone. If only the report/status needs correction, say so explicitly; do not silently accept an actual defect.",
     ]);
     if (!object(triage) || !text(triage.summary) ||
@@ -107,6 +155,16 @@ export async function reconcileFeedback({ ctx, loop, key, context, feedback, att
         throw new Error(`Invalid Scrum Master triage response in ${loop.id}`);
     }
     const proposed = [...triage.requiredCorrections, ...triage.scopeQuestions];
+    const reusedDispositions = triage.reusedDispositions ?? [];
+    if ((triage.reusedDispositions !== undefined && (!Array.isArray(triage.reusedDispositions) ||
+        triage.reusedDispositions.some((item) => !object(item) || !text(item.priorReference) || !text(item.evidence) ||
+            Object.keys(item).some((field) => !["priorReference", "evidence"].includes(field))))) ||
+        new Set(reusedDispositions.map((item) => item.priorReference)).size !== reusedDispositions.length ||
+        reusedDispositions.some((item) => !priorDispositions.some((prior) => prior.reference === item.priorReference) ||
+            proposed.some((proposal) => proposal.priorReference === item.priorReference ||
+                JSON.stringify([key, proposal.id]) === item.priorReference))) {
+        throw new Error(`Invalid Scrum Master reusedDispositions in ${loop.id}`);
+    }
     for (const item of proposed) {
         if (retained.has(item.id) && item.priorReference !== JSON.stringify([key, item.id])) {
             throw new Error(`Invalid Scrum Master disposition ID collision in ${loop.id}; use its explicit priorReference to reconsider this decision, or a new ID for unrelated scope`);
@@ -162,14 +220,18 @@ export async function reconcileFeedback({ ctx, loop, key, context, feedback, att
     }
     for (const decision of product?.decisions ?? []) retained.set(decision.id, decision);
     const decisions = [...retained.values()];
+    const reused = reusedDispositions.map((item) => priorDispositions.find((prior) => prior.reference === item.priorReference))
+        .filter((item) => !decisions.some((decision) => JSON.stringify([key, decision.id]) === item.reference));
     return {
         origin, triage, ...(architecture ? { architecture } : {}), ...(product ? { product } : {}),
+        ...(reusedDispositions.length ? { reusedDispositions } : {}),
         instructions: [
             ...reconciledTriage.requiredCorrections.map((item) => ({ id: item.id, disposition: "required",
                 action: item.action, acceptance: item.requirement, evidence: item.evidence,
                 taskBoundary: context.assignment?.doneWhen ?? loop.completeWhen ?? loop.name })),
             ...decisions.filter((item) => ["required", "approve"].includes(item.disposition)),
+            ...reused.filter((item) => ["required", "approve"].includes(item.disposition)),
         ],
-        nonBlocking: decisions.filter((item) => ["defer", "decline"].includes(item.disposition)),
+        nonBlocking: [...decisions, ...reused].filter((item) => ["defer", "decline"].includes(item.disposition)),
     };
 }

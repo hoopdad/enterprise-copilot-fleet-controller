@@ -5,6 +5,40 @@ const fields = ["inputTokens", "cacheReadTokens", "outputTokens"];
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const counter = (value) => Number.isSafeInteger(value) && value >= 0;
 const identifier = (value) => typeof value === "string" && value.length > 0 ? value : null;
+const text = (value) => typeof value === "string";
+const entries = (value, fields) => Array.isArray(value) && value.every((item) =>
+    item !== null && typeof item === "object" && fields.every((field) => text(item[field])));
+
+function governanceResult(result) {
+    if (text(result?.summary) &&
+        entries(result.requiredCorrections, ["id", "requirement", "evidence", "action"]) &&
+        entries(result.scopeQuestions, ["id", "request", "evidence"]) &&
+        (result.reusedDispositions === undefined || entries(result.reusedDispositions, ["priorReference", "evidence"]))) {
+        return { stage: "triage", summary: [
+            result.summary,
+            ...result.requiredCorrections.map((item) => `Required correction ${item.id}: ${item.action} Criterion: ${item.requirement} Evidence: ${item.evidence}`),
+            ...result.scopeQuestions.map((item) => `Unresolved scope ${item.id}: ${item.request} Evidence: ${item.evidence}`),
+            ...(result.reusedDispositions ?? []).map((item) => `Prior disposition reused: ${item.priorReference}. Evidence: ${item.evidence}`),
+            ...(!result.requiredCorrections.length && !result.scopeQuestions.length ? ["No new corrections or scope questions."] : []),
+        ].join("\n") };
+    }
+    if (entries(result?.assessments, ["id", "necessity", "rationale", "simplestOption"]) &&
+        result.assessments.every((item) => ["required", "enhancement"].includes(item.necessity))) {
+        return { stage: "scope-advice", summary: result.assessments.map((item) =>
+            `${item.id}: ${item.necessity}. ${item.rationale} Simplest option: ${item.simplestOption}`
+        ).join("\n") || "No scope assessments." };
+    }
+    if (entries(result?.decisions, ["id", "disposition", "rationale", "action", "acceptance", "taskBoundary"]) &&
+        result.decisions.every((item) => ["required", "approve", "defer", "decline"].includes(item.disposition))) {
+        return { stage: "scope-decision", summary: result.decisions.map((item) => [
+            `${item.id}: ${item.disposition}. ${item.rationale}`,
+            item.action ? `Action: ${item.action}` : null,
+            item.acceptance ? `Acceptance: ${item.acceptance}` : null,
+            item.taskBoundary ? `Task boundary: ${item.taskBoundary}` : null,
+        ].filter(Boolean).join(" ")).join("\n") || "No scope decisions." };
+    }
+    return null;
+}
 
 function emptyState(stat) {
     return {
@@ -35,6 +69,7 @@ function ingest(state, line) {
         if (event.data?.phase !== "final_answer" || event.data?.toolRequests?.length || !identifier(event.agentId)) return;
         const content = event.data.content;
         if (typeof content !== "string") return;
+        state.results.set(event.agentId, { kind: "unavailable", status: "unsupported", names: [] });
         const candidate = content.match(/<<<WORKFLOW_JSON>>>\s*([\s\S]*?)\s*<<<END_WORKFLOW_JSON>>>/)?.[1] ??
             content.trim().replace(/^```json\s*/, "").replace(/\s*```$/, "");
         let result;
@@ -42,13 +77,20 @@ function ingest(state, line) {
         catch (error) {
             if (!(error instanceof SyntaxError)) throw error;
             if (content.includes("<<<WORKFLOW_JSON>>>") || content.trim().startsWith("{") || content.trim().startsWith("```json")) {
+                state.results.set(event.agentId, { kind: "unavailable", status: "malformed", names: [] });
                 state.warnings.add("Malformed structured final outcome was skipped; a work outcome may be unavailable.");
             }
             return;
         }
         const review = typeof result?.agree === "boolean" && typeof result.feedback === "string";
         const work = ["complete", "rework", "needs-replan", "needs-input"].includes(result?.status) && typeof result.summary === "string";
-        if (!review && !work) return;
+        const governance = governanceResult(result);
+        if (!review && !work && !governance) return;
+        if (!review && !work) {
+            state.results.set(event.agentId, { kind: "governance", ...governance,
+                summary: governance.summary.slice(0, 12_000), names: [] });
+            return;
+        }
         const names = [];
         for (const item of [...(Array.isArray(result.artifact?.ReleasePlan?.sprints) ? result.artifact.ReleasePlan.sprints : []),
             ...(Array.isArray(result.artifact?.SprintPlan?.tasks) ? result.artifact.SprintPlan.tasks : [])]) {
@@ -198,7 +240,12 @@ export function agentWork(state, runId, agent, agents = []) {
     const taskId = agent.label?.match(/\/task\/([^/:]+)/)?.[1];
     const sprintId = agent.label?.match(/sprint\/\d+\/([^/:]+)/)?.[1];
     const taskTitle = known.find(([id]) => id === (taskId ?? sprintId))?.[1] ?? null;
-    if (!result) return { taskTitle, workResult: null };
+    if (!result || result.kind === "unavailable") return {
+        taskTitle, workResult: null, workOutcomeState: result?.status ?? "missing",
+    };
+    if (result.kind === "governance" && agent.label?.match(/:governance:([^:]+):[^:]+:\d+$/)?.[1] !== result.stage) {
+        return { taskTitle, workResult: null, workOutcomeState: "unsupported" };
+    }
     let summary = result.summary;
     const replacements = new Map(known);
     if (known.length) {
@@ -208,6 +255,7 @@ export function agentWork(state, runId, agent, agents = []) {
     }
     return { taskTitle, workResult: {
         kind: result.kind, agree: result.agree, status: result.status, summary,
+        ...(result.kind === "governance" ? { stage: result.stage } : {}),
         ...(result.kind === "review" ? { taskComplete: result.taskComplete, ownerStatus: owner ? resultFor(owner)?.status ?? null : null } : {}),
         source: "Structured final agent response",
     } };

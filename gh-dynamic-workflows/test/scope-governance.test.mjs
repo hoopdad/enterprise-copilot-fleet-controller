@@ -4,7 +4,7 @@ import { runLoop } from "../lab-loops.mjs";
 import { definition, flattenLoops, workflowMetadata } from "../loop-source.mjs";
 import { createAgentScheduler } from "../scheduling.mjs";
 import { governanceResponse } from "./scope-governance.fixture.mjs";
-import { dispositionContext } from "../scope-governance.mjs";
+import { dispositionContext, feedbackContext, triageSchema } from "../scope-governance.mjs";
 
 const loop = flattenLoops(definition.workflows.ReleaseLoop.steps).find((node) => node.id === "AssignedWorkDeveloperLoop");
 function harness(respond, assignment = true) {
@@ -34,7 +34,8 @@ test("every retry receives Scrum-only required correction without an opt-in guar
         if (input.kind === "reviewer") {
             if (round > 1) {
                 assert.equal(input.feedback.governance.instructions[0].disposition, "required");
-                assert.ok(input.feedback.governanceHistory.length);
+                assert.ok(input.feedback.governanceRounds);
+                assert.equal(input.feedback.governanceHistory, undefined);
                 assert.match(input.instructions.join("\n"), /Deferred\/declined enhancements cannot block/);
             }
             return { agree: round === 3, taskComplete: round === 3, unmetCriteria: round === 3 ? [] : ["Original defect"],
@@ -61,6 +62,68 @@ test("every retry receives Scrum-only required correction without an opt-in guar
     ]);
     assert.ok(!Object.hasOwn(result, "progress"));
     assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+});
+
+test("triage schemas allow only registered runtime references without erasing file-backed decisions", async () => {
+    const reference = JSON.stringify(["source", "approved-topology"]);
+    const prior = {
+        id: "approved-topology", reference, disposition: "approve",
+        action: "Use the approved suite-scoped topology.",
+        acceptance: "Preserve durable originals and no ambiguous repost.",
+        taskBoundary: "Original binding task only.",
+        origin: { key: "source", loopId: "ArchitectureLoop" },
+    };
+    for (const priorDispositions of [[], [prior], []]) {
+        const f = harness((input, options) => {
+            if (input.stage !== "triage") return;
+            const properties = options.schema.properties;
+            assert.match(input.instructions.join("\n"), /ONLY exact entries in the supplied priorDispositions/);
+            assert.match(input.instructions.join("\n"), /without fabricating ledger membership or requesting the same approval again/);
+            for (const field of ["requiredCorrections", "scopeQuestions"]) {
+                const referenceSchema = properties[field].items.properties.priorReference;
+                if (priorDispositions.length) assert.deepEqual(referenceSchema.enum, [reference]);
+                else assert.equal(referenceSchema, undefined);
+                assert.equal(properties[field].items.additionalProperties, false);
+            }
+            if (priorDispositions.length) {
+                assert.deepEqual(properties.reusedDispositions.items.properties.priorReference.enum, [reference]);
+                assert.equal(properties.reusedDispositions.maxItems, undefined);
+            } else {
+                assert.equal(properties.reusedDispositions.maxItems, 0);
+            }
+            return {
+                summary: "Keep the current contract and inspected Product Owner audit decision.",
+                requiredCorrections: [{
+                    id: "physical-send", requirement: "Actual binding doneWhen.",
+                    evidence: "Original Product Owner audit approves suite scope; physical send remains unbound.",
+                    action: "Connect the actual physical send without reopening the approved topology.",
+                }],
+                scopeQuestions: [],
+                reusedDispositions: priorDispositions.length ? [{
+                    priorReference: reference, evidence: "The registered boundary still applies.",
+                }] : [],
+            };
+        });
+        const result = await f.run({ context: { assignment: { id: "binding", doneWhen: "Actual binding." }, priorDispositions } });
+        assert.equal(result.status, "agreed");
+        assert.equal(result.governanceHistory[0].governance.triage.scopeQuestions.length, 0);
+    }
+    assert.equal(triageSchema.properties.requiredCorrections.items.properties.priorReference.enum, undefined);
+    assert.equal(triageSchema.properties.reusedDispositions.maxItems, undefined);
+});
+
+test("unregistered file-backed reuse remains an explicit validation error rather than an imported approval", async () => {
+    const f = harness((input) => {
+        if (input.stage === "triage") return {
+            summary: "A file-backed review is not a registered runtime disposition.",
+            requiredCorrections: [], scopeQuestions: [],
+            reusedDispositions: [{
+                priorReference: JSON.stringify(["source", "unregistered"]),
+                evidence: "A document cites this prior review.",
+            }],
+        };
+    });
+    await assert.rejects(f.run(), /Invalid Scrum Master reusedDispositions/);
 });
 
 test("Architect advice then PO required/approve/defer/decline becomes one bounded actionable set for owner AND original reviewers", async () => {
@@ -90,7 +153,8 @@ test("Architect advice then PO required/approve/defer/decline becomes one bounde
         if (round > 1 && input.kind !== "governance") {
             assert.deepEqual(input.feedback.governance.instructions.map((item) => item.id), ["clear", "defect", "polish"]);
             assert.deepEqual(input.feedback.governance.nonBlocking.map((item) => item.id), ["later", "unwanted"]);
-            assert.equal(input.feedback.governanceHistory[0].reviews.length, 2);
+            assert.equal(input.feedback.reviews.length, 2);
+            assert.equal(input.feedback.governanceHistory, undefined);
         }
     });
     const result = await f.run();
@@ -285,8 +349,90 @@ test("invalid prior references and ambiguous local ID collisions fail instead of
                     id: `changed-${index}`, request: "Reconsider.", evidence: "Evidence.", priorReference: reference,
                 })) };
         });
+
         await assert.rejects(f.run(), /Invalid .*priorReference|Invalid Scrum Master disposition ID collision/);
     }
+});
+
+test("Scrum reuses unchanged decisions across retries with both original reviewers and no repeated Architect/PO calls", async () => {
+    const f = harness((input, _, round) => {
+        if (input.kind === "reviewer") return { agree: round === 4, taskComplete: round === 4,
+            unmetCriteria: round === 4 ? [] : ["Original null criterion."], feedback: "Verify original criterion." };
+        if (input.stage === "triage" && round === 1) return {
+            summary: "Correct the existing defect; adjudicate optional polish.",
+            requiredCorrections: [{ id: "null", requirement: "Original null criterion.",
+                evidence: "Null check fails.", action: "Fix null handling." }],
+            scopeQuestions: [{ id: "polish", request: "Optional polish.", evidence: "Outside handoff." }],
+        };
+        if (input.stage === "triage") {
+            assert.match(input.instructions.join("\n"), /Do not copy it into scopeQuestions/);
+            assert.equal(input.feedback.governanceHistory, undefined);
+            assert.equal(input.feedback.governance.product, undefined);
+            return { summary: "Same scoped decisions apply; fix the remaining original defect.",
+                requiredCorrections: [], scopeQuestions: [],
+                reusedDispositions: input.priorDispositions.map((item) => ({
+                    priorReference: item.reference, evidence: "Unchanged boundary and acceptance; null failure remains.",
+                })) };
+        }
+        if (round >= 3 && input.kind !== "governance") {
+            assert.equal(input.feedback.governance.instructions.find((item) => item.id === "null").action, "Fix null handling.");
+            assert.equal(input.feedback.governance.nonBlocking[0].disposition, "defer");
+            assert.equal(input.priorDispositions.find((item) => item.id === "null").reference, '["governed","null"]');
+        }
+    });
+    const result = await f.run();
+    assert.equal(result.rounds, 4);
+    assert.equal(result.governanceHistory.length, 3);
+    assert.equal(f.calls.filter((input) => input.stage === "scope-advice").length, 1);
+    assert.equal(f.calls.filter((input) => input.stage === "scope-decision").length, 1);
+    for (let round = 1; round <= 4; round++) {
+        assert.deepEqual(f.calls.filter((input) => input.kind === "reviewer" && input.options.label.endsWith(`:${round}`))
+            .map((input) => input.role), ["Architect", "Critic"]);
+    }
+    assert.equal(result.governanceHistory[2].governance.reusedDispositions.length, 2);
+    assert.equal(dispositionContext({ outcomes: [result] }).find((item) => item.id === "null").origin.key, "governed");
+});
+
+test("reuse preserves inherited provenance and rejects unknown, duplicate or simultaneously reconsidered references", async () => {
+    const prior = { reference: '["earlier","optional"]', id: "optional", disposition: "decline",
+        rationale: "Outside original task.", action: "", acceptance: "", taskBoundary: "Only original handoff.",
+        origin: { key: "earlier", loopId: loop.id, assignment: { id: "source" } } };
+    for (const mode of ["valid", "unknown", "duplicate", "conflict", "null", "override"]) {
+        const f = harness((input) => {
+            if (input.stage !== "triage") return;
+            const reuse = { priorReference: mode === "unknown" ? "missing" : prior.reference, evidence: "Same boundary." };
+            return { summary: "Reuse scope.", requiredCorrections: [],
+                scopeQuestions: mode === "conflict" ? [{ id: "changed", request: "Reconsider.",
+                    evidence: "New finding.", priorReference: prior.reference }] : [],
+                reusedDispositions: mode === "null" ? null : [mode === "override" ? { ...reuse, disposition: "required" } : reuse,
+                    ...(mode === "duplicate" ? [reuse] : [])] };
+        });
+        const work = f.run({ key: "consumer", context: { priorDispositions: [prior],
+            assignment: { id: "consumer", doneWhen: "Consumer handoff." } } });
+        if (mode !== "valid") await assert.rejects(work, /Invalid Scrum Master reusedDispositions/);
+        else {
+            const result = await work;
+            const effective = dispositionContext({ outcomes: [result] });
+            assert.equal(effective[0].reference, prior.reference);
+            assert.equal(effective[0].origin.assignment.id, "source");
+            assert.equal(f.calls.filter((input) => input.kind === "governance").length, 1);
+        }
+    }
+});
+
+test("retry feedback keeps current evidence and instructions while full governance audits remain in durable results", () => {
+    const governance = { origin: { key: "original" }, instructions: [{ id: "fix" }], nonBlocking: [],
+        architecture: { assessments: ["RAW-ADVICE"] }, product: { decisions: ["RAW-DECISION"] } };
+    const feedback = { owner: { summary: "Current evidence." }, reviews: [{ role: "Critic", feedback: "Actual defect." }],
+        governance, governanceHistory: Array.from({ length: 20 }, () => ({ owner: "RAW-HISTORICAL-OWNER", governance })) };
+    const projected = feedbackContext(feedback);
+    assert.equal(projected.governanceRounds, 20);
+    assert.equal(projected.owner.summary, "Current evidence.");
+    assert.deepEqual(projected.governance.instructions, [{ id: "fix" }]);
+    assert.doesNotMatch(JSON.stringify(projected), /RAW-/);
+    assert.ok(JSON.stringify(projected).length < JSON.stringify(feedback).length * 0.2);
+    assert.equal(feedback.governanceHistory[0].owner, "RAW-HISTORICAL-OWNER");
+    assert.equal(feedbackContext(null), null);
 });
 
 test("accepted and confirmed human-input outcomes do not add governance calls", async () => {

@@ -28,6 +28,7 @@ const files = [
     ["extension.mjs", "gh-dynamic-workflows/extension.mjs"],
     ["lab-loops.mjs", "gh-dynamic-workflows/lab-loops.mjs"],
     ["scope-governance.mjs", "gh-dynamic-workflows/scope-governance.mjs"],
+    ["task-context.mjs", "gh-dynamic-workflows/task-context.mjs"],
     ["lab-workflow.mjs", "gh-dynamic-workflows/lab-workflow.mjs"],
     ["LAB-CONTRACT.md", "gh-dynamic-workflows/LAB-CONTRACT.md"],
     ["LAB-DESIGN.md", "gh-dynamic-workflows/LAB-DESIGN.md"],
@@ -37,7 +38,7 @@ const files = [
     ...["extension.mjs", "workflow-owner.agent.md", "workflow-reviewer.agent.md"].map((file) =>
         [`templates/${file}`, `gh-dynamic-workflows/templates/${file}`]),
     ...["install.test.mjs", "lab-loops.test.mjs", "lab-workflow.test.mjs", "lab-sdk.test.mjs", "run.test.mjs", "scheduling.test.mjs",
-        "scope-governance.test.mjs", "scope-governance.fixture.mjs"].map((file) =>
+        "scope-governance.test.mjs", "scope-governance.fixture.mjs", "task-context.test.mjs"].map((file) =>
         [`test/${file}`, `gh-dynamic-workflows/test/${file}`]),
     ["templates/extension.mjs", ".github/extensions/autonomous-delivery/extension.mjs"],
     ["templates/workflow-owner.agent.md", ".github/agents/workflow-owner.agent.md"],

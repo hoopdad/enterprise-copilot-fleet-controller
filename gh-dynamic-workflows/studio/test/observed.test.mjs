@@ -118,6 +118,23 @@ test("new owner profiles retain historical doer attribution; read-only feedback 
     }
 });
 
+test("completed governance shows its retained outcome without becoming an acceptance vote", () => {
+    for (const [stage, title] of [["triage", "Feedback reconciled"], ["scope-advice", "Scope advice recorded"],
+        ["scope-decision", "Scope decision recorded"]]) {
+        const result = workOutcome({ status: "completed", workResult: {
+            kind: "governance", stage, summary: "Original acceptance remains binding.",
+        } });
+        assert.equal(result.title, title);
+        assert.equal(result.tone, "waiting");
+        assert.match(result.summary, /Original acceptance remains binding/);
+        assert.match(result.summary, /not an original acceptance vote/);
+        assert.doesNotMatch(result.summary, /unavailable|not retained/);
+    }
+    assert.match(workOutcome({ status: "completed", workOutcomeState: "unsupported" }).summary, /final response is retained.*display limitation/);
+    assert.match(workOutcome({ status: "completed", workOutcomeState: "malformed" }).summary, /retained.*could not be parsed/);
+    assert.match(workOutcome({ status: "completed", workOutcomeState: "missing" }).summary, /No final response was found/);
+});
+
 test("review agreement keeps task acceptance and live capability separate", () => {
     for (const [ownerStatus, title] of [["rework", "Agrees: task still incomplete"],
         ["needs-replan", "Agrees: scoped replanning needed"], ["needs-input", "Agrees: human input needed"]]) {

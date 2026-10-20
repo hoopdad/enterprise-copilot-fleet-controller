@@ -22,6 +22,11 @@ test("every writing turn commits before review, and the existing Scrum Master re
     });
     await runLoop({ ctx, loop: loops.find((node) => node.id === "SprintReviewLoop"), key: "git", context: {} });
     const owner = calls.find((call) => call.kind === "doer");
+    assert.equal(calls.filter((call) => call.kind === "doer").length, 1);
+    assert.match(owner.instructions.join("\n"), /Owner status complete is your own acceptance, not a claim that reviewers have already agreed/);
+    assert.match(owner.instructions.join("\n"), /Pending reviewer votes are not owner rework/);
+    assert.match(owner.instructions.join("\n"), /records agreement only when the original reviewers agree/);
+    assert.match(owner.instructions.join("\n"), /Never claim collective acceptance.*passing cloud-deployed tests/);
     assert.match(owner.instructions.join("\n"), /every turn that changes files.*rework or needs-input/);
     assert.match(owner.instructions.join("\n"), /git commit --only/);
     assert.match(owner.instructions.join("\n"), /retain its code commits on a named branch/);
@@ -87,6 +92,55 @@ test("an agreed scope change returns internal needs-replan instead of more rewor
     });
     assert.equal(result.status, "needs-replan");
     assert.equal(result.rounds, 1);
+});
+
+test("unassigned execution replans return after original review and triage rather than repeating unchanged blockers", async () => {
+    for (const id of ["EndToEndTestLoop", "DevOpsWorkLoop"]) {
+        const calls = [];
+        const result = await runLoop({
+            ctx: context(async (prompt) => {
+                const input = JSON.parse(prompt);
+                calls.push(input);
+                return input.kind === "doer"
+                    ? { status: "needs-replan", summary: "An existing production prerequisite needs replanning.",
+                        artifact: {}, progress: [] }
+                    : { agree: true, taskComplete: false, unmetCriteria: ["Production prerequisite remains unmet."],
+                        feedback: "Accurate replan, not passing deployment.", verifiedProgress: [] };
+            }),
+            loop: loops.find((node) => node.id === id), key: id, context: {},
+            attempts: 1, maxNoProgressRounds: 10,
+        });
+        assert.equal(result.status, "needs-replan");
+        assert.equal(result.rounds, 1);
+        assert.equal(result.governanceHistory.length, 1);
+        assert.equal(calls.filter((call) => call.kind === "doer").length, 1);
+        assert.match(calls[0].instructions.join("\n"), /For an execution, test or deployment loop/);
+        assert.doesNotMatch(calls[0].instructions.join("\n"), /For an unassigned planning\/release loop/);
+        assert.deepEqual(result.reviews.map((review) => review.role),
+            loops.find((node) => node.id === id).reviewers);
+        assert.ok(result.reviews.every((review) => review.taskComplete === false));
+    }
+});
+
+test("unassigned planning replans stay with the current owner without importing later-stage votes", async () => {
+    for (const id of ["ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop",
+        "SprintDesignLoop", "SprintArchitectureLoop", "SprintPlanLoop"]) {
+        let rounds = 0;
+        const result = await runLoop({
+            ctx: context(async (prompt) => {
+                const input = JSON.parse(prompt);
+                if (input.kind === "doer") {
+                    assert.match(input.instructions.join("\n"), /For an unassigned planning\/release loop/);
+                    return { status: ++rounds === 1 ? "needs-replan" : "complete",
+                        summary: "Resolve this planning document here.", artifact: {} };
+                }
+                return { agree: true, feedback: "Accurate planning disposition." };
+            }),
+            loop: loops.find((node) => node.id === id), key: id, context: {},
+        });
+        assert.equal(result.status, "agreed");
+        assert.equal(result.rounds, 2);
+    }
 });
 
 test("the original YAML's hierarchy, roles, reviewer order and completion conditions are retained", () => {

@@ -90,6 +90,12 @@ replanning, human input and completion reports. Missing completion context stays
 unconfirmed; a reviewer writing "PASS" does not override an owner's rework.
 No single review establishes combined assignment acceptance or live capability.
 Supported final work responses supply the agent's summary or reviewer feedback.
+Scrum Master triage, Architect scope assessments and Product Owner scope
+decisions also display their retained structured outcomes, including required
+corrections, unresolved questions and reused dispositions. These are feedback
+coordination, not original acceptance votes. A retained unsupported response,
+malformed structured response and missing final response have distinct notices;
+an unsupported display format does not imply the workflow lost its result.
 Unambiguous task/sprint IDs are expanded using names from the same run's
 retained ReleasePlan/SprintPlan results; unavailable names are not guessed.
 Full recorded

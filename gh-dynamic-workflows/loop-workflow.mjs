@@ -2,6 +2,8 @@ import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import { definition as installedDefinition, loadWorkflow, flattenLoops } from "./loop-source.mjs";
 import { runLoop } from "./lab-loops.mjs";
+import { dispositionContext, scopeContext } from "./scope-governance.mjs";
+import { archiveContext, documentContext, historyLocation, outcomeContext, outcomeIndex } from "./task-context.mjs";
 import { createAgentScheduler, createResourceScheduler, criticalPathPriorities, scheduleTasks } from "./scheduling.mjs";
 
 export const ENGINE = "yaml-loops-v1";
@@ -96,6 +98,29 @@ async function specification(args, root) {
     return args.input?.goal ?? "";
 }
 
+export async function taskContext(common, documents, outcomes, extra = {}, audits = new Map(), documentAudits = new Map()) {
+    const currentOutcomes = [...outcomes], currentDocuments = { ...documents };
+    const priorDispositions = dispositionContext({ outcomes: currentOutcomes, ...extra });
+    for (const outcome of currentOutcomes) {
+        if (!audits.has(outcome.key)) {
+            audits.set(outcome.key, await archiveContext(common.history, `outcome ${outcome.key}`, outcome));
+        }
+    }
+    const handoff = async (outcome) => outcomeContext(outcome,
+        audits.get(outcome.key) ?? await archiveContext(common.history, "dependency outcome", outcome));
+    return structuredClone({
+        ...common,
+        documents: Object.fromEntries(Object.entries(currentDocuments).map(([name, document]) =>
+            [name, documentContext(document, documentAudits.get(name))])),
+        outcomes: currentOutcomes.map((outcome) => outcomeIndex(outcome, audits.get(outcome.key))),
+        ...extra,
+        ...(extra.dependencies ? { dependencies: await Promise.all(extra.dependencies.map(handoff)) } : {}),
+        ...(extra.inherited ? { inherited: await scopeContext(common, extra.inherited) } : {}),
+        ...(extra.scopeRevision ? { scopeRevision: await scopeContext(common, extra.scopeRevision) } : {}),
+        priorDispositions,
+    });
+}
+
 export function createLoopRunner() {
     return async (ctx) => {
         const args = ctx.args;
@@ -115,26 +140,20 @@ export function createLoopRunner() {
         const source = args.workflowPath ? loadWorkflow(path.resolve(root, args.workflowPath)) : installedDefinition;
         const steps = source.workflows.ReleaseLoop.steps;
         const all = new Map(flattenLoops(steps).map((node) => [node.id, node]));
-        const documents = {}, outcomes = [], completed = [];
+        const documents = {}, outcomes = [], completed = [], audits = new Map(), documentAudits = new Map();
         const common = {
             projectRoot: root, request: args, specification: await specification(args, root),
+            ...(ctx.runId ? { history: historyLocation(root, ctx.runId) } : {}),
             roleDescriptions: source.roles, engine: ENGINE,
             orchestration: "Original YAML owners and reviewers govern acceptance. Every unresolved round receives read-only Scrum Master feedback triage, with Architect advice and Product Owner decisions for ambiguous scope, before retry or scoped replanning. No new YAML stages. Former ticket, hash, lease, frozen-input, native-receipt and admission protocols are retired. Ordinary CLI permissions and actual project authority still apply.",
         };
-        const context = (extra = {}) => structuredClone({
-            ...common, documents,
-            outcomes: outcomes.map(({ governanceHistory, ...outcome }) => ({
-                ...outcome,
-                ...(governanceHistory?.length ? { governance: governanceHistory.at(-1).governance } : {}),
-            })),
-            ...extra,
-        });
+        const context = (extra = {}) => taskContext(common, documents, outcomes, extra, audits, documentAudits);
         const attemptsFor = (id) => args.attempts?.[id] ?? args.attempts?.[
             ["AssignedWorkUIDeveloperLoop", "AssignedWorkDeveloperLoop", "DevOpsWorkLoop"].includes(id) ? "implementation" : "planning"];
         const perform = async (node, key, extra = {}, decode, phase = true, dispatch) => {
             if (phase) ctx.phase(node.name);
             const result = await runLoop({
-                ctx, loop: node, key: `${ENGINE}:${key}`, context: context(extra),
+                ctx, loop: node, key: `${ENGINE}:${key}`, context: await context(extra),
                 decode: async (artifact) => {
                     await planningDocuments(artifact, root);
                     if (Object.hasOwn(artifact, "ReleasePlan")) releasePlan(artifact);
@@ -147,11 +166,13 @@ export function createLoopRunner() {
                 priority: extra.scheduling?.criticalPathMinutes ?? 0,
             });
             const outcome = { loopId: node.id, key, ...result };
+            audits.set(key, await archiveContext(common.history, `outcome ${key}`, outcome));
             outcomes.push(outcome);
             if (result.status === "agreed") {
                 const accepted = { ...result.artifact };
                 if (extra.scopeRevision) delete accepted.SprintPlan;
                 Object.assign(documents, accepted);
+                for (const name of Object.keys(accepted)) documentAudits.set(name, audits.get(key));
             }
             return outcome;
         };

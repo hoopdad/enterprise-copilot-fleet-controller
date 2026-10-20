@@ -7,6 +7,41 @@ import { fixture, SOURCE, usageEvent, workEvent } from "./fixture.mjs";
 let f;
 let studio;
 let yamlSource;
+test("renders completed governance outcomes rather than missing-result warnings", async ({ page }) => {
+    const local = await fixture();
+    let instance;
+    try {
+        const cases = [
+            ["triage", "Scrum Master", "Feedback reconciled", { summary: "Fix the original null criterion.",
+                requiredCorrections: [{ id: "null", requirement: "Safe handoff.", evidence: "Failing null check.", action: "Handle null." }],
+                scopeQuestions: [] }],
+            ["scope-advice", "Architect", "Scope advice recorded", { assessments: [{ id: "polish", necessity: "enhancement",
+                rationale: "Outside original handoff.", simplestOption: "Keep existing behavior." }] }],
+            ["scope-decision", "Product Owner", "Scope decision recorded", { decisions: [{ id: "polish", disposition: "defer",
+                rationale: "Original acceptance is sufficient.", action: "", acceptance: "", taskBoundary: "" }] }],
+        ];
+        instance = await startStudio(local.project, { sessionsRoot: local.sessionsRoot });
+        for (const [stage, role, title, result] of cases) {
+            local.mutate((db) => db.prepare("UPDATE workflow_agents SET label=?,status='completed' WHERE run_id='live-run'")
+                .run(`yaml:AssignedWorkDeveloperLoop:governance:${stage}:${role}:1`));
+            await appendFile(path.join(path.dirname(local.dbFile), "events.jsonl"),
+                JSON.stringify(workEvent(`result-${stage}`, "a1", result)) + "\n");
+            await page.goto(instance.url);
+            const task = page.locator('[data-task="agent:a1"]');
+            await expect(task).toContainText(title);
+            await task.click();
+            await expect(page.locator("#task-details")).toContainText(title);
+            await expect(page.locator("#task-details")).toContainText("not an original acceptance vote");
+            await expect(page.locator("#task-details")).not.toContainText("not retained");
+            await expect(page.locator("#error")).toBeHidden();
+        }
+    } finally {
+        await page.close();
+        await instance?.close();
+        await local.cleanup();
+    }
+});
+
 test.beforeAll(async () => {
     f = await fixture();
     yamlSource = await readFile(new URL("../../loops.yml", import.meta.url), "utf8");

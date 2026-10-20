@@ -1,18 +1,26 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createLoopRunner, sprintTasks, releasePlan } from "../loop-workflow.mjs";
 import { governanceResponse } from "./scope-governance.fixture.mjs";
+import { mkdtempSync } from "node:fs";
+
+const temporaryRoots = [];
+after(async () => {
+    for (const root of temporaryRoots) await rm(root, { recursive: true, force: true });
+});
 
 const task = (id, kind = "developer", dependsOn = []) => ({
     id, title: id, kind, owner: kind === "designer" ? "Designer" : kind === "devops" ? "DevOps Engineer" : "Developer", dependsOn,
 });
 function fake({ tasks = [], artifact, review, args = {} } = {}) {
     const calls = [], phases = [], journal = new Map();
+    const root = mkdtempSync(path.join(os.tmpdir(), "yaml-loop-context-"));
+    temporaryRoots.push(root);
     const ctx = {
-        runId: "synthetic-offline", args: { projectRoot: process.cwd(), ...args },
+        runId: "synthetic-offline", args: { projectRoot: root, ...args },
         log() {}, phase: (title) => phases.push(title),
         parallel: (thunks) => Promise.all(thunks.map(async (fn) => {
             try { return await fn(); } catch { return null; }
@@ -80,6 +88,28 @@ test("agreed Architecture needs-replan is resolved internally before downstream 
     const count = f.calls.length;
     assert.equal((await createLoopRunner()(f.ctx)).status, "completed");
     assert.equal(f.calls.length, count);
+});
+
+test("an agreed unassigned DevOps replan stops honestly without a blocked-owner retry loop or later-stage acceptance", { timeout: 5000 }, async () => {
+    const f = fake();
+    const agent = f.ctx.agent;
+    f.ctx.agent = async (prompt, options) => {
+        const input = JSON.parse(prompt);
+        const result = await agent(prompt, options);
+        return input.kind === "doer" && input.loop.id === "DevOpsWorkLoop"
+            ? { status: "needs-replan", summary: "A retained production prerequisite needs a concrete scope decision.",
+                artifact: {}, nextAction: "Reconcile affected work through the original Architect and Scrum Master." }
+            : result;
+    };
+    const result = await createLoopRunner()(f.ctx);
+    assert.equal(result.status, "needs-replan");
+    assert.equal(result.stoppedAt, "DevOpsWorkLoop");
+    assert.equal(result.rounds, 1);
+    assert.deepEqual(result.completedSprints, []);
+    assert.equal(result.documents.EndToEndTest.outcome, "FAIL");
+    assert.equal(f.calls.filter((call) => call.kind === "doer" && call.loop.id === "DevOpsWorkLoop").length, 1);
+    assert.ok(!f.calls.some((call) => call.kind === "doer" && call.loop.id === "SprintReviewLoop"));
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
 });
 
 test("every stopped result is SDK JSON-safe without invented optional fields", async () => {
@@ -158,7 +188,9 @@ test("scoped Architect/plan amendments replace only the affected assignment and 
         artifact: async (input, output) => {
             if (input.context.scopeRevision && input.loop.id === "SprintArchitectureLoop") {
                 assert.ok(input.context.scopeRevision.request.feedback.governance.instructions.length);
-                assert.ok(input.context.scopeRevision.request.governanceHistory.length);
+                assert.equal(input.context.scopeRevision.request.governanceHistory, undefined);
+                assert.ok(input.context.scopeRevision.request.feedback.governanceRounds);
+                assert.ok(input.context.scopeRevision.audit.path);
                 amended.resolve();
                 return { SprintArchitecture: { disposition: "Bounded research may finish with unresolved live capability." } };
             }
@@ -259,6 +291,7 @@ test("SprintPlan dispatches the saved eleven-task graph before planning agreemen
     ];
     await writeFile(path.join(root, "SprintPlan.json"), JSON.stringify({ SprintPlan: { tasks } }));
     const started = new Set();
+    const rootsStarted = Promise.withResolvers();
     let releasePackage, planReviewed = false, packageFinished = false;
     const packageWait = new Promise((resolve) => { releasePackage = resolve; });
     const f = fake({
@@ -267,6 +300,7 @@ test("SprintPlan dispatches the saved eleven-task graph before planning agreemen
             if (input.loop.id === "SprintPlanLoop") return { SprintPlan: { path: "SprintPlan.json", tasksPreserved: 11 } };
             const id = input.context.assignment?.id;
             if (id) started.add(id);
+            if (["package", "platform", "design"].every((name) => started.has(name))) rootsStarted.resolve();
             if (id === "package") { await packageWait; packageFinished = true; }
             if (id === "contracts") assert.ok(packageFinished);
             if (input.loop.id === "DevOpsWorkLoop") {
@@ -275,8 +309,9 @@ test("SprintPlan dispatches the saved eleven-task graph before planning agreemen
             }
             return output;
         },
-        review: (input) => {
+        review: async (input) => {
             if (input.loop.id === "SprintPlanLoop") {
+                await rootsStarted.promise;
                 assert.equal(input.dispatch.status, "dispatched");
                 assert.equal(input.dispatch.taskIds.length, 10);
                 assert.deepEqual(input.dispatch.deferredDevOps, ["deployment"]);
@@ -498,7 +533,8 @@ test("productive planning and implementation exceed ten rounds and six sprints w
     assert.ok(result.outcomes.every((outcome) => outcome.rounds === 12));
     assert.ok(result.outcomes.every((outcome) => outcome.governanceHistory.length === 11));
     const later = f.calls.find((call) => call.kind === "doer" && call.loop.id === "UserExperienceLoop");
-    assert.ok(later.context.outcomes[0].governance.instructions.length);
+    assert.ok(later.context.priorDispositions.length);
+    assert.ok(later.context.outcomes[0].audit.path);
     assert.equal(Object.hasOwn(later.context.outcomes[0], "governanceHistory"), false);
 });
 

@@ -32,6 +32,11 @@ export function tokenText(value) {
 
 export function workOutcome(agent, { phase } = {}) {
     const work = agent.workResult;
+    if (work?.kind === "governance") return {
+        title: { triage: "Feedback reconciled", "scope-advice": "Scope advice recorded", "scope-decision": "Scope decision recorded" }[work.stage],
+        summary: `${work.summary}\nRead-only feedback coordination, not an original acceptance vote or proof of task completion.`,
+        tone: "waiting",
+    };
     if (work?.kind === "review") {
         if (!work.agree) return { title: "Changes requested", summary: work.summary, tone: "error" };
         const title = work.ownerStatus === "needs-replan" ? "Agrees: scoped replanning needed"
@@ -74,7 +79,11 @@ export function workOutcome(agent, { phase } = {}) {
     }
     return {
         title: "Work outcome unavailable",
-        summary: "The execution state is recorded, but this agent's final work outcome was not retained in a supported format.",
+        summary: agent.workOutcomeState === "unsupported"
+            ? "A final response is retained, but Studio does not support its outcome format. This is a display limitation, not evidence that the workflow lost the result."
+            : agent.workOutcomeState === "malformed"
+                ? "A final response is retained, but its structured outcome could not be parsed by Studio. Inspect the original response; task completion is unconfirmed."
+                : "No final response was found in the available session evidence for this agent. Recorded execution state alone does not confirm its work outcome.",
         tone: "waiting",
     };
 }

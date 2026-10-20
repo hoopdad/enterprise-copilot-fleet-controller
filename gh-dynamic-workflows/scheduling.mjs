@@ -124,7 +124,8 @@ export function scheduleTasks(tasks, execute, { priorities = criticalPathPriorit
             } while (changed && pending.size);
             if (!active) {
                 if (failures.size) reject(new AggregateError([...failures.values()],
-                    `Assigned work execution failed for ${[...failures.keys()].join(", ")}; no completion was recorded`));
+                    `Assigned work execution failed for ${[...failures.keys()].join(", ")}; no completion was recorded. ` +
+                    `Causes: ${[...failures].map(([id, error]) => `${id}: ${String(error?.message ?? error)}`).join("; ")}`));
                 else if (pending.size) reject(new Error(`No ready assignments: ${[...pending].join(", ")}`));
                 else resolve(tasks.map((task) => results.get(task.id)));
             }
