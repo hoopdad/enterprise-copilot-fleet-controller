@@ -27,6 +27,10 @@ exactly one of `requirement:{path,line}` or `failingCheck`. Every finding requir
 `summary` and `action`; requirement lines are positive integers and `failingCheck`
 names an emitted check ID. Required Red Team scope is
 `infrastructure-config` or `dependency-cve`.
+Requirement citations resolve beneath `projectRoot/docs/requirements`, with
+nonempty working-tree lines matching committed `HEAD` at the same path/line.
+Symlink escapes and new/altered requirement anchors cannot establish blockers.
+Fixed read-only Git arguments verify citations without evaluating emitted commands.
 Both workflow registration names use that same runner. Its default shared writing
 profile is `workflow-owner` (`agents.owner`, then legacy `agents.doer` overrides);
 concrete YAML roles, stable doer kinds/labels and historical Studio remain intact.
@@ -129,11 +133,12 @@ Accurate E2E failure reports are actionable feedback, not completion. The
 continuous DevOps-then-E2E loops require passing deployed verification before
 releasing dependents.
 
-The engine identity is `yaml-loops-v2-evidence`. Accepted `yaml-loops-v1` or
-earlier v2 journal steps cannot bypass new checks or replay as current acceptance;
+The engine identity is `yaml-loops-v2`. A run-version marker distinguishes
+compatible runs; existing unversioned context history is rejected. Accepted
+`yaml-loops-v1` journal steps cannot bypass new checks or replay as v2 acceptance;
 preserve them as history and
 start a new run after adoption. Results and rounds are journaled by SDK durable
-steps. Compatible v2-evidence replay preserves completed work, not exactly-once effects. An interruption
+steps. Compatible v2 replay preserves completed work, not exactly-once effects. An interruption
 can leave an external operation uncertain; do-ers must inspect actual state and
 report it honestly rather than repeat blindly. This is not an extra review gate.
 Old engine native journals remain historical and are not replay-compatible.
@@ -141,8 +146,9 @@ Old engine native journals remain historical and are not replay-compatible.
 Explicit user round/sprint limits are honored; unspecified limits remain absent.
 An optional `maxNoProgressRounds` counts consecutive stalled rounds per loop/
 assignment. Do-ers propose stable progress IDs with inspectable evidence; the
-original reviewers independently verify them within their existing review.
-Only new IDs verified by every reviewer reset the counter. The credited
+original check-adequacy reviewers independently verify them within their existing
+review. Critic and Red Team cannot veto progress through observation-only
+responses. Only new IDs verified by every check-adequacy reviewer reset the counter. The credited
 evidence and prior feedback accompany later rounds to prevent repeated work
 being relabeled as progress. At the threshold, dispatched work has been joined
 and a `blocked`/`no-progress` result retains the counter and unresolved feedback.

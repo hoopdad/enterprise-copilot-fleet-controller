@@ -62,7 +62,10 @@ Red Team reviews only infrastructure configuration and application-library CVEs
 `requirement:{path,line}` or `failingCheck`. All findings require `summary` and
 `action`; requirement lines are positive integers and `failingCheck` names an
 emitted check ID. Required Red Team scope is
-`infrastructure-config` or `dependency-cve`. Owners emit required
+`infrastructure-config` or `dependency-cve`. Requirement paths must resolve under
+`docs/requirements`; cited nonempty working-tree lines must match committed `HEAD`
+at the same path/line. New or altered requirement anchors are nonblocking.
+Owners emit required
 `checks:[{id,kind,command,requirement,environment,exitCode,evidence}]`, where kind
 is `test`, `schema` or `deployed-probe` and environment is `local` or `deployed`.
 Each check's `evidence` is a nonempty repository-relative path to its log/result
@@ -112,6 +115,6 @@ For existing installations, deliberately review/replace the old runtime and
 instructions instead of rerunning the non-overwriting installer. Old native
 journals are history, not resumable through the new engine. See [README.md](README.md).
 
-The current engine is `yaml-loops-v2-evidence`. Preserve accepted `yaml-loops-v1`
-and earlier v2 journals as history; they cannot bypass new checks or replay as
-current acceptance. Start a new run after adopting v2-evidence.
+The current engine is `yaml-loops-v2`. A run-version marker rejects existing
+unversioned context history. Preserve accepted `yaml-loops-v1` journals as history;
+they cannot bypass new checks or replay as v2 acceptance. Start a new run after adoption.

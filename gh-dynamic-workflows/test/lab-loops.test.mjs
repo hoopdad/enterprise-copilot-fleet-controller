@@ -37,6 +37,20 @@ test("every writing turn commits owned paths before review and preserves concurr
     for (const call of calls.slice(1)) assert.match(call.instructions.join("\n"), /actual Git commits/);
 });
 
+test("scope edits require authority plus requirement/regression changes in one commit, not a decision ledger", async () => {
+    const calls = [];
+    await run((input) => { calls.push(input); return input.kind === "doer" ? owner() : review(); });
+    const ownerInstructions = calls[0].instructions.join("\n");
+    assert.match(ownerInstructions, /actual project\/user authority.*docs\/requirements.*regression test in the same committed change/);
+    assert.match(ownerInstructions, /Declined proposals never land/);
+    assert.match(ownerInstructions, /evidence-file validation establishes inspectability, not that a process actually ran/);
+    for (const input of calls.slice(1)) {
+        assert.match(input.instructions.join("\n"), /inspect actual authority and the Git commit/);
+        assert.match(input.instructions.join("\n"), /regression test must be in the same committed change/);
+        assert.match(input.instructions.join("\n"), /A nonempty evidence file does not prove execution/);
+    }
+});
+
 test("planning instructions cover deployed-first contract handoffs and shared resource contention", async () => {
     let prompt;
     await run((input) => {
@@ -110,24 +124,51 @@ test("invalid or failed subagents are explicit errors rather than agreement", as
     await assert.rejects(runLoop({ ctx, loop, key: "null", context: packet }), /Reviewer execution failed/);
 });
 
-test("productive rounds have no total default cap; substantive verified advances can exceed ten rounds", async () => {
+test("productive guarded rounds have no total cap; substantive verified advances can exceed ten rounds", async () => {
     let round = 0;
     const result = await run((input) => input.kind === "doer"
         ? owner({ status: ++round <= 12 ? "rework" : "complete", progress: [{ id: `step-${round}`, evidence: `New required output ${round}` }] })
-        : review({ verifiedProgress: input.owner.progress.map((item) => item.id) }));
+        : review({ verifiedProgress: input.owner.progress.map((item) => item.id) }), { maxNoProgressRounds: 3 });
     assert.equal(result.status, "agreed");
     assert.equal(result.rounds, 13);
 });
 
-test("default bounded no-progress and explicit thresholds stop unresolved loops without fake completion", async () => {
-    for (const limit of [undefined, 1, 4]) {
+test("only explicitly supplied no-progress thresholds stop unresolved loops without fake completion", async () => {
+    for (const limit of [1, 4]) {
         const result = await run((input) => input.kind === "doer" ? owner({ status: "rework" }) : review(),
             { maxNoProgressRounds: limit });
         assert.equal(result.status, "blocked");
-        assert.equal(result.rounds, limit ?? 3);
+        assert.equal(result.rounds, limit);
         assert.equal(result.stopCause, "no-progress");
     }
     await assert.rejects(run(() => {}, { maxNoProgressRounds: 0 }), /positive integer/);
+});
+
+test("omitted stagnation guard adds no implicit round cap or mandatory progress fields", async () => {
+    let round = 0;
+    const result = await run((input, options) => {
+        assert.equal(input.progressState, undefined);
+        if (input.kind === "doer") {
+            assert.ok(!options.schema.required.includes("progress"));
+            const response = owner({ status: ++round <= 12 ? "rework" : "complete" });
+            delete response.progress;
+            return response;
+        }
+        assert.ok(!options.schema.required.includes("verifiedProgress"));
+        const response = review();
+        delete response.verifiedProgress;
+        return response;
+    });
+
+    assert.equal(result.status, "agreed");
+    assert.equal(result.rounds, 13);
+});
+
+test("explicit stagnation guards require valid owner and reviewer progress fields", async () => {
+    await assert.rejects(run((input) => input.kind === "doer" ? owner({ progress: undefined }) : review(),
+        { maxNoProgressRounds: 2 }), /Invalid do-er progress/);
+    await assert.rejects(run((input) => input.kind === "doer" ? owner() : review({ verifiedProgress: undefined }),
+        { maxNoProgressRounds: 2 }), /Invalid.*reviewer progress/);
 });
 
 test("threshold-round verified advance resets stagnation; IDs and relabeled evidence cannot be reclaimed", async () => {
@@ -145,10 +186,12 @@ test("threshold-round verified advance resets stagnation; IDs and relabeled evid
     assert.equal(result.progress.credited.length, 1);
 });
 
-test("progress requires every original reviewer's independent confirmation", async () => {
+test("progress requires every original check-adequacy reviewer's independent confirmation", async () => {
     const result = await run((input) => input.kind === "doer"
         ? owner({ status: "rework", progress: [{ id: "new", evidence: "New test actually passes" }] })
-        : review({ verifiedProgress: input.role === loop.reviewers[0] ? ["new"] : [] }), { maxNoProgressRounds: 2 });
+        : review({ verifiedProgress: input.role === "Architect" ? ["new"] : [] }), {
+        loop: { ...loop, reviewers: ["Architect", "Developer", "Critic", "Red Team"] }, maxNoProgressRounds: 2,
+    });
     assert.equal(result.status, "blocked");
     assert.deepEqual(result.progress.credited, []);
 });
@@ -157,6 +200,34 @@ test("completion and human input take precedence over the no-progress threshold"
     for (const status of ["complete", "needs-input"]) {
         const result = await run((input) => input.kind === "doer" ? owner({ status }) : review(), { maxNoProgressRounds: 1 });
         assert.equal(result.status, status === "complete" ? "agreed" : status);
+    }
+});
+
+test("Critic/Red Team progress opinions cannot indirectly veto guarded completion", async () => {
+    let round = 0;
+    const roles = ["Architect", "Critic", "Red Team"];
+    const result = await run((input) => {
+        if (input.kind === "doer") return owner({
+            status: ++round === 1 ? "rework" : "complete",
+            progress: [{ id: `advance-${round}`, evidence: `New required output ${round}` }],
+        });
+        return review({
+            checksValid: input.role === "Architect",
+            agree: false, taskComplete: false,
+            verifiedProgress: input.role === "Architect" ? input.owner.progress.map((item) => item.id) : [],
+        });
+    }, { loop: { ...loop, reviewers: roles }, maxNoProgressRounds: 1 });
+    assert.equal(result.status, "agreed");
+    assert.equal(result.rounds, 2);
+});
+
+test("deployed acceptance and verification loops reject local-only checks even without assignment context", async () => {
+    for (const id of ["SprintReviewLoop", "EndToEndTestLoop", "DevOpsWorkLoop"]) {
+        const result = await run((input) => input.kind === "doer" ? owner({ checks: checks({ environment: "local" }) }) : review(), {
+            loop: loops.find((item) => item.id === id), context: { projectRoot: fixtureRoot }, attempts: 1,
+        });
+        assert.equal(result.status, "limit-reached");
+        assert.match(result.feedback.transportIssue, /deployed-environment check/);
     }
 });
 
@@ -177,7 +248,7 @@ test("dispatch is joined before plan retry, threshold stops and reviewer errors"
     assert.deepEqual(result.feedback.dispatchedWork, [{ status: "agreed" }]);
     joined = false;
     await assert.rejects(run((input) => input.kind === "doer" ? owner() : review({ verifiedProgress: ["invented"] }), {
-        context: { projectRoot: fixtureRoot },
+        context: { projectRoot: fixtureRoot }, maxNoProgressRounds: 2,
         dispatch: () => ({ settle: async () => { joined = true; } }),
     }), /Invalid.*progress/);
     assert.ok(joined);

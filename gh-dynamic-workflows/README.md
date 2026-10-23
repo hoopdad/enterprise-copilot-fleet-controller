@@ -96,6 +96,9 @@ Findings use `type:"blocking"|"observation"`. Blocking entries supply exactly on
 of `requirement:{path,line}` or `failingCheck`; unsupported suggestions are
 observations. Every finding requires `summary` and `action`; requirement line
 numbers are positive integers and `failingCheck` names the emitted check ID.
+Requirement paths must resolve beneath `docs/requirements`, and the cited
+nonempty working-tree line must match committed `HEAD` at the same path/line.
+Uncommitted or altered requirement anchors are observations, not blockers.
 Red Team findings require
 `scope:"infrastructure-config"|"dependency-cve"`.
 
@@ -318,7 +321,8 @@ This counts **consecutive rounds without new progress verified by every
 original reviewer**, independently per loop invocation/assignment. The do-er
 reports `progress:[{id,evidence}]` using stable milestone/check/finding IDs and
 inspectable evidence; each reviewer returns `verifiedProgress:[id,...]` after
-independent inspection. New IDs endorsed by all reviewers reset the counter
+independent inspection. New IDs endorsed by all check-adequacy reviewers
+(excluding Critic and Red Team) reset the counter
 even when the loop still needs rework. Reusing an already credited ID or the
 same evidence text (ignoring case/whitespace) never resets it. Changed summaries,
 file churn, repeated tests, relabeled old work,
@@ -340,10 +344,11 @@ Rework stays inside original loops, not a separate repair/recovery pipeline.
 An agreed `needs-input`, stagnation `blocked`, or explicitly reached limit is
 not success. Inspect both the SDK envelope and the application-level result.
 
-The engine identity is `yaml-loops-v2-evidence`. Accepted `yaml-loops-v1` or
-earlier v2 journal steps cannot bypass new checks or replay as current acceptance. Preserve prior runs
-as history and start a new run after adoption.
-SDK step/agent journals support replay of compatible v2-evidence runs. They provide
+The engine identity is `yaml-loops-v2`. A run-version marker distinguishes
+compatible runs; existing unversioned context history is rejected. Accepted
+`yaml-loops-v1` journal steps cannot bypass new checks or replay as v2 acceptance.
+Preserve prior runs as history and start a new run after adoption.
+SDK step/agent journals support replay of compatible v2 runs. They provide
 best-effort at-least-once execution, not exactly-once side effects. Agents must
 inspect uncertain real-world outcomes before repeating operations. Old native
 `.delivery-runs` journals belong to the retired engine: preserve them as history,
@@ -379,7 +384,8 @@ For a narrowly reviewed manual adoption, the behavioral files are
 tests in sync (the installer manifest lists their exact paths). Existing
 `workflow.mjs`, `lab-workflow.mjs` and `extension.mjs` already load the common
 runner and require no registration change. If Studio is installed, separately
-copy `studio/observed.mjs` (and its regression) for readable historical attribution;
+copy `studio/usage.mjs` and `studio/observed.mjs` (and their regressions) for
+structured check-review rendering and readable historical attribution;
 historical `workflow-doer` labels still render.
 
 ```powershell

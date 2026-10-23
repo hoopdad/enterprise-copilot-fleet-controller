@@ -45,7 +45,7 @@ await joinSession({ workflows: [defineWorkflow({
         if (!ctx.args.nested) return { status: "needs-input", summary: "Fixture only; no delivery executed." };
         const tasks = [
             { id: "skeleton", title: "Skeleton", kind: "devops", owner: "DevOps Engineer", dependsOn: [],
-                walkingSkeleton: true, doneWhen: "Deployed checks pass; azd handoff." },
+                walkingSkeleton: true, doneWhen: "Deployed checks pass.", handoff: "azd deployment URL" },
             { id: "a", title: "Fixture a", kind: "developer", owner: "Developer", dependsOn: ["skeleton"] },
             { id: "b", title: "Fixture b", kind: "ui", owner: "Developer", dependsOn: ["a"] },
         ];
@@ -63,7 +63,12 @@ await joinSession({ workflows: [defineWorkflow({
                 const artifact = input.loop.id === "ReleasePlanLoop" ? { ReleasePlan: { sprints: [{ id: "fixture" }] } }
                     : input.loop.id === "SprintPlanLoop" ? { SprintPlan: { tasks } } : {};
                 return { status: "complete", summary: "Fixture only; no tools or actual agents", artifact, progress: [],
-                    checks: [{ id: "fixture", kind: "schema", command: "fixture only", requirement: "Synthetic fixture contract",
+                    checks: input.context.assignment?.walkingSkeleton ? [
+                        { id: "deployment", kind: "test", command: "azd up", requirement: "Synthetic fixture deployment",
+                            environment: "deployed", exitCode: 0, evidence: "fixture.log" },
+                        { id: "probe", kind: "deployed-probe", command: "fixture only", requirement: "Synthetic fixture probe",
+                            environment: "deployed", exitCode: 0, evidence: "fixture.log" },
+                    ] : [{ id: "fixture", kind: "schema", command: "fixture only", requirement: "Synthetic fixture contract",
                         environment: "deployed", exitCode: 0, evidence: "fixture.log" }] };
             },
         });

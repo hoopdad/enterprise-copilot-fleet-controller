@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { mkdir, writeFile, symlink, readFile } from "node:fs/promises";
 import { normalizeFindings, verifyChecks, runLoop, ownerSchema, reviewerSchema } from "../lab-loops.mjs";
-import { checks, owner, review, context, project, commitRequirements } from "./evidence.fixture.mjs";
+import { checks, skeletonChecks, owner, review, context, project, commitRequirements } from "./evidence.fixture.mjs";
 
 const loop = { id: "AssignedWorkDeveloperLoop", name: "Work", owner: "Developer", reviewers: ["Critic", "Red Team", "Architect"] };
 test("response contracts require executable checks and structured check suitability, not completion votes", () => {
@@ -57,6 +57,29 @@ test("Red Team only blocks infrastructure configuration and application dependen
     }
 });
 
+test("requirement citations cannot invent authority through new/dirty lines or symlink escapes", async (t) => {
+    const root = await project(t);
+    await mkdir(path.join(root, "docs/requirements"), { recursive: true });
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "docs/requirements/api.md"), "Committed required endpoint.\n");
+    await writeFile(path.join(root, "src/not-a-requirement.md"), "Invented requirement outside the scope ledger.\n");
+    await symlink("../../src/not-a-requirement.md", path.join(root, "docs/requirements/escape.md"));
+    await commitRequirements(root);
+    const finding = (name, line = 1) => ({ type: "blocking", summary: "A requirement is unmet.", action: "Fix.",
+        requirement: { path: `docs/requirements/${name}`, line } });
+    const normalize = async (item) => (await normalizeFindings([item], { role: "Critic", projectRoot: root }))[0];
+    assert.equal((await normalize(finding("api.md"))).type, "blocking");
+    assert.equal((await normalize(finding("escape.md"))).type, "observation");
+    await writeFile(path.join(root, "docs/requirements/api.md"), "A fabricated replacement requirement.\n");
+    assert.equal((await normalize(finding("api.md"))).type, "observation");
+    await writeFile(path.join(root, "docs/requirements/new.md"), "An uncommitted invented requirement.\n");
+    assert.equal((await normalize(finding("new.md"))).type, "observation");
+    const outside = await project(t);
+    await mkdir(path.join(outside, "docs"), { recursive: true });
+    await symlink(path.join(root, "docs/requirements"), path.join(outside, "docs/requirements"));
+    assert.equal((await normalizeFindings([finding("new.md")], { role: "Critic", projectRoot: outside }))[0].type, "observation");
+});
+
 test("missing, failed, malformed, duplicate, empty or escaped check evidence cannot complete", async (t) => {
     const root = await project(t);
     await writeFile(path.join(root, "empty.log"), "");
@@ -76,6 +99,21 @@ test("missing, failed, malformed, duplicate, empty or escaped check evidence can
     assert.equal(await verifyChecks(checks({ evidence: "checks.log", environment: "local" }), { projectRoot: root }), null);
 });
 
+test("walking skeleton needs actual emitted azd deployment and a distinct deployed probe, not wording", async (t) => {
+    const root = await project(t);
+    const packet = { projectRoot: root, assignment: { walkingSkeleton: true,
+        doneWhen: "passes in deployed environment", handoff: "azd deployment URL" } };
+    assert.match(await verifyChecks(checks({ evidence: "checks.log" }), packet), /azd up\/provision\/deploy/);
+    assert.equal(await verifyChecks(skeletonChecks("checks.log"), packet), null);
+    assert.match(await verifyChecks(skeletonChecks("checks.log").slice(0, 1), packet), /separate passing deployed probe/);
+    assert.match(await verifyChecks(skeletonChecks("checks.log").map((check) =>
+        check.id === "azd-deployment" ? { ...check, command: "echo azd up" } : check), packet), /azd/);
+    for (const command of ["azd provision --no-prompt", "azd deploy --no-prompt"]) {
+        assert.equal(await verifyChecks(skeletonChecks("checks.log").map((check) =>
+            check.id === "azd-deployment" ? { ...check, command } : check), packet), null);
+    }
+});
+
 test("unsupported critic/red-team votes and prose cannot gate; other reviewers assess check adequacy", async (t) => {
     const root = await project(t);
     let round = 0;
@@ -85,7 +123,11 @@ test("unsupported critic/red-team votes and prose cannot gate; other reviewers a
             calls.push(input);
             if (input.kind === "doer") {
                 round++;
-                if (round > 1) assert.equal(input.feedback.reviews[0].findings[0].type, "observation");
+                if (round > 1) {
+                    assert.equal(input.feedback.reviews[0].findings[0].type, "observation");
+                    assert.equal(input.feedback.reviews[0].accepted, true);
+                    assert.match(input.instructions.join("\n"), /Reviewer feedback prose is audit commentary/);
+                }
                 return owner({ checks: checks({ evidence: "checks.log" }) });
             }
             return review({
@@ -131,7 +173,32 @@ test("valid requirement-backed findings force rework and retain evidence without
     assert.equal(result.rounds, 2);
     assert.equal(calls.filter((call) => call.kind === "doer").length, 2);
     assert.equal(calls.filter((call) => call.kind === "reviewer").length, 6);
+    assert.ok(!calls.some((call) => call.citationVerification));
     assert.deepEqual(await readFile(path.join(root, "docs/requirements/api.md"), "utf8"), "Require health check.\n");
+});
+
+test("valid requirement blockers use only original parallel reviewers and cannot be waived by another approval", async (t) => {
+    const root = await project(t);
+    await mkdir(path.join(root, "docs/requirements"), { recursive: true });
+    await writeFile(path.join(root, "docs/requirements/api.md"), "Health endpoint must respond.\n");
+    await commitRequirements(root);
+    const calls = [];
+    const result = await runLoop({
+        ctx: context((input) => {
+            calls.push(input);
+            if (input.kind === "doer") return owner({ checks: checks({ evidence: "checks.log" }) });
+            return review({ findings: input.role === "Critic" ? [{
+                type: "blocking", summary: "Health endpoint is absent.", action: "Implement the required endpoint.",
+                requirement: { path: "docs/requirements/api.md", line: 1 },
+            }] : [] });
+        }),
+        loop, key: "original-reviews", context: { projectRoot: root, assignment: {} }, attempts: 1,
+    });
+    assert.equal(result.status, "limit-reached");
+    assert.equal(result.feedback.reviews[0].findings[0].type, "blocking");
+    assert.deepEqual(calls.filter((call) => call.kind === "reviewer").map((call) => call.role), loop.reviewers);
+    assert.equal(calls.length, 1 + loop.reviewers.length);
+    assert.ok(!calls.some((call) => call.kind === "governance" || call.citationVerification));
 });
 
 test("checks are never executed by runtime and human limitations never fabricate completion", async (t) => {

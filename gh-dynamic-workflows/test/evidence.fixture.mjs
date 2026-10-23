@@ -11,6 +11,10 @@ export const checks = (overrides = {}) => [{
     requirement: "Validate the assigned completeWhen contract", environment: "deployed", exitCode: 0,
     evidence: "gh-dynamic-workflows/package.json", ...overrides,
 }];
+export const skeletonChecks = (evidence = "gh-dynamic-workflows/package.json") => [
+    ...checks({ id: "azd-deployment", kind: "test", command: "azd up --no-prompt", evidence }),
+    ...checks({ id: "deployed-probe", kind: "deployed-probe", command: "curl --fail https://deployed.example/health", evidence }),
+];
 export const owner = (overrides = {}) => ({
     status: "complete", summary: "Synthetic test response, not real delivery evidence.", artifact: {},
     checks: checks(), progress: [], ...overrides,

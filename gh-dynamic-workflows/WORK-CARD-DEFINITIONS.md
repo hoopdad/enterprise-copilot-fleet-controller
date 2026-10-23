@@ -163,6 +163,9 @@ one of `requirement:{path,line}` or `failingCheck`. Every finding requires
 names an emitted check ID. Red Team findings require
 `scope:"infrastructure-config"|"dependency-cve"`. Observation cards do not
 invent blocking authority.
+Requirement paths must resolve beneath `docs/requirements`; cited nonempty
+working-tree lines must match committed `HEAD` at the same path/line. New or
+altered requirement anchors remain observations, not blocking authority.
 
 Do not invent names, diagnoses, verification, or human-action requirements
 for historical work lacking that information.
@@ -225,6 +228,7 @@ metadata do not gain invented pending-card context.
 Preserve existing reviewer roles, real permissions, authority and exact evidence
 attribution while applying the check-based completion contract. Framework source changes do not
 automatically update an installed or active target workflow.
-The current engine is `yaml-loops-v2-evidence`; accepted `yaml-loops-v1` and earlier
-v2 journals remain historical evidence, not a way to bypass or replay new checks.
+The current engine is `yaml-loops-v2`; a run-version marker rejects existing
+unversioned context history. Accepted `yaml-loops-v1` journals remain historical
+evidence, not a way to bypass or replay new checks.
 Start a new run after adoption rather than treating historical cards as current acceptance.

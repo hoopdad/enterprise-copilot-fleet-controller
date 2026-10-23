@@ -7,7 +7,7 @@ import { runLoop, ownerSchema, reviewerSchema } from "../lab-loops.mjs";
 import { createLoopRunner, sprintTasks } from "../loop-workflow.mjs";
 import { outcomeContext } from "../task-context.mjs";
 import { definition, flattenLoops } from "../loop-source.mjs";
-import { checks, owner, review, fixtureRoot, fixtureBase, skeleton } from "./evidence.fixture.mjs";
+import { checks, skeletonChecks, owner, review, fixtureRoot, fixtureBase, skeleton } from "./evidence.fixture.mjs";
 
 const card = (changes = {}) => ({
     role: "Developer", action: "Fix database-write access in QuestionAnswer API",
@@ -105,7 +105,7 @@ test("file-backed plans retain identical cards through actual dispatch, reviews 
             const artifact = input.loop.id === "ArchitectureLoop" ? { Architecture: { solutionModel } }
                 : input.loop.id === "ReleasePlanLoop" ? { ReleasePlan: { sprints: [{ id: "s1" }] } }
                 : input.loop.id === "SprintPlanLoop" ? { SprintPlan: { path: "plan.json" } } : {};
-            return owner({ artifact, checks: checks({ evidence: "checks.log" }),
+            return owner({ artifact, checks: input.context.assignment?.walkingSkeleton ? skeletonChecks("checks.log") : checks({ evidence: "checks.log" }),
                 workCard: card({ role: input.role }),
                 ...(input.loop.id === "SprintPlanLoop" ? { taskCards: [
                     { id: walkingSkeleton.id, workCard: walkingSkeleton.workCard }, { id: task.id, workCard: planned },

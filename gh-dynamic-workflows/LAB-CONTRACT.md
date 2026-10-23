@@ -37,7 +37,8 @@ and `maxSprints` to allow unlimited rounds and sprints.
 
 Optional `maxNoProgressRounds` is a positive integer with no default. It stops
 each original loop invocation/assignment after that many consecutive rounds
-without new progress independently verified by all of its original reviewers.
+without new progress independently verified by its original check-adequacy
+reviewers (excluding Critic and Red Team, whose observations cannot veto progress).
 Verified progress resets the counter even when completion is not yet agreed.
 The existing completion/human-input conditions take precedence. Legacy total
 round/sprint caps, if also supplied, remain independent limits.
@@ -88,6 +89,10 @@ check. All findings require `summary` and `action`; requirement line numbers
 are positive integers and `failingCheck` is the emitted check ID.
 Requirement citations must resolve inside `projectRoot/docs/requirements`;
 symlink escapes are rejected even when they target another repository directory.
+The cited nonempty working-tree line must match committed `HEAD` at the same
+path and line number. New or dirty fabricated requirement lines normalize to
+observations rather than blocking acceptance. Verification uses fixed read-only
+Git arguments, never emitted check commands or shell evaluation.
 Unsupported suggestions use `type:"observation"`. Red Team findings require
 `scope:"infrastructure-config"|"dependency-cve"`; dependency CVE findings identify
 the CVE, library and affected version.
@@ -147,7 +152,7 @@ round and how to inspect them. Reviewers additionally return
 underlying progress they actually verified. Missing/malformed fields and
 unknown IDs are explicit errors, not successful progress or silent defaults.
 Reviewers receive the credited evidence and prior feedback. New IDs endorsed
-by every reviewer reset stagnation; previously credited IDs cannot reset it.
+by every check-adequacy reviewer reset stagnation; previously credited IDs cannot reset it.
 The same evidence text, ignoring case/whitespace, also cannot reset it under a
 new ID. Reviewers must detect paraphrased/repackaged prior work too.
 Do not recredit prior work by relabeling it. Claims, cosmetic churn and repeated
@@ -195,7 +200,10 @@ Developer/Developer/Designer/DevOps Engineer respectively. Dependencies must
 exist and form an acyclic graph shared by DevOps and all other task kinds.
 Sprint 1 starts with a dependency-free DevOps assignment marked
 `walkingSkeleton:true`, using `azd`; every other assignment depends on it
-transitively. After every assignment, the existing DevOps loop deploys/verifies
+transitively. Skeleton completion records an actual `azd up`, `azd provision`
+or `azd deploy` check and a separate passing deployed probe; naming `azd` in
+planning prose is not execution evidence.
+After every assignment, the existing DevOps loop deploys/verifies
 the increment, then the E2E loop tests that latest deployment before any dependents
 are released, not as late-only stages.
 Reviewer feedback can request changed work without any new review type. Further sprint backlog uses
@@ -273,9 +281,10 @@ useful evidence, not successful completion. Other application results
 include `needs-input`, `limit-reached` and dependency `not-run`; errors remain
 errors. Check the result as well as the SDK envelope.
 
-The engine identity is `yaml-loops-v2-evidence`. Prior `yaml-loops-v1` or earlier
-v2 accepted journal steps cannot bypass the new checks or replay as current acceptance: preserve
-them as history and start a new run after adoption. Retired `.delivery-runs`
+The engine identity is `yaml-loops-v2`. A run-version marker distinguishes
+compatible runs; existing unversioned context history is rejected. Prior
+`yaml-loops-v1` accepted journal steps cannot bypass new checks or replay as v2
+acceptance: preserve them as history and start a new run after adoption. Retired `.delivery-runs`
 native journals also remain historical, not migration/replay input.
-Use supported SDK owner-session resume only for compatible v2-evidence runs, not a
+Use supported SDK owner-session resume only for compatible v2 runs, not a
 fabricated terminal flag or a second workflow wrapping native continuation.

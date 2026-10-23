@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createLoopRunner, sprintTasks, releasePlan, ENGINE } from "../loop-workflow.mjs";
-import { owner, review, project, checks, task, skeleton, context } from "./evidence.fixture.mjs";
+import { owner, review, project, checks, skeletonChecks, task, skeleton, context } from "./evidence.fixture.mjs";
 
 async function fake(t, { tasks = [skeleton(), task("api", "developer", ["skeleton"])], artifact, inspect, args = {} } = {}) {
     const root = await project(t);
@@ -17,7 +17,8 @@ async function fake(t, { tasks = [skeleton(), task("api", "developer", ["skeleto
             let output = {};
             if (input.loop.id === "ReleasePlanLoop") output = { ReleasePlan: { sprints: [{ id: "s1" }] } };
             if (input.loop.id === "SprintPlanLoop") output = { SprintPlan: { tasks } };
-            return owner({ checks: checks({ evidence: "checks.log" }), artifact: await artifact?.(input, output) ?? output });
+            return owner({ checks: input.context.assignment?.walkingSkeleton ? skeletonChecks("checks.log") : checks({ evidence: "checks.log" }),
+                artifact: await artifact?.(input, output) ?? output });
         }),
         runId: "synthetic-offline", args: { projectRoot: root, ...args },
         phase: (value) => phases.push(value),
@@ -36,9 +37,9 @@ test("first sprint starts with deployed azd skeleton; E2E/DevOps run after each 
     assert.deepEqual(f.calls.filter((call) => call.kind === "doer").map((call) => [call.loop.id, call.context.assignment?.id]), [
         ["ArchitectureLoop", undefined], ["UserExperienceLoop", undefined], ["ReleasePlanLoop", undefined],
         ["SprintDesignLoop", undefined], ["SprintArchitectureLoop", undefined], ["SprintPlanLoop", undefined],
-        ["DevOpsWorkLoop", "skeleton"], ["EndToEndTestLoop", undefined], ["DevOpsWorkLoop", undefined],
-        ["AssignedWorkUIDeveloperLoop", "ui"], ["EndToEndTestLoop", undefined], ["DevOpsWorkLoop", undefined],
-        ["AssignedWorkDeveloperLoop", "api"], ["EndToEndTestLoop", undefined], ["DevOpsWorkLoop", undefined],
+        ["DevOpsWorkLoop", "skeleton"], ["DevOpsWorkLoop", undefined], ["EndToEndTestLoop", undefined],
+        ["AssignedWorkUIDeveloperLoop", "ui"], ["DevOpsWorkLoop", undefined], ["EndToEndTestLoop", undefined],
+        ["AssignedWorkDeveloperLoop", "api"], ["DevOpsWorkLoop", undefined], ["EndToEndTestLoop", undefined],
         ["SprintReviewLoop", undefined], ["SprintRetroLoop", undefined], ["ReleaseCloseoutLoop", undefined],
     ]);
     assert.equal(result.outcomes.filter((item) => item.key.includes("/continuous/")).length, 6);
@@ -62,8 +63,27 @@ test("deployment failure blocks dependents even when reviewers accept the accura
     assert.match(result.outcomes.find((item) => item.loopId === "EndToEndTestLoop").feedback.transportIssue, /failed/);
 });
 
+test("E2E verifies the latest DevOps deployment before dependent assignment starts", async (t) => {
+    let deployedGeneration = 0, verifiedGeneration = 0;
+    const f = await fake(t, { inspect: (input) => {
+        if (input.kind !== "doer") return;
+        if (input.context.continuousVerification && input.loop.id === "DevOpsWorkLoop") deployedGeneration++;
+        if (input.context.continuousVerification && input.loop.id === "EndToEndTestLoop") {
+            assert.ok(deployedGeneration > verifiedGeneration);
+            verifiedGeneration = deployedGeneration;
+        }
+        if (input.context.assignment?.id === "api") {
+            assert.equal(deployedGeneration, 1);
+            assert.equal(verifiedGeneration, deployedGeneration);
+        }
+    } });
+    assert.equal((await createLoopRunner()(f.ctx)).status, "completed");
+    assert.equal(deployedGeneration, 2);
+    assert.equal(verifiedGeneration, deployedGeneration);
+});
+
 test("continuous checks require deployed environment, not local-only success", async (t) => {
-    const f = await fake(t, { args: { attempts: { DevOpsWorkLoop: 1 } },
+    const f = await fake(t, { args: { attempts: { EndToEndTestLoop: 1, DevOpsWorkLoop: 1 } },
         inspect: (input) => input.kind === "doer" && input.context.continuousVerification
             ? owner({ checks: checks({ evidence: "checks.log", environment: "local" }) }) : undefined });
     const result = await createLoopRunner()(f.ctx);
@@ -82,7 +102,7 @@ test("all task kinds including DevOps share dependency scheduler, reviews and de
     assert.equal((await createLoopRunner()(f.ctx)).status, "completed");
     for (const id of ["skeleton", "infra", "design", "ui"]) {
         const start = events.findIndex(([taskId, loopId]) => taskId === id && !loopId.includes("EndToEnd"));
-        assert.deepEqual(events.slice(start + 1, start + 3).map(([, loopId]) => loopId), ["EndToEndTestLoop", "DevOpsWorkLoop"]);
+        assert.deepEqual(events.slice(start + 1, start + 3).map(([, loopId]) => loopId), ["DevOpsWorkLoop", "EndToEndTestLoop"]);
     }
     const ui = f.calls.find((call) => call.kind === "doer" && call.context.assignment?.id === "ui");
     assert.equal(ui.context.dependencies[0].status, "agreed");
@@ -92,12 +112,15 @@ test("all task kinds including DevOps share dependency scheduler, reviews and de
 test("first-sprint metadata and transitive deployed-first dependencies are enforced, later sprints need no new skeleton", () => {
     const valid = [skeleton(), task("contract", "developer", ["skeleton"]), task("api", "developer", ["contract"])];
     assert.deepEqual(sprintTasks({ SprintPlan: { tasks: valid } }, { firstSprint: true }), valid);
+    assert.doesNotThrow(() => sprintTasks({ SprintPlan: { tasks: [
+        { ...skeleton(), doneWhen: "passes in deployed environment", handoff: "azd deployment URL" },
+    ] } }, { firstSprint: true }));
     for (const tasks of [
         [], [task("api")], [task("api"), skeleton()], [{ ...skeleton(), dependsOn: ["api"] }, task("api")],
         [{ ...skeleton(), walkingSkeleton: false }], [{ ...skeleton(), owner: "Developer" }],
-        [{ ...skeleton(), doneWhen: "Local tests pass" }], [{ ...skeleton(), doneWhen: "Deployed checks pass" }],
+        [{ ...skeleton(), doneWhen: "Local tests pass" }], [{ ...skeleton(), handoff: "" }],
         [skeleton(), task("independent")], [skeleton(), { ...task("other", "devops", ["skeleton"]), walkingSkeleton: true }],
-    ]) assert.throws(() => sprintTasks({ SprintPlan: { tasks } }, { firstSprint: true }), /walking|First sprint|assigned owner/);
+    ]) assert.throws(() => sprintTasks({ SprintPlan: { tasks } }, { firstSprint: true }), /walking|First sprint|assigned owner|doneWhen\/handoff/);
     assert.deepEqual(sprintTasks({ SprintPlan: { tasks: [task("later")] } }), [task("later")]);
     assert.doesNotThrow(() => sprintTasks({ SprintPlan: { tasks: [task("infra", "devops"), task("app", "developer", ["infra"])] } }));
 });
@@ -112,6 +135,19 @@ test("invalid task graph, owner, resources, estimates and work criteria return c
         [{ ...task("a"), doneWhen: "" }], [{ ...task("a"), exclusions: [42] }],
     ]) assert.throws(() => sprintTasks({ SprintPlan: { tasks } }));
     for (const plan of [{}, { sprints: [] }, { sprints: [{ id: "s" }, { id: "s" }] }]) assert.throws(() => releasePlan({ ReleasePlan: plan }));
+});
+
+test("task and sprint identifiers cannot collide with durable assignment or continuous-step key segments", () => {
+    for (const id of ["api/continuous", "api\\continuous", "api:continuous", ".", "..", "api\ncontinuous", "api\u0000continuous", " api "]) {
+        assert.throws(() => sprintTasks({ SprintPlan: { tasks: [
+            task("api"), task(id, "devops", ["api"]),
+        ] } }), /safe unique id/, JSON.stringify(id));
+        assert.throws(() => releasePlan({ ReleasePlan: { sprints: [{ id }] } }), /safe unique string ids/, JSON.stringify(id));
+    }
+    assert.doesNotThrow(() => sprintTasks({ SprintPlan: { tasks: [
+        task("api"), task("api-continuous", "devops", ["api"]),
+    ] } }));
+    assert.doesNotThrow(() => releasePlan({ ReleasePlan: { sprints: [{ id: "sprint-1.2" }] } }));
 });
 
 test("invalid first-sprint plan retries original owner before any assignment dispatch", async (t) => {
@@ -190,6 +226,21 @@ test("SDK replay preserves accepted evidence using new engine keys; legacy accep
     assert.equal(f.calls.length, count);
     assert.ok([...f.journal.keys()].some((key) => key.startsWith(`${ENGINE}:`)));
     assert.ok(f.calls.some((call) => call.kind === "doer" && call.loop.id === "ArchitectureLoop"));
+});
+
+test("existing v1 or unversioned durable context requires a new run without modifying history", async (t) => {
+    for (const version of [undefined, "yaml-loops-v1"]) {
+        const f = await fake(t);
+        const directory = path.join(f.root, "gh-dynamic-workflows", ".delivery-runs", f.ctx.runId);
+        await mkdir(path.join(directory, "context"), { recursive: true });
+        const audit = '{"status":"agreed","artifact":{"legacy":true}}\n';
+        await writeFile(path.join(directory, "context", "old.json"), audit);
+        if (version) await writeFile(path.join(directory, "engine.json"), JSON.stringify({ engine: version }) + "\n");
+        await assert.rejects(createLoopRunner()(f.ctx), /older workflow engine.*new yaml-loops-v2 run/);
+        assert.equal(await readFile(path.join(directory, "context", "old.json"), "utf8"), audit);
+        if (version) assert.equal(JSON.parse(await readFile(path.join(directory, "engine.json"), "utf8")).engine, version);
+        assert.equal(f.calls.length, 0);
+    }
 });
 
 test("only explicit sprint caps stop additional planned work, and retrospective changes reach the next sprint", async (t) => {
