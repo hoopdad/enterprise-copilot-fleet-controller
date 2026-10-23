@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, mkdir, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { fixtureBase } from "./evidence.fixture.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 test("fresh installations contain the ordinary YAML runtime and owner/reviewer profiles; existing files are not overwritten", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "yaml-loop-install-"));
+    const root = await mkdtemp(path.join(fixtureBase, ".yaml-loop-install-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const installer = fileURLToPath(new URL("../install.mjs", import.meta.url));
     const installed = spawnSync(process.execPath, [installer, root], { encoding: "utf8" });
@@ -24,7 +24,7 @@ test("fresh installations contain the ordinary YAML runtime and owner/reviewer p
     assert.deepEqual((await readdir(path.join(root, ".github", "agents"))).sort(),
         ["workflow-owner.agent.md", "workflow-reviewer.agent.md"]);
     assert.match(await readFile(path.join(root, ".github", "agents", "workflow-owner.agent.md"), "utf8"), /name: workflow-owner/);
-    assert.ok(files.includes("scope-governance.mjs"));
+    assert.ok(!files.includes("scope-governance.mjs"));
     assert.ok(files.includes("task-context.mjs"));
     assert.ok(files.includes("work-cards.mjs") && files.includes("WORK-CARD-DEFINITIONS.md"));
     assert.ok((await readdir(path.join(root, "gh-dynamic-workflows", "test"))).includes("work-cards.test.mjs"));
@@ -36,7 +36,7 @@ test("fresh installations contain the ordinary YAML runtime and owner/reviewer p
 });
 
 test("explicit upgrade installs the owner default, retains legacy overrides and never touches historical state", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "yaml-loop-upgrade-"));
+    const root = await mkdtemp(path.join(fixtureBase, ".yaml-loop-upgrade-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const installer = fileURLToPath(new URL("../install.mjs", import.meta.url));
     assert.equal(spawnSync(process.execPath, [installer, root], { encoding: "utf8" }).status, 0);
@@ -53,5 +53,5 @@ test("explicit upgrade installs the owner default, retains legacy overrides and 
     assert.match(await readFile(path.join(root, "gh-dynamic-workflows", "lab-loops.mjs"), "utf8"), /agents.owner \?\? agents.doer \?\? "workflow-owner"/);
     assert.equal(await readFile(legacy, "utf8"), "Legacy custom override; retain for agents.doer.");
     assert.equal(await readFile(path.join(history, "history.json"), "utf8"), '{"untouched":true}');
-    assert.ok((await readdir(path.join(root, "gh-dynamic-workflows", "test"))).includes("scope-governance.fixture.mjs"));
+    assert.ok((await readdir(path.join(root, "gh-dynamic-workflows", "test"))).includes("evidence.fixture.mjs"));
 });

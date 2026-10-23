@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { archiveContext, contextInstructions, historyLocation } from "../task-context.mjs";
 import { taskContext } from "../loop-workflow.mjs";
-import { dispositionContext, feedbackContext, promptFeedback } from "../scope-governance.mjs";
+import { fixtureBase } from "./evidence.fixture.mjs";
 
 test("task instructions separate authorized local commands from denied external probes without broadening access", () => {
     const instructions = contextInstructions.join("\n");
@@ -18,7 +17,7 @@ test("task instructions separate authorized local commands from denied external 
 });
 
 async function fixture(t) {
-    const root = await mkdtemp(path.join(os.tmpdir(), "task-handoff-"));
+    const root = await mkdtemp(path.join(fixtureBase, ".task-handoff-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     return { projectRoot: root, history: historyLocation(root, "offline-run"),
         request: { authorization: { provision: false, modelTests: false } }, specification: "Original acceptance." };
@@ -38,7 +37,8 @@ function outcome(key, rounds) {
         summary: "Bounded handoff accepted; liveReady remains false.",
         artifact: { DeveloperWork: { path: `contracts/${key}.md`, commit: "abc123",
             liveReady: false, adapterBinding: null, limitations: ["Wire and independent quality remain unproved."] } },
-        reviews: [{ role: "Architect", agree: true, taskComplete: true, unmetCriteria: [],
+        checks: [{ id: "contract", exitCode: 0, evidence: "checks.log" }],
+        reviews: [{ role: "Architect", checksValid: true, findings: [],
             feedback: "CURRENT-REVIEW-" + "x".repeat(1000) }],
         governanceHistory: Array.from({ length: rounds }, () => ({
             owner: { summary: "RAW-OLD-REPORT-" + "x".repeat(2000) },
@@ -64,9 +64,11 @@ test("additional historical rounds do not expand the integration task packet; ex
     assert.equal(packet.dependencies.length, 2);
     assert.equal(packet.dependencies[0].artifact.DeveloperWork.liveReady, false);
     assert.equal(packet.dependencies[0].artifact.DeveloperWork.adapterBinding, null);
-    assert.equal(packet.dependencies[0].reviews[0].taskComplete, true);
+    assert.equal(packet.dependencies[0].reviews[0].checksValid, true);
+    assert.equal(packet.dependencies[0].checks[0].id, "contract");
     assert.deepEqual(packet.request, common.request);
-    assert.deepEqual(packet.priorDispositions, dispositionContext({ outcomes: large }));
+    assert.equal(packet.priorDispositions, undefined);
+    assert.doesNotMatch(JSON.stringify(packet), /disposition|governanceHistory/);
     assert.deepEqual(large, before);
     const original = JSON.parse(await readFile(path.join(common.projectRoot, packet.dependencies[0].audit.path), "utf8"));
     assert.deepEqual(original, before[0]);
@@ -74,26 +76,7 @@ test("additional historical rounds do not expand the integration task packet; ex
     assert.equal(packet.outcomes[2].artifact, undefined);
 });
 
-test("retry and dispatch feedback retain current evidence and decisions without copying nested audits", async (t) => {
-    const common = await fixture(t);
-    const current = governance();
-    const raw = { owner: { summary: "Current required correction." },
-        reviews: [{ role: "Critic", feedback: "Current specific defect." }],
-        governance: { ...current, architecture: { rawAdvice: "RAW-ADVICE" } },
-        governanceHistory: [{ rawAudit: "RAW-ROUND" }],
-        dispatchedWork: [outcome("child", 100)] };
-    const packet = await promptFeedback(common, raw);
-    assert.equal(packet.owner.summary, raw.owner.summary);
-    assert.deepEqual(packet.reviews, raw.reviews);
-    assert.deepEqual(packet.governance.instructions, current.instructions);
-    assert.deepEqual(packet.governance.nonBlocking, current.nonBlocking);
-    assert.equal(packet.governanceRounds, 1);
-    assert.doesNotMatch(JSON.stringify(packet), /RAW-|CURRENT-REVIEW-/);
-    assert.deepEqual(JSON.parse(await readFile(path.join(common.projectRoot, packet.audit.path), "utf8")), raw);
-    assert.equal(feedbackContext(null), null);
-});
-
-test("scoped replanning preserves current criteria, parent boundaries and exact supersession", async (t) => {
+test("scoped replanning preserves current criteria and historical audit without importing dispositions", async (t) => {
     const common = await fixture(t);
     const original = governance("original");
     const oldReference = JSON.stringify(["original", "optional"]);
@@ -106,16 +89,14 @@ test("scoped replanning preserves current criteria, parent boundaries and exact 
             assignment: { id: "outer", doneWhen: "Preserve original acceptance." },
             request: { feedback: { governance: original, governanceHistory: [{ raw: "RAW-OUTER" }] } },
         } };
-    const raw = { outcomes: [prior], scopeRevision: rawScope };
     const packet = await taskContext(common, {}, [prior], { scopeRevision: rawScope });
-    assert.deepEqual(packet.priorDispositions, dispositionContext(raw));
-    assert.ok(!packet.priorDispositions.some((item) => item.reference === oldReference));
-    assert.ok(packet.priorDispositions.some((item) => item.supersedes?.includes(oldReference)));
+    assert.equal(packet.priorDispositions, undefined);
     assert.equal(packet.scopeRevision.assignment.doneWhen, rawScope.assignment.doneWhen);
     assert.equal(packet.scopeRevision.inherited.assignment.id, "outer");
-    assert.ok(packet.scopeRevision.request.feedback.governance.instructions.length);
+    assert.equal(packet.scopeRevision.request.feedback, undefined);
     assert.doesNotMatch(JSON.stringify(packet), /RAW-|CURRENT-REVIEW-/);
-    assert.deepEqual(JSON.parse(await readFile(path.join(common.projectRoot, packet.scopeRevision.audit.path), "utf8")), rawScope);
+    assert.deepEqual(JSON.parse(await readFile(path.join(common.projectRoot, packet.scopeRevision.request.audit.path), "utf8")), rawScope.request);
+    assert.doesNotMatch(JSON.stringify(packet), /disposition|governanceHistory/);
 });
 
 test("document references retain source and commit; audits are additive, idempotent and never overwrite history", async (t) => {

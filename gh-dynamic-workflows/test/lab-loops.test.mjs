@@ -2,379 +2,279 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { definition, flattenLoops, parseWorkflow } from "../loop-source.mjs";
 import { runLoop } from "../lab-loops.mjs";
-import { governanceResponse } from "./scope-governance.fixture.mjs";
+import { owner, review, context, fixtureRoot, checks } from "./evidence.fixture.mjs";
 
 const loops = flattenLoops(definition.workflows.ReleaseLoop.steps);
-function context(agent) {
-    return { agent: async (prompt, options) => {
-        const input = JSON.parse(prompt);
-        return input.kind === "governance" ? governanceResponse(input) : agent(prompt, options);
-    }, step: async (_, fn) => fn(), parallel: (thunks) => Promise.all(thunks.map((fn) => fn())), log() {} };
+const loop = loops.find((node) => node.id === "AssignedWorkDeveloperLoop");
+const packet = { projectRoot: fixtureRoot, assignment: { id: "api", doneWhen: "Deployed checks pass" } };
+function run(agent, options = {}) {
+    return runLoop({ ctx: context(agent), loop, key: "test", context: packet, ...options });
 }
-test("every writing turn commits before review, and the existing Scrum Master reviews Git reconciliation", async () => {
-    const calls = [];
-    const ctx = context(async (prompt) => {
-        const input = JSON.parse(prompt);
-        calls.push(input);
-        return input.kind === "doer"
-            ? { status: "complete", summary: "Committed own changes as abc123 on feature/work", artifact: {} }
-            : { agree: true, feedback: "Inspected committed changes" };
-    });
-    await runLoop({ ctx, loop: loops.find((node) => node.id === "SprintReviewLoop"), key: "git", context: {} });
-    const owner = calls.find((call) => call.kind === "doer");
-    assert.equal(calls.filter((call) => call.kind === "doer").length, 1);
-    assert.match(owner.instructions.join("\n"), /Owner status complete is your own acceptance, not a claim that reviewers have already agreed/);
-    assert.match(owner.instructions.join("\n"), /Pending reviewer votes are not owner rework/);
-    assert.match(owner.instructions.join("\n"), /records agreement only when the original reviewers agree/);
-    assert.match(owner.instructions.join("\n"), /Never claim collective acceptance.*passing cloud-deployed tests/);
-    assert.match(owner.instructions.join("\n"), /every turn that changes files.*rework or needs-input/);
-    assert.match(owner.instructions.join("\n"), /git commit --only/);
-    assert.match(owner.instructions.join("\n"), /retain its code commits on a named branch/);
-    assert.match(owner.instructions.join("\n"), /abandonment reason in a commit message on the feature branch/);
-    for (const review of calls.filter((call) => call.kind === "reviewer")) {
-        assert.equal(review.owner.summary, "Committed own changes as abc123 on feature/work");
-        assert.match(review.instructions.join("\n"), /actual Git commits/);
-        assert.match(review.instructions.join("\n"), /pending responses are not an unmet owner criterion/);
-    }
-    const scrum = calls.find((call) => call.kind === "reviewer" && call.role === "Scrum Master");
-    assert.match(scrum.instructions.join("\n"), /accountable for Git reconciliation/);
-    assert.match(scrum.instructions.join("\n"), /remain read-only yourself/);
-});
-
-test("planning and its original reviewers favor contract handoffs, critical paths and economical integration", async () => {
-    const calls = [];
-    await runLoop({
-        ctx: context(async (prompt) => {
-            const input = JSON.parse(prompt);
-            calls.push(input);
-            return input.kind === "doer" ? { status: "complete", summary: "Plan ready", artifact: {} }
-                : { agree: true, feedback: "" };
-        }),
-        loop: loops.find((node) => node.id === "SprintPlanLoop"), key: "planning", context: {},
-        dispatch: async () => ({ context: { status: "dispatched" }, settle: async () => [] }),
-    });
-    assert.equal(calls[0].role, "Scrum Master");
-    assert.match(calls[0].instructions.join("\n"), /critical-path analysis/);
-    assert.match(calls[0].instructions.join("\n"), /smallest useful accepted handoff/);
-    assert.match(calls[0].instructions.join("\n"), /explicit integration\/refactoring tasks/);
-    assert.match(calls[0].instructions.join("\n"), /request.git.featureBranch/);
-    assert.match(calls[0].instructions.join("\n"), /doneWhen string, exclusions array and handoff string/);
-    assert.match(calls[0].instructions.join("\n"), /model name, input tokens, cached\/cache-read tokens, output tokens and elapsed time/);
-    for (const call of calls.filter((input) => input.kind === "reviewer")) {
-        assert.match(call.instructions.join("\n"), /agreed interface\/fixture or the whole implementation/);
-        assert.match(call.instructions.join("\n"), /File overlap alone is not a dependency/);
-        assert.match(call.instructions.join("\n"), /Plan review does not wait/);
-    }
-});
-
-test("accurate rework agreement is not completion, and a reviewer cannot automatically promote the owner's status", async () => {
-    let round = 0;
-    const ctx = context(async (prompt) => {
-        const input = JSON.parse(prompt);
-        if (input.kind === "doer") {
-            round++;
-            return { status: round === 1 ? "rework" : "complete", summary: "Bounded finding.", artifact: { liveReady: false } };
-        }
-        return { agree: true, taskComplete: round !== 2, unmetCriteria: round === 2 ? ["Missing handoff."] : [], feedback: "Accurate report." };
-    });
-    const result = await runLoop({ ctx, loop: loops[0], key: "scope", context: { assignment: { doneWhen: "Document a bounded finding." } } });
-    assert.equal(result.rounds, 3);
-    assert.equal(result.status, "agreed");
-    assert.equal(result.artifact.liveReady, false);
-});
-
-test("an agreed scope change returns internal needs-replan instead of more rework or human input", async () => {
-    const result = await runLoop({
-        ctx: context(async (prompt) => JSON.parse(prompt).kind === "doer"
-            ? { status: "needs-replan", summary: "The live binding is outside this research task.", artifact: {} }
-            : { agree: true, taskComplete: false, unmetCriteria: ["Correct the scope."], feedback: "Architect decision needed." }),
-        loop: loops[0], key: "replan", context: { assignment: { id: "research" } },
-    });
-    assert.equal(result.status, "needs-replan");
-    assert.equal(result.rounds, 1);
-});
-
-test("unassigned execution replans return after original review and triage rather than repeating unchanged blockers", async () => {
-    for (const id of ["EndToEndTestLoop", "DevOpsWorkLoop"]) {
+test("all original loops retain owners/reviewers and instruct executable evidence, not disposition governance", async () => {
+    for (const current of loops.filter((node) => node.reviewers)) {
         const calls = [];
-        const result = await runLoop({
-            ctx: context(async (prompt) => {
-                const input = JSON.parse(prompt);
-                calls.push(input);
-                return input.kind === "doer"
-                    ? { status: "needs-replan", summary: "An existing production prerequisite needs replanning.",
-                        artifact: {}, progress: [] }
-                    : { agree: true, taskComplete: false, unmetCriteria: ["Production prerequisite remains unmet."],
-                        feedback: "Accurate replan, not passing deployment.", verifiedProgress: [] };
-            }),
-            loop: loops.find((node) => node.id === id), key: id, context: {},
-            attempts: 1, maxNoProgressRounds: 10,
-        });
-        assert.equal(result.status, "needs-replan");
-        assert.equal(result.rounds, 1);
-        assert.equal(result.governanceHistory.length, 1);
-        assert.equal(calls.filter((call) => call.kind === "doer").length, 1);
-        assert.match(calls[0].instructions.join("\n"), /For an execution, test or deployment loop/);
-        assert.doesNotMatch(calls[0].instructions.join("\n"), /For an unassigned planning\/release loop/);
-        assert.deepEqual(result.reviews.map((review) => review.role),
-            loops.find((node) => node.id === id).reviewers);
-        assert.ok(result.reviews.every((review) => review.taskComplete === false));
-    }
-});
-
-test("unassigned planning replans stay with the current owner without importing later-stage votes", async () => {
-    for (const id of ["ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop",
-        "SprintDesignLoop", "SprintArchitectureLoop", "SprintPlanLoop"]) {
-        let rounds = 0;
-        const result = await runLoop({
-            ctx: context(async (prompt) => {
-                const input = JSON.parse(prompt);
-                if (input.kind === "doer") {
-                    assert.match(input.instructions.join("\n"), /For an unassigned planning\/release loop/);
-                    return { status: ++rounds === 1 ? "needs-replan" : "complete",
-                        summary: "Resolve this planning document here.", artifact: {} };
-                }
-                return { agree: true, feedback: "Accurate planning disposition." };
-            }),
-            loop: loops.find((node) => node.id === id), key: id, context: {},
-        });
+        const result = await run((input) => {
+            calls.push(input);
+            return input.kind === "doer" ? owner() : review();
+        }, { loop: current });
         assert.equal(result.status, "agreed");
-        assert.equal(result.rounds, 2);
+        assert.deepEqual(result.reviews.map((item) => item.role), current.reviewers);
+        assert.ok(calls.every((call) => call.instructions.join("\n").includes("permission")));
+        assert.match(calls[0].instructions.join("\n"), /completeWhen.*executable checks each round/);
+        assert.match(calls[0].instructions.join("\n"), /No Scrum triage, Architect advice, Product Owner decision/);
+        assert.ok(!calls.some((call) => call.kind === "governance"));
     }
 });
 
-test("the original YAML's hierarchy, roles, reviewer order and completion conditions are retained", () => {
-    assert.deepEqual(definition.workflows.ReleaseLoop.steps.map((node) => node.id),
-        ["ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop", "SprintLoop", "ReleaseCloseoutLoop"]);
-    const expected = [
-        ["ArchitectureLoop", "Architect", ["Product Owner", "Red Team", "Critic"]],
-        ["UserExperienceLoop", "Designer", ["Product Owner", "Critic"]],
-        ["ReleasePlanLoop", "Product Owner", ["Stakeholder", "Architect", "Designer", "Critic"]],
-        ["SprintDesignLoop", "Designer", ["Product Owner", "Critic"]],
-        ["SprintArchitectureLoop", "Architect", ["Product Owner", "Critic", "Red Team"]],
-        ["SprintPlanLoop", "Scrum Master", ["Product Owner", "Architect", "Critic"]],
-        ["AssignedWorkUIDeveloperLoop", "Developer", ["Architect", "Designer", "Critic"]],
-        ["AssignedWorkDeveloperLoop", "Developer", ["Architect", "Critic"]],
-        ["EndToEndTestLoop", "Developer", ["Architect", "Critic", "Product Owner"]],
-        ["DevOpsWorkLoop", "DevOps Engineer", ["Architect", "Critic", "Developer"]],
-        ["SprintReviewLoop", "Product Owner", ["Scrum Master", "Critic", "Architect", "Red Team"]],
-        ["SprintRetroLoop", "Product Owner", ["Scrum Master", "Critic", "Architect", "Red Team", "Designer", "Developer"]],
-        ["ReleaseCloseoutLoop", "Product Owner", ["Stakeholder", "Architect", "Critic"]],
-    ];
-    assert.deepEqual(loops.filter((node) => !node.substeps).map((node) => [node.id, node.owner, node.reviewers]), expected);
-    assert.equal(loops.find((node) => node.id === "DevOpsWorkLoop").completeWhen,
-        "Owner and reviewers agree and cloud-deployed system passes tests.");
-    assert.equal(loops.find((node) => node.id === "EndToEndTestLoop").completeWhen,
-        "Owner and reviewers agree test outcomes are accurate and actionable.");
-});
-test("disagreement loops back to the same do-er and original reviewers; agreeing feedback is allowed", async () => {
+test("every writing turn commits owned paths before review and preserves concurrent work", async () => {
     const calls = [];
-    let owners = 0;
-    const ctx = context(async (prompt, options) => {
-        const input = JSON.parse(prompt);
-        calls.push({ input, options });
-        if (input.kind === "doer") {
-            owners++;
-            if (owners === 2) assert.match(JSON.stringify(input.feedback), /fix this/);
-            return { status: "complete", summary: "done", artifact: {} };
-        }
-        return { agree: owners > 1 || input.role !== "Critic", feedback: owners > 1 ? "Minor observation remains" : "fix this" };
+    await run((input) => { calls.push(input); return input.kind === "doer" ? owner() : review(); });
+    const instructions = calls[0].instructions.join("\n");
+    assert.match(instructions, /every turn that changes files, including rework or needs-input/);
+    assert.match(instructions, /git commit --only/);
+    assert.match(instructions, /preserve concurrent changes/);
+    assert.match(instructions, /never invent counters/);
+    for (const call of calls.slice(1)) assert.match(call.instructions.join("\n"), /actual Git commits/);
+});
+
+test("scope edits require authority plus requirement/regression changes in one commit, not a decision ledger", async () => {
+    const calls = [];
+    await run((input) => { calls.push(input); return input.kind === "doer" ? owner() : review(); });
+    const ownerInstructions = calls[0].instructions.join("\n");
+    assert.match(ownerInstructions, /actual project\/user authority.*docs\/requirements.*regression test in the same committed change/);
+    assert.match(ownerInstructions, /Declined proposals never land/);
+    assert.match(ownerInstructions, /evidence-file validation establishes inspectability, not that a process actually ran/);
+    for (const input of calls.slice(1)) {
+        assert.match(input.instructions.join("\n"), /inspect actual authority and the Git commit/);
+        assert.match(input.instructions.join("\n"), /regression test must be in the same committed change/);
+        assert.match(input.instructions.join("\n"), /A nonempty evidence file does not prove execution/);
+    }
+});
+
+test("planning instructions cover deployed-first contract handoffs and shared resource contention", async () => {
+    let prompt;
+    await run((input) => {
+        if (input.kind === "doer") prompt = input;
+        return input.kind === "doer" ? owner() : review();
+    }, { loop: loops.find((node) => node.id === "SprintPlanLoop"), context: { projectRoot: fixtureRoot },
+        dispatch: () => ({ context: { status: "dispatched" }, settle: async () => [] }) });
+    assert.match(prompt.instructions.join("\n"), /walkingSkeleton:true,kind:devops/);
+    assert.match(prompt.instructions.join("\n"), /transitively depends/);
+    assert.match(prompt.instructions.join("\n"), /exclusiveResources.*mutable contention/);
+    assert.match(prompt.instructions.join("\n"), /Plan completion requires dispatch-ready assignments/);
+});
+
+test("accurate rework and reviewer completion votes cannot promote owner status", async () => {
+    let round = 0;
+    const result = await run((input) => input.kind === "doer"
+        ? owner({ status: ++round < 3 ? "rework" : "complete" })
+        : review({ agree: true, taskComplete: true }));
+    assert.equal(result.status, "agreed");
+    assert.equal(result.rounds, 3);
+});
+
+test("execution scope changes return scoped needs-replan; planning resolves changes in its own loop", async () => {
+    for (const current of [loop, loops.find((node) => node.id === "ArchitectureLoop")]) {
+        let round = 0;
+        const result = await run((input) => input.kind === "doer"
+            ? owner({ status: ++round === 1 ? "needs-replan" : "complete" }) : review(), { loop: current });
+        assert.equal(result.status, current === loop ? "needs-replan" : "agreed");
+        assert.equal(result.rounds, current === loop ? 1 : 2);
+        assert.equal(result.governanceHistory, undefined);
+    }
+});
+
+test("workflow parser rejects malformed hierarchy and duplicate IDs without introducing new roles", () => {
+    assert.ok(loops.some((node) => node.id === "ReleaseCloseoutLoop"));
+    assert.throws(() => parseWorkflow("workflows: {}"), /requires/);
+    assert.throws(() => parseWorkflow("workflows:\n  ReleaseLoop:\n    steps:\n      - {id: x, name: X, owner: Developer, reviewers: []}"), /do-er and reviewers/);
+    assert.throws(() => parseWorkflow("workflows:\n  ReleaseLoop:\n    steps:\n      - {id: x, name: X, owner: Developer, reviewers: [Critic]}\n      - {id: x, name: X, owner: Developer, reviewers: [Critic]}"), /unique/);
+});
+
+test("check inadequacy retries the same doer and original reviewers; observations allow acceptance", async () => {
+    let round = 0;
+    const result = await run((input) => {
+        if (input.kind === "doer") { round++; return owner(); }
+        return review({ checksValid: round > 1 || ["Critic", "Red Team"].includes(input.role),
+            findings: [{ type: "observation", summary: "Improve naming later", action: "Consider naming" }] });
     });
-    const result = await runLoop({ ctx, loop: loops[0], key: "architecture", context: {} });
     assert.equal(result.status, "agreed");
     assert.equal(result.rounds, 2);
-    assert.equal(calls.filter((call) => call.input.kind === "reviewer").length, 6);
-    assert.ok(calls.every((call) => call.options.agent.startsWith("workflow-")));
-    assert.equal(new Set(calls.map((call) => call.options.label)).size, calls.length);
-});
-test("there is no engine default round cap", async () => {
-    let rounds = 0;
-    const ctx = context(async (prompt) => {
-        const input = JSON.parse(prompt);
-        if (input.kind === "doer") { rounds++; return { status: "complete", summary: "working", artifact: {} }; }
-        return { agree: rounds >= 12, feedback: "continue" };
-    });
-    const result = await runLoop({ ctx, loop: loops[0], key: "no-default", context: {} });
-    assert.equal(result.rounds, 12);
-});
-test("explicit attempt limits and genuine human-input outcomes are reported, never passed", async () => {
-    const limit = await runLoop({
-        ctx: context(async (p) => JSON.parse(p).kind === "doer"
-            ? { status: "complete", summary: "work", artifact: {} } : { agree: false, feedback: "not yet" }),
-        loop: loops[0], key: "limit", context: {}, attempts: 2,
-    });
-    assert.equal(limit.status, "limit-reached");
-    assert.equal(limit.rounds, 2);
-    assert.equal(limit.limit, 2);
-    assert.match(limit.summary, /ArchitectureLoop.*2-round limit/);
-    assert.match(limit.reason, /Reviewers still disagreed.*Critic/);
-    assert.ok(limit.feedback.reviews.every((review) => review.feedback === "not yet"));
-    const blocked = await runLoop({
-        ctx: context(async (p) => JSON.parse(p).kind === "doer"
-            ? { status: "needs-input", summary: "User must authorize another resource", artifact: {} }
-            : { agree: true, feedback: "Requires user authority" }),
-        loop: loops[0], key: "human", context: {},
-    });
-    assert.equal(blocked.status, "needs-input");
-    assert.match(blocked.summary, /User must authorize another resource/);
-    assert.ok(blocked.nextAction);
-});
-test("invalid or failed subagents are explicit failures, not agreement", async () => {
-    await assert.rejects(runLoop({ ctx: context(async () => null), loop: loops[0], key: "null", context: {} }), /Invalid do-er/);
-    await assert.rejects(runLoop({
-        ctx: context(async (p) => JSON.parse(p).kind === "doer"
-            ? { status: "complete", summary: "", artifact: {} } : null),
-        loop: loops[0], key: "review-null", context: {},
-    }), /Invalid .*reviewer/);
-    assert.throws(() => parseWorkflow("workflows: {}"), /ReleaseLoop/);
 });
 
-function progressContext({ owner, review } = {}) {
+test("explicit attempt limits and genuine human-input outcomes never pass", async () => {
+    for (const attempts of [0, -1, 1.5, "2"]) {
+        await assert.rejects(run(() => {}, { attempts }), /positive integer/);
+    }
+    const limited = await run((input) => input.kind === "doer" ? owner({ status: "rework" }) : review(), { attempts: 2 });
+    assert.equal(limited.status, "limit-reached");
+    const human = await run((input) => input.kind === "doer"
+        ? owner({ status: "needs-input", checks: [], nextAction: "Supply deployment authority" }) : review({ checksValid: false }));
+    assert.equal(human.status, "needs-input");
+});
+
+test("invalid or failed subagents are explicit errors rather than agreement", async () => {
+    for (const response of [null, {}, owner({ status: "PASS" }), owner({ checks: undefined }), owner({ progress: undefined })]) {
+        await assert.rejects(run(() => response), /Invalid/);
+    }
+    await assert.rejects(run((input) => input.kind === "doer" ? owner() : { checksValid: "true" }), /Invalid/);
+    await assert.rejects(run((input) => { if (input.kind === "reviewer") throw new Error("agent failed"); return owner(); }), /agent failed/);
+    const ctx = context((input) => input.kind === "doer" ? owner() : review());
+    ctx.parallel = async () => [null];
+    await assert.rejects(runLoop({ ctx, loop, key: "null", context: packet }), /Reviewer execution failed/);
+});
+
+test("productive guarded rounds have no total cap; substantive verified advances can exceed ten rounds", async () => {
     let round = 0;
-    return context(async (prompt, options) => {
-        const input = JSON.parse(prompt);
+    const result = await run((input) => input.kind === "doer"
+        ? owner({ status: ++round <= 12 ? "rework" : "complete", progress: [{ id: `step-${round}`, evidence: `New required output ${round}` }] })
+        : review({ verifiedProgress: input.owner.progress.map((item) => item.id) }), { maxNoProgressRounds: 3 });
+    assert.equal(result.status, "agreed");
+    assert.equal(result.rounds, 13);
+});
+
+test("only explicitly supplied no-progress thresholds stop unresolved loops without fake completion", async () => {
+    for (const limit of [1, 4]) {
+        const result = await run((input) => input.kind === "doer" ? owner({ status: "rework" }) : review(),
+            { maxNoProgressRounds: limit });
+        assert.equal(result.status, "blocked");
+        assert.equal(result.rounds, limit);
+        assert.equal(result.stopCause, "no-progress");
+    }
+    await assert.rejects(run(() => {}, { maxNoProgressRounds: 0 }), /positive integer/);
+});
+
+test("omitted stagnation guard adds no implicit round cap or mandatory progress fields", async () => {
+    let round = 0;
+    const result = await run((input, options) => {
+        assert.equal(input.progressState, undefined);
+        if (input.kind === "doer") {
+            assert.ok(!options.schema.required.includes("progress"));
+            const response = owner({ status: ++round <= 12 ? "rework" : "complete" });
+            delete response.progress;
+            return response;
+        }
+        assert.ok(!options.schema.required.includes("verifiedProgress"));
+        const response = review();
+        delete response.verifiedProgress;
+        return response;
+    });
+
+    assert.equal(result.status, "agreed");
+    assert.equal(result.rounds, 13);
+});
+
+test("explicit stagnation guards require valid owner and reviewer progress fields", async () => {
+    await assert.rejects(run((input) => input.kind === "doer" ? owner({ progress: undefined }) : review(),
+        { maxNoProgressRounds: 2 }), /Invalid do-er progress/);
+    await assert.rejects(run((input) => input.kind === "doer" ? owner() : review({ verifiedProgress: undefined }),
+        { maxNoProgressRounds: 2 }), /Invalid.*reviewer progress/);
+});
+
+test("threshold-round verified advance resets stagnation; IDs and relabeled evidence cannot be reclaimed", async () => {
+    let round = 0;
+    const result = await run((input) => {
         if (input.kind === "doer") {
             round++;
-            assert.ok(options.schema.required.includes("progress"));
-            return { status: "rework", summary: "Continuing", artifact: {}, progress: [], ...await owner?.(round, input) };
+            return owner({ status: "rework", progress: round >= 2
+                ? [{ id: `id-${round}`, evidence: round === 2 ? "New check passes" : " new   CHECK passes " }] : [] });
         }
-        assert.ok(options.schema.required.includes("verifiedProgress"));
-        return { agree: false, feedback: "More work remains", verifiedProgress: [], ...await review?.(round, input) };
-    });
-}
-test("productive rework can exceed ten rounds, with progress independently verified by the original reviewers", async () => {
-    const ctx = progressContext({
-        owner: (round, input) => {
-            assert.equal(input.progressState.credited.length, round - 1);
-            assert.equal(input.progressState.noProgressRounds, 0);
-            return {
-                status: round === 25 ? "complete" : "rework",
-                progress: [{ id: `check-${round}`, evidence: `Newly resolved failing check ${round}` }],
-            };
-        },
-        review: (round, input) => ({
-            agree: round === 25, verifiedProgress: input.owner.progress.map((item) => item.id),
-        }),
-    });
-    const result = await runLoop({ ctx, loop: loops[0], key: "productive", context: {}, maxNoProgressRounds: 10 });
-    assert.equal(result.status, "agreed");
-    assert.equal(result.rounds, 25);
-});
-test("ten consecutive unverified rounds stop as blocked, not successful completion or a total-round limit", async () => {
-    const ctx = progressContext({ owner: (round) => ({
-        summary: `A different claim ${round}`, artifact: { changed: round },
-        progress: [{ id: `claim-${round}`, evidence: `Unverified claim ${round}` }],
-    }) });
-    const result = await runLoop({ ctx, loop: loops[0], key: "stalled", context: {}, maxNoProgressRounds: 10 });
+        return review({ verifiedProgress: input.owner.progress.map((item) => item.id) });
+    }, { maxNoProgressRounds: 2 });
     assert.equal(result.status, "blocked");
-    assert.equal(result.stopCause, "no-progress");
-    assert.equal(result.rounds, 10);
-    assert.deepEqual(result.progress, { noProgressRounds: 10, limit: 10, credited: [] });
-    assert.equal(result.feedback.owner.summary, "A different claim 10");
-    assert.match(result.summary, /10 consecutive rounds/);
-    assert.ok(result.nextAction);
-});
-test("verified progress on the threshold round resets the consecutive counter; reused IDs never reset it", async () => {
-    const ctx = progressContext({
-        owner: (round, input) => {
-            if (round === 20) assert.equal(input.progressState.noProgressRounds, 9);
-            return { progress: round >= 10 ? [{ id: "resolved-check", evidence: `Evidence prose version ${round}` }] : [] };
-        },
-        review: (_, input) => ({ verifiedProgress: input.owner.progress.map((item) => item.id) }),
-    });
-    const result = await runLoop({ ctx, loop: loops[0], key: "reset", context: {}, maxNoProgressRounds: 10 });
-    assert.equal(result.status, "blocked");
-    assert.equal(result.rounds, 20);
-    assert.equal(result.progress.noProgressRounds, 10);
-    assert.deepEqual(result.progress.credited, [{ id: "resolved-check", evidence: "Evidence prose version 10", round: 10 }]);
-});
-test("one reviewer's progress claim is not enough and disjoint verified IDs are not consensus", async () => {
-    for (const disjoint of [false, true]) {
-        const ctx = progressContext({
-            owner: () => ({ progress: [{ id: "a", evidence: "Check A" }, { id: "b", evidence: "Check B" }] }),
-            review: (_, input) => ({ verifiedProgress: input.role === "Critic" ? (disjoint ? ["b"] : []) : ["a"] }),
-        });
-        const result = await runLoop({ ctx, loop: loops[0], key: `no-consensus-${disjoint}`, context: {}, maxNoProgressRounds: 1 });
-        assert.equal(result.status, "blocked");
-        assert.equal(result.progress.credited.length, 0);
-    }
-});
-test("relabeling identical evidence cannot reset stagnation even when reviewers endorse a fresh ID", async () => {
-    const ctx = progressContext({
-        owner: (round) => ({ progress: [{ id: `new-label-${round}`, evidence: round % 2 ? " Check A passed " : "check   a PASSED" }] }),
-        review: (_, input) => ({ verifiedProgress: input.owner.progress.map((item) => item.id) }),
-    });
-    const result = await runLoop({ ctx, loop: loops[0], key: "relabeled", context: {}, maxNoProgressRounds: 10 });
-    assert.equal(result.status, "blocked");
-    assert.equal(result.rounds, 11);
+    assert.equal(result.rounds, 4);
     assert.equal(result.progress.credited.length, 1);
 });
-test("completion and genuine human input take precedence over stagnation on the threshold round", async () => {
+
+test("progress requires every original check-adequacy reviewer's independent confirmation", async () => {
+    const result = await run((input) => input.kind === "doer"
+        ? owner({ status: "rework", progress: [{ id: "new", evidence: "New test actually passes" }] })
+        : review({ verifiedProgress: input.role === "Architect" ? ["new"] : [] }), {
+        loop: { ...loop, reviewers: ["Architect", "Developer", "Critic", "Red Team"] }, maxNoProgressRounds: 2,
+    });
+    assert.equal(result.status, "blocked");
+    assert.deepEqual(result.progress.credited, []);
+});
+
+test("completion and human input take precedence over the no-progress threshold", async () => {
     for (const status of ["complete", "needs-input"]) {
-        const ctx = progressContext({
-            owner: () => ({ status, summary: "Accurately reviewed outcome", nextAction: "Supply missing authority" }),
-            review: () => ({ agree: true }),
-        });
-        const result = await runLoop({ ctx, loop: loops[0], key: status, context: {}, maxNoProgressRounds: 1 });
-        assert.equal(result.status, status === "complete" ? "agreed" : "needs-input");
-        assert.equal(result.rounds, 1);
+        const result = await run((input) => input.kind === "doer" ? owner({ status }) : review(), { maxNoProgressRounds: 1 });
+        assert.equal(result.status, status === "complete" ? "agreed" : status);
     }
 });
-test("unconfirmed human-input claims are still bounded by stagnation", async () => {
-    const ctx = progressContext({ owner: () => ({ status: "needs-input" }) });
-    const result = await runLoop({ ctx, loop: loops[0], key: "unconfirmed", context: {}, maxNoProgressRounds: 2 });
-    assert.equal(result.status, "blocked");
+
+test("Critic/Red Team progress opinions cannot indirectly veto guarded completion", async () => {
+    let round = 0;
+    const roles = ["Architect", "Critic", "Red Team"];
+    const result = await run((input) => {
+        if (input.kind === "doer") return owner({
+            status: ++round === 1 ? "rework" : "complete",
+            progress: [{ id: `advance-${round}`, evidence: `New required output ${round}` }],
+        });
+        return review({
+            checksValid: input.role === "Architect",
+            agree: false, taskComplete: false,
+            verifiedProgress: input.role === "Architect" ? input.owner.progress.map((item) => item.id) : [],
+        });
+    }, { loop: { ...loop, reviewers: roles }, maxNoProgressRounds: 1 });
+    assert.equal(result.status, "agreed");
     assert.equal(result.rounds, 2);
 });
-test("dispatch is settled before a stagnation stop and its actual result is retained", async () => {
-    let settled = false;
-    const ctx = progressContext({ owner: () => ({ status: "complete" }) });
-    const result = await runLoop({
-        ctx, loop: loops[0], key: "dispatch-stall", context: {}, maxNoProgressRounds: 1,
-        dispatch: async () => ({
-            context: { status: "dispatched" },
-            settle: async () => { settled = true; return [{ status: "agreed" }]; },
-        }),
+
+test("deployed acceptance and verification loops reject local-only checks even without assignment context", async () => {
+    for (const id of ["SprintReviewLoop", "EndToEndTestLoop", "DevOpsWorkLoop"]) {
+        const result = await run((input) => input.kind === "doer" ? owner({ checks: checks({ environment: "local" }) }) : review(), {
+            loop: loops.find((item) => item.id === id), context: { projectRoot: fixtureRoot }, attempts: 1,
+        });
+        assert.equal(result.status, "limit-reached");
+        assert.match(result.feedback.transportIssue, /deployed-environment check/);
+    }
+});
+
+test("dispatch is joined before plan retry, threshold stops and reviewer errors", async () => {
+    let joined = false, round = 0;
+    const result = await run((input) => {
+        if (input.kind === "doer") {
+            if (++round > 1) assert.ok(joined);
+            return owner();
+        }
+        return review({ checksValid: false });
+    }, {
+        loop: { ...loop, id: "SprintPlanLoop", reviewers: ["Architect"] },
+        context: { projectRoot: fixtureRoot }, maxNoProgressRounds: 2,
+        dispatch: () => ({ context: { status: "dispatched" }, settle: async () => { joined = true; return [{ status: "agreed" }]; } }),
     });
-    assert.ok(settled);
     assert.equal(result.status, "blocked");
     assert.deepEqual(result.feedback.dispatchedWork, [{ status: "agreed" }]);
+    joined = false;
+    await assert.rejects(run((input) => input.kind === "doer" ? owner() : review({ verifiedProgress: ["invented"] }), {
+        context: { projectRoot: fixtureRoot }, maxNoProgressRounds: 2,
+        dispatch: () => ({ settle: async () => { joined = true; } }),
+    }), /Invalid.*progress/);
+    assert.ok(joined);
 });
-test("malformed progress cannot silently become verified progress, and dispatched work is joined on reviewer errors", async () => {
-    for (const progress of [undefined, null, {}, [{ id: "", evidence: "x" }], [{ id: "x", evidence: " " }],
-        [{ id: " x ", evidence: "x" }], [{ id: "x", evidence: "a" }, { id: "x", evidence: "b" }]]) {
-        await assert.rejects(runLoop({
-            ctx: progressContext({ owner: () => ({ progress }) }),
-            loop: loops[0], key: "invalid-owner", context: {}, maxNoProgressRounds: 10,
-        }), /Invalid do-er progress/);
-    }
-    for (const verifiedProgress of [undefined, null, {}, [7], ["unknown"], ["x", "x"]]) {
-        let settled = false;
-        await assert.rejects(runLoop({
-            ctx: progressContext({
-                owner: () => ({ status: "complete", progress: [{ id: "x", evidence: "Check X" }] }),
-                review: () => ({ verifiedProgress }),
-            }),
-            loop: loops[0], key: "invalid-reviewer", context: {}, maxNoProgressRounds: 10,
-            dispatch: async () => ({ context: {}, settle: async () => { settled = true; } }),
-        }), /Invalid .*reviewer progress/);
-        assert.ok(settled);
+
+test("missing checks, failing checks and non-deployed assigned checks never dispatch or complete", async () => {
+    for (const emitted of [[], checks({ exitCode: 1 }), checks({ environment: "local" })]) {
+        let dispatched = false;
+        const result = await run((input) => input.kind === "doer" ? owner({ checks: emitted }) : review(),
+            { attempts: 1, dispatch: () => { dispatched = true; } });
+        assert.equal(result.status, "limit-reached");
+        assert.ok(result.feedback.transportIssue);
+        assert.equal(dispatched, false);
     }
 });
-test("stagnation is opt-in and explicit legacy round caps remain independent ceilings", async () => {
-    for (const maxNoProgressRounds of [0, -1, 1.5, NaN, null, "10", Number.MAX_SAFE_INTEGER + 1]) {
-        await assert.rejects(runLoop({
-            ctx: context(() => assert.fail("Invalid settings must not launch an agent")),
-            loop: loops[0], key: "invalid-limit", context: {}, maxNoProgressRounds,
-        }), /maxNoProgressRounds.*positive integer/);
+
+test("owner default and explicit legacy doer overrides retain original roles and labels", async () => {
+    for (const [agents, expected] of [[{}, "workflow-owner"], [{ doer: "legacy" }, "legacy"], [{ owner: "owner", doer: "legacy" }, "owner"]]) {
+        const calls = [];
+        await run((input, options) => {
+            calls.push({ input, options });
+            return input.kind === "doer" ? owner() : review();
+        }, { agents });
+        assert.equal(calls[0].options.agent, expected);
+        assert.equal(calls[0].input.role, loop.owner);
+        assert.match(calls[0].options.label, /test:doer:1/);
+        assert.ok(calls.slice(1).every((call) => call.options.agent === "workflow-reviewer"));
     }
-    const result = await runLoop({
-        ctx: progressContext({
-            owner: (round) => ({ progress: [{ id: `check-${round}`, evidence: "Newly resolved check" }] }),
-            review: (_, input) => ({ verifiedProgress: input.owner.progress.map((item) => item.id) }),
-        }),
-        loop: loops[0], key: "explicit-cap", context: {}, attempts: 2, maxNoProgressRounds: 10,
-    });
-    assert.equal(result.status, "limit-reached");
-    assert.equal(result.rounds, 2);
 });

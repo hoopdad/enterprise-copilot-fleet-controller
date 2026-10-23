@@ -161,6 +161,39 @@ test("new owner profiles retain historical doer attribution; read-only feedback 
     }
 });
 
+test("check reviews judge suitability without treating raw blocking claims as validated acceptance", () => {
+    for (const checksValid of [true, false]) {
+        for (const findings of [[], [{ type: "observation", summary: "No live evidence.", action: "Retain limitation." }],
+            [{ type: "blocking", summary: "Null input fails.", action: "Handle null.",
+                requirement: { path: "docs/spec.md", line: 12 }, failingCheck: "null-input", scope: "API handoff" }]]) {
+            const record = { status: "completed", workResult: { kind: "review", checksValid, findings,
+                summary: "Review submitted.", agree: true, taskComplete: true, ownerStatus: "complete" } };
+            const result = workOutcome(record);
+            assert.equal(result.title, !checksValid ? "Check suitability changes requested"
+                : findings[0]?.type === "blocking" ? "Checks suitable; blocking claims submitted"
+                    : "Checks suitable; acceptance unconfirmed");
+            assert.equal(result.tone, checksValid ? "waiting" : "error");
+            assert.match(result.summary, /assessment of check suitability, not task completion or final acceptance/);
+            assert.match(result.summary, /not runtime-verified by Studio/);
+            assert.match(result.summary, /blocking claims require runtime validation/);
+            assert.equal(outcome(record, { agent: true }).tone, result.tone);
+            if (findings.length) {
+                assert.match(result.summary, /Submitted (observation|blocking claim):/);
+                assert.match(result.summary, new RegExp(findings[0].action));
+            }
+            if (findings[0]?.type === "blocking") {
+                assert.match(result.summary, /Requirement: docs\/spec.md:12/);
+                assert.match(result.summary, /Submitted failing check: null-input/);
+                assert.match(result.summary, /Scope: API handoff/);
+            }
+        }
+    }
+    const bounded = workOutcome({ workResult: { kind: "review", checksValid: true, findings: [],
+        summary: "x".repeat(20_000) } });
+    assert.equal(bounded.summary.length, 12_000);
+    assert.match(bounded.summary, /not runtime-verified by Studio/);
+});
+
 test("completed governance shows its retained outcome without becoming an acceptance vote", () => {
     for (const [stage, title] of [["triage", "Feedback reconciled"], ["scope-advice", "Scope advice recorded"],
         ["scope-decision", "Scope decision recorded"]]) {

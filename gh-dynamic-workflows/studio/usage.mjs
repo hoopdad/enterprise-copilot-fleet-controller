@@ -65,6 +65,23 @@ function governanceResult(result) {
     return null;
 }
 
+function projectCheckReview(result) {
+    if (typeof result?.checksValid !== "boolean" || !text(result.feedback) ||
+        !entries(result.findings, ["type", "summary", "action"]) ||
+        result.findings.some((item) => !["observation", "blocking"].includes(item.type))) return null;
+    return {
+        checksValid: result.checksValid,
+        summary: result.feedback.slice(0, 12_000),
+        findings: result.findings.slice(0, 100).map((item) => ({
+            type: item.type, summary: item.summary.slice(0, 4000), action: item.action.slice(0, 4000),
+            ...(text(item.requirement?.path) && Number.isSafeInteger(item.requirement.line) && item.requirement.line > 0
+                ? { requirement: { path: item.requirement.path.slice(0, 1000), line: item.requirement.line } } : {}),
+            ...(text(item.failingCheck) ? { failingCheck: item.failingCheck.slice(0, 1000) } : {}),
+            ...(text(item.scope) ? { scope: item.scope.slice(0, 1000) } : {}),
+        })),
+    };
+}
+
 function emptyState(stat) {
     return {
         dev: stat.dev, ino: stat.ino, size: 0, mtimeMs: null, offset: 0, discarding: false,
@@ -107,11 +124,16 @@ function ingest(state, line) {
             }
             return;
         }
-        const review = typeof result?.agree === "boolean" && typeof result.feedback === "string";
+        const checkReview = projectCheckReview(result);
+        const review = result?.checksValid === undefined && typeof result?.agree === "boolean" && typeof result.feedback === "string";
         const work = ["complete", "rework", "needs-replan", "needs-input"].includes(result?.status) && typeof result.summary === "string";
         const governance = governanceResult(result);
-        if (!review && !work && !governance) return;
+        if (!checkReview && !review && !work && !governance) return;
         const card = projectCard(result.workCard, state);
+        if (checkReview) {
+            state.results.set(event.agentId, { kind: "review", ...checkReview, names: [], assignments: [], card });
+            return;
+        }
         if (!review && !work) {
             state.results.set(event.agentId, { kind: "governance", ...governance,
                 summary: governance.summary.slice(0, 12_000), names: [], card });
@@ -297,9 +319,11 @@ export function agentWork(state, runId, agent, agents = []) {
     }
     return { taskTitle, taskCard, taskCardSource: result.card ? "Structured final agent response"
         : taskCard ? "Recorded assignment" : null, workResult: {
-        kind: result.kind, agree: result.agree, status: result.status, summary,
+        kind: result.kind, ...(typeof result.checksValid === "boolean" ? {} : { agree: result.agree }), status: result.status, summary,
         ...(result.kind === "governance" ? { stage: result.stage } : {}),
-        ...(result.kind === "review" ? { taskComplete: result.taskComplete, ownerStatus: owner ? resultFor(owner)?.status ?? null : null } : {}),
+        ...(result.kind === "review" && typeof result.checksValid === "boolean"
+            ? { checksValid: result.checksValid, findings: result.findings }
+            : result.kind === "review" ? { taskComplete: result.taskComplete, ownerStatus: owner ? resultFor(owner)?.status ?? null : null } : {}),
         source: "Structured final agent response",
     } };
 }
