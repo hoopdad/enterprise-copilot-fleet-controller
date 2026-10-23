@@ -38,6 +38,8 @@ function outcome(key, rounds) {
         artifact: { DeveloperWork: { path: `contracts/${key}.md`, commit: "abc123",
             liveReady: false, adapterBinding: null, limitations: ["Wire and independent quality remain unproved."] } },
         checks: [{ id: "contract", exitCode: 0, evidence: "checks.log" }],
+        correctionAssessments: [{ correctionId: "Architect:1", verdict: "refuted",
+            reason: "The existing endpoint already responds.", evidence: "checks.log" }],
         reviews: [{ role: "Architect", checksValid: true, findings: [],
             feedback: "CURRENT-REVIEW-" + "x".repeat(1000) }],
         governanceHistory: Array.from({ length: rounds }, () => ({
@@ -66,6 +68,7 @@ test("additional historical rounds do not expand the integration task packet; ex
     assert.equal(packet.dependencies[0].artifact.DeveloperWork.adapterBinding, null);
     assert.equal(packet.dependencies[0].reviews[0].checksValid, true);
     assert.equal(packet.dependencies[0].checks[0].id, "contract");
+    assert.deepEqual(packet.dependencies[0].correctionAssessments, before[0].correctionAssessments);
     assert.deepEqual(packet.request, common.request);
     assert.equal(packet.priorDispositions, undefined);
     assert.doesNotMatch(JSON.stringify(packet), /disposition|governanceHistory/);

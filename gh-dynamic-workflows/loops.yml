@@ -37,9 +37,9 @@ roles:
   - name: Stakeholder
     description: "Provides input, feedback, and strategic direction"
   - name: Critic
-    description: "Reviews requirement-to-outcome and outcome-to-requirement traceability and completion-check suitability. A finding blocks only with a docs/requirements line citation or a failing emitted check; otherwise it is a non-blocking observation. Untraceable additions close with 'remove it' only when backed by such evidence."
+    description: "Reviews requirement-to-outcome and outcome-to-requirement traceability and completion-check suitability. Every role's mandatory corrections need an original user requirement or approved amendment citation and a falsifiable failure reason; demonstrated defects also need evidence. Everything else is optional. Untraceable additions close with 'remove it' only when grounded this way."
   - name: Red Team
-    description: "Reviews infrastructure configurations and application-library CVEs only. Cite the affected configuration or library/version and CVE. Findings block only with a docs/requirements line citation or a failing emitted check; otherwise they are non-blocking observations, not invented controls."
+    description: "Reviews infrastructure configurations and application-library CVEs only. Cite the affected configuration or library/version and CVE. Like every role, mandatory corrections need an original user requirement or approved amendment citation and a falsifiable failure reason; demonstrated defects also need evidence. Everything else is optional, not invented controls."
 
 workflows:
   ReleaseLoop:
@@ -241,7 +241,7 @@ workflows:
               - "SprintPlan"
               - "Scripts in scripts/"
             outputs:
-              - "Additional backlog items in ReleasePlan for new findings or blocked work"
+              - "Additional backlog items in ReleasePlan only for original requirements, approved amendments or demonstrated defects preventing them; other suggestions stay optional"
             owner: "Product Owner"
             reviewers:
               - "Scrum Master"
@@ -259,7 +259,7 @@ workflows:
               - "Error and communication metrics"
               - "Process observations"
             outputs:
-              - "Improvements for Architecture, UserExperience, and ReleasePlan artifacts"
+              - "Optional improvements for Architecture, UserExperience, and ReleasePlan artifacts; mandatory corrections require user-requirement or approved-amendment grounding"
               - "Documented retrospective inputs and decisions"
             owner: "Product Owner"
             reviewers:

@@ -8,6 +8,7 @@ import { workCardSchema, taskCardsSchema, validateWorkCard, validateTaskCards, w
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const text = (value) => typeof value === "string" && !!value.trim();
 const executeFile = promisify(execFile);
+export const CORRECTION_CONTRACT = "requirement-grounded-v1";
 export const checkSchema = {
     type: "object", additionalProperties: false,
     required: ["id", "kind", "command", "requirement", "environment", "exitCode", "evidence"],
@@ -23,17 +24,33 @@ const findingFields = {
     summary: { type: "string", minLength: 1 }, action: { type: "string", minLength: 1 },
     scope: { type: "string", enum: ["infrastructure-config", "dependency-cve"] },
 };
+const citationSchema = {
+    type: "object", additionalProperties: false, required: ["path", "line"],
+    properties: { path: { type: "string", minLength: 1 }, line: { type: "integer", minimum: 1 } },
+};
 export const findingSchema = { oneOf: [
     { type: "object", additionalProperties: false, required: ["type", "summary", "action"],
         properties: { type: { const: "observation" }, ...findingFields } },
-    { type: "object", additionalProperties: false, required: ["type", "summary", "action"],
+    ...["original-requirement", "approved-amendment", "demonstrated-defect"].map((basis) => ({
+        type: "object", additionalProperties: false,
+        required: ["type", "summary", "action", "basis", "requirement", "reason",
+            ...(basis === "demonstrated-defect" ? ["evidence"] : [])],
         properties: { type: { const: "blocking" }, ...findingFields,
-            requirement: { type: "object", additionalProperties: false, required: ["path", "line"],
-                properties: { path: { type: "string", pattern: "^docs/requirements/.+" }, line: { type: "integer", minimum: 1 } } },
-            failingCheck: { type: "string", minLength: 1 } },
-        oneOf: [{ type: "object", required: ["requirement"], not: { type: "object", required: ["failingCheck"] } },
-            { type: "object", required: ["failingCheck"], not: { type: "object", required: ["requirement"] } }] },
+            basis: { const: basis }, requirement: citationSchema, reason: { type: "string", minLength: 1 },
+            ...(basis === "demonstrated-defect" ? {
+                evidence: { type: "string", minLength: 1 }, failingCheck: { type: "string", minLength: 1 },
+            } : {}) },
+    })),
 ] };
+const correctionAssessmentSchema = {
+    type: "object", additionalProperties: false,
+    required: ["correctionId", "verdict", "reason", "evidence"],
+    properties: {
+        correctionId: { type: "string", minLength: 1 },
+        verdict: { type: "string", enum: ["confirmed", "refuted", "unresolved"] },
+        reason: { type: "string", minLength: 1 }, evidence: { type: "string" },
+    },
+};
 export const ownerSchema = {
     type: "object", required: ["status", "summary", "artifact", "workCard", "checks"],
     properties: {
@@ -41,6 +58,7 @@ export const ownerSchema = {
         summary: { type: "string" }, artifact: { type: "object" }, nextAction: { type: "string" },
         limitation: { type: "string" }, workCard: workCardSchema, taskCards: taskCardsSchema,
         checks: { type: "array", items: checkSchema },
+        correctionAssessments: { type: "array", items: correctionAssessmentSchema },
         progress: { type: "array", items: { type: "object", required: ["id", "evidence"],
             properties: { id: { type: "string", minLength: 1 }, evidence: { type: "string", minLength: 1 } } } },
     },
@@ -64,17 +82,18 @@ async function sourceFile(root, relative) {
 }
 
 async function requirementLine(root, requirement) {
+    if (!object(requirement) || !text(requirement.path) || path.isAbsolute(requirement.path) ||
+        requirement.path.split(/[\\/]/).includes("..") ||
+        !Number.isSafeInteger(requirement.line) || requirement.line < 1) return false;
     const base = await realpath(root);
-    const file = await realpath(path.resolve(base, requirement.path));
-    if (!file.startsWith(path.join(base, "docs", "requirements") + path.sep)) return false;
     const lines = (await sourceFile(base, requirement.path)).split(/\r?\n/);
     const current = lines[requirement.line - 1];
     if (!current?.trim()) return false;
-    // Fixed read-only Git operations verify authority; emitted check commands never run here.
+    // Git verifies citation integrity, not user authorship or semantic entailment.
     const git = async (args) => (await executeFile("git", ["--no-pager", "-C", base, ...args],
         { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 })).stdout;
     const prefix = (await git(["rev-parse", "--show-prefix"])).replace(/[\r\n]+$/, "");
-    const committed = await git(["show", `HEAD:${prefix}${requirement.path}`]);
+    const committed = await git(["show", `HEAD:${prefix}${requirement.path.replaceAll("\\", "/")}`]);
     return committed.split(/\r?\n/)[requirement.line - 1] === current;
 }
 
@@ -112,7 +131,7 @@ export async function verifyChecks(checks, context = {}) {
 }
 
 export async function normalizeFindings(findings, { role, checks = [], projectRoot } = {}) {
-    return Promise.all((Array.isArray(findings) ? findings : []).map(async (finding) => {
+    return Promise.all((Array.isArray(findings) ? findings : []).map(async (finding, index) => {
         const normalized = {
             type: "observation", summary: text(finding?.summary) ? finding.summary : "Unsupported finding",
             action: text(finding?.action) ? finding.action : "No blocking action established.",
@@ -120,23 +139,44 @@ export async function normalizeFindings(findings, { role, checks = [], projectRo
         };
         if (!object(finding) || finding.type !== "blocking" || !text(finding.summary) || !text(finding.action) ||
             (role === "Red Team" && !["infrastructure-config", "dependency-cve"].includes(finding.scope))) return normalized;
-        const requirement = finding.requirement;
-        const hasRequirement = requirement !== undefined, hasCheck = finding.failingCheck !== undefined;
-        if (hasRequirement === hasCheck) return normalized;
-        if (hasCheck && checks.some((check) => text(check.id) && check.id === finding.failingCheck &&
-            Number.isInteger(check.exitCode) && check.exitCode !== 0)) {
-            return { ...normalized, type: "blocking", failingCheck: finding.failingCheck };
-        }
-        if (object(requirement) && /^docs\/requirements\/.+/.test(requirement.path) &&
-            !requirement.path.split("/").includes("..") && Number.isInteger(requirement.line) && requirement.line > 0) {
-            try {
-                if (await requirementLine(projectRoot, requirement)) {
-                    return { ...normalized, type: "blocking", requirement };
-                }
-            } catch { /* Missing or inaccessible citations are observations, not authority. */ }
-        }
-        return normalized;
+        if (!["original-requirement", "approved-amendment", "demonstrated-defect"].includes(finding.basis) ||
+            !text(finding.reason)) return normalized;
+        const defect = finding.basis === "demonstrated-defect";
+        if (!defect && (finding.failingCheck !== undefined || finding.evidence !== undefined)) return normalized;
+        if (finding.failingCheck !== undefined && !checks.some((check) =>
+            text(check.id) && check.id === finding.failingCheck &&
+            Number.isInteger(check.exitCode) && check.exitCode !== 0 && check.evidence === finding.evidence)) return normalized;
+        try {
+            if (!(await requirementLine(projectRoot, finding.requirement))) return normalized;
+            if (defect && (!text(finding.evidence) || !(await sourceFile(projectRoot, finding.evidence)).trim())) return normalized;
+        } catch { return normalized; /* Missing or inaccessible evidence never establishes authority. */ }
+        return { ...normalized, type: "blocking", correctionId: `${role}:${index + 1}`,
+            basis: finding.basis, requirement: finding.requirement, reason: finding.reason,
+            ...(defect ? { evidence: finding.evidence } : {}),
+            ...(finding.failingCheck !== undefined ? { failingCheck: finding.failingCheck } : {}) };
     }));
+}
+
+async function verifyCorrectionAssessments(assessments, feedback, root) {
+    const corrections = (feedback?.reviews ?? []).flatMap((review) =>
+        review.findings.filter((finding) => finding.type === "blocking"));
+    if (assessments === undefined && !corrections.length) return;
+    if (!Array.isArray(assessments) || assessments.length !== corrections.length ||
+        new Set(assessments.map((item) => item?.correctionId)).size !== assessments.length) {
+        throw new Error("Correction assessments must address every previous supported correction exactly once");
+    }
+    for (const item of assessments) {
+        if (!object(item) || !corrections.some((finding) => finding.correctionId === item.correctionId) ||
+            !["confirmed", "refuted", "unresolved"].includes(item.verdict) || !text(item.reason) ||
+            typeof item.evidence !== "string" || (item.verdict !== "unresolved" && !text(item.evidence))) {
+            throw new Error("Invalid correction assessment; give a confirmed/refuted/unresolved verdict, reason and inspectable evidence");
+        }
+        if (item.evidence) {
+            try {
+                if (!(await sourceFile(root, item.evidence)).trim()) throw new Error("Empty evidence");
+            } catch { throw new Error(`Correction assessment ${item.correctionId} needs readable repository-local evidence`); }
+        }
+    }
 }
 
 const ownerInstructions = [
@@ -151,8 +191,9 @@ const ownerInstructions = [
     "Use artifact keys matching YAML outputs. ReleasePlan contains sprints with unique ids. SprintPlan contains tasks with id,title,kind (ui/developer/designer/devops),owner,dependsOn,doneWhen,exclusions,handoff.",
     "Deployment comes first: the first sprint starts with walkingSkeleton:true,kind:devops,owner:DevOps Engineer,dependsOn:[],doneWhen requiring a deployed pass, and an explicit deployment handoff. The skeleton owner must emit actual azd up/provision/deploy command evidence plus a separate successful deployed-probe check; merely mentioning azd in doneWhen/handoff is not deployment. Every other first-sprint task transitively depends on it. Include exclusiveResources for shared deployment/configuration state.",
     "EndToEndTestLoop and DevOpsWorkLoop run after every accepted assignment, before its dependents. Failing E2E or deployment is not successful completion, even when accurately reported.",
-    "Read normalized feedback directly; observations are optional and never imply scope expansion. Fix evidence-backed blockers or failing/unsuitable checks. No Scrum triage, Architect advice, Product Owner decision or disposition ledger runs between rounds.",
-    "Reviewer feedback prose is audit commentary, not an additional mandatory action list. accepted:true findings are observations even if prose demands work or legacy votes are false. Mandatory corrections come only from supported blocking findings, failing/missing owner checks or transport issues, and checksValid:false adequacy reviews from roles other than Critic/Red Team. Never promote uncited critic/security prose into a requirement.",
+    "Read normalized feedback directly; observations are optional and never imply scope expansion. Fix supported requirement failures and actual failing/missing execution checks. No Scrum triage, Architect advice, Product Owner decision or disposition ledger runs between rounds.",
+    "Every mandatory correction from any role, including Architect, Product Owner and Scrum Master, must cite an original user requirement, an explicitly approved amendment, or a demonstrated defect preventing that requirement, and explain exactly why the current work fails it. A committed agent-written requirement or failing invented test alone is not user authority. Reviewer feedback prose and checksValid:false alone are optional commentary, not mandatory work. Preserve actual execution/permission failures; optional suggestions never authorize scope, new tests or replanning.",
+    "On retry assess each previous supported correction in correctionAssessments:[{correctionId,verdict:confirmed|refuted|unresolved,reason,evidence}]. Use its supplied correctionId exactly once. Confirm or refute with repository-relative source/log evidence; unresolved may use empty evidence but must explain the uncertainty. Do not call uncertainty proof, waive a failing required check, or claim completion while a confirmed failure remains. The original reviewers verify your reasoning in their next existing review; no new judge or approval stage is added.",
     "Before ending every turn that changes files, including rework or needs-input, commit your own intended changes before reviewers inspect them. Never commit secrets, generated junk or another person's work. Report branch and commit IDs; if committing fails, report the problem, not complete.",
     "Inspect Git status first and preserve concurrent changes. Stage explicit owned paths and use path-scoped git commit --only in shared checkouts. Do not switch branches underneath active agents, discard work, force-push or remove Git locks. Keep task commits available for integration.",
     "Use request.git.featureBranch when supplied. Include observed model/usage/elapsed metadata in commit messages only when actually available; never invent counters.",
@@ -163,12 +204,13 @@ const reviewInstructions = [
     "Independently inspect actual source, command logs/result files and Git commits, not just owner summaries. Confirm checks actually exercise completeWhen, requirements and doneWhen on the claimed environment. Return checksValid:boolean for check suitability and evidence credibility, not a completion vote.",
     "For an accepted scope change, inspect actual authority and the Git commit: docs/requirements edits and the corresponding regression test must be in the same committed change. Declined proposals must never land. Assess the regression check's suitability; do not substitute a disposition ledger or treat observations as authorization.",
     "A nonempty evidence file does not prove execution. Verify the actual owner-tool command output, exit code and claimed environment against source/commits; do not accept fabricated logs or claim cryptographic execution verification from this runtime.",
-    "Return findings as a discriminated union: {type:observation,summary,action} OR {type:blocking,summary,action,requirement:{path:docs/requirements/...,line:positive integer}} OR {type:blocking,summary,action,failingCheck:id}. Cite exactly one source. Requirement lines must resolve inside projectRoot/docs/requirements and match the committed HEAD line; dirty/new fabricated lines cannot block. FailingCheck must name an emitted check with nonzero exitCode. Unsupported claims become observations.",
-    "Critic and Red Team can block ONLY with a valid structured finding citing a requirement line or failing check. Raw agree:false, taskComplete:false, prose and checksValid:false without a supported blocker cannot gate these roles. Other reviewers assess check adequacy using checksValid, not substitute completion votes.",
-    "Critic: is everything required present and everything present required? Missing work or untraceable additions need a real requirement line or failing check to block; otherwise record an observation. Requirements and tests are the scope ledger.",
+    "Return {type:observation,summary,action} for optional suggestions. Every blocking finding from EVERY role requires {type:blocking,summary,action,basis:original-requirement|approved-amendment|demonstrated-defect,requirement:{path,line},reason}. Cite the original user requirement or explicit approval directly in an existing repository-local source, with a positive committed HEAD line. reason states a falsifiable claim of how the work fails that requirement, not a preference. demonstrated-defect additionally requires evidence: a nonempty repository-relative source/log file showing the defect prevents the cited requirement; optional failingCheck must name an emitted failed check whose evidence matches. A failing check alone is not authority.",
+    "All roles, including Architect, Product Owner, Scrum Master, Critic and Red Team, can block ONLY with a supported structured correction. Raw agree:false, taskComplete:false, prose and checksValid:false alone cannot gate any role. Keep checksValid as diagnostic assessment; when checks omit a required behavior or are not credible, cite the actual requirement and explain the specific failure in a blocking finding. Unsupported or unresolved opinion stays optional.",
+    "Independently verify correctionAssessments in this same review. Architect checks technical reasoning; Product Owner checks requirement entailment where already assigned. Do not summon absent roles or add an arbitration stage. Withdraw refuted claims; uphold only a currently demonstrated requirement failure with citation, reason and evidence. An owner's assertion or unresolved verdict is not a waiver of actual failing required checks.",
+    "Critic: is everything required present and everything present required? Missing work or untraceable additions need the same original-requirement/approved-amendment/defect grounding as every other role; otherwise record an observation. Requirements and tests are the scope ledger.",
     "Red Team: findings are limited to infrastructure-config or dependency-cve; include scope with one of those values. Review infrastructure configurations and application library CVEs only, not general product security or invented governance controls.",
     "Observations never block and there is no zero-findings requirement. Pending parallel reviewer responses are not unmet owner criteria. Preserve human authorization boundaries.",
-    "A requirement citation is not semantic proof by itself: verify that its actual committed line applies to this assignment and entails the claimed correction. Unrelated headings, descriptive prose and invented interpretations are observations.",
+    "A requirement citation is not semantic proof or proof of user authorship: inspect the original request/explicit approval and verify the cited line applies to this assignment and entails the correction. Committing an agent's interpretation does not authorize it. Unrelated headings, descriptive prose, speculative defects and invented interpretations are observations.",
     "Keep review read-only. Inspect actual Git commits for changed files and require credible logs; do not fabricate missing evidence or waive deployed assignment checks. No dispositions or governance triage.",
 ];
 
@@ -187,6 +229,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
         for (let attempt = 1; attempts === undefined || attempt <= attempts; attempt++) {
             ctx.signal?.throwIfAborted();
             ctx.log(`${loop.name}: ${loop.owner}, round ${attempt}`);
+            const pendingCorrections = feedback?.reviews.some((review) => review.findings.some((finding) => finding.type === "blocking"));
             const owner = await scheduleAgent("doer", () => ctx.agent(JSON.stringify({
                 kind: "doer", role: loop.owner, loop, context, feedback,
                 ...(guarded ? { progressState: progressState() } : {}),
@@ -197,11 +240,13 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     ...(dispatch ? ["Plan completion requires dispatch-ready assignments, not completed implementation. Use rough estimatedMinutes critical paths and bounded contract handoffs. Match exclusiveResources for mutable contention, not merely file overlap."] : []),
                     ...(context.scopeRevision ? ["Resolve only the affected scoped amendment with existing Architect/Scrum Master loops. Preserve unrelated accepted work and requirements; use a separate replacement graph with internal dependency IDs."] : []),
                 ],
-            }), { agent: agents.owner ?? agents.doer ?? "workflow-owner", label: `${key}:doer:${attempt}`, schema: doerSchema }), priority);
+            }), { agent: agents.owner ?? agents.doer ?? "workflow-owner", label: `${key}:doer:${attempt}`,
+                schema: pendingCorrections ? { ...doerSchema, required: [...doerSchema.required, "correctionAssessments"] } : doerSchema }), priority);
             if (!object(owner) || !["complete", "rework", "needs-replan", "needs-input"].includes(owner.status) ||
                 typeof owner.summary !== "string" || !object(owner.artifact)) throw new Error(`Invalid do-er response in ${loop.id}; no completion was recorded`);
             validateWorkCard(owner.workCard, `${loop.id} owner`);
             if (!Array.isArray(owner.checks)) throw new Error(`Invalid do-er checks in ${loop.id}; no completion was recorded`);
+            await verifyCorrectionAssessments(owner.correctionAssessments, feedback, context.projectRoot);
             if (guarded && (!Array.isArray(owner.progress) || owner.progress.some((item) =>
                 !object(item) || !text(item.id) || item.id !== item.id.trim() || !text(item.evidence)) ||
                 new Set(owner.progress.map((item) => item.id)).size !== owner.progress.length)) throw new Error(`Invalid do-er progress in ${loop.id}; no progress was credited`);
@@ -236,8 +281,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     if (guarded && (!Array.isArray(review.verifiedProgress) || review.verifiedProgress.some((id) => !owner.progress.some((item) => item.id === id)) ||
                         new Set(review.verifiedProgress).size !== review.verifiedProgress.length)) throw new Error(`Invalid ${role} reviewer progress in ${loop.id}; no progress was credited`);
                     const findings = await normalizeFindings(review.findings, { role, checks: owner.checks, projectRoot: context.projectRoot });
-                    const accepted = !findings.some((finding) => finding.type === "blocking") &&
-                        (["Critic", "Red Team"].includes(role) || review.checksValid);
+                    const accepted = !findings.some((finding) => finding.type === "blocking");
                     return { role, checksValid: review.checksValid, feedback: review.feedback, findings,
                         ...(guarded ? { verifiedProgress: review.verifiedProgress } : {}),
                         ...(review.workCard ? { workCard: review.workCard } : {}), accepted };
@@ -246,6 +290,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
             } catch (error) { await dispatched?.settle(); throw error; }
             const accepted = reviews.every((review) => review.accepted);
             const result = { artifact: owner.artifact, summary: owner.summary, checks: owner.checks, reviews, rounds: attempt,
+                ...(owner.correctionAssessments ? { correctionAssessments: owner.correctionAssessments } : {}),
                 ...(owner.workCard ? { workCard: owner.workCard } : {}),
                 ...(text(owner.limitation) ? { limitation: owner.limitation } : {}) };
             if (owner.status === "needs-input") {

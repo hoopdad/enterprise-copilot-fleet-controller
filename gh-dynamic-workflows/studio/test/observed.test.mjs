@@ -165,14 +165,16 @@ test("check reviews judge suitability without treating raw blocking claims as va
     for (const checksValid of [true, false]) {
         for (const findings of [[], [{ type: "observation", summary: "No live evidence.", action: "Retain limitation." }],
             [{ type: "blocking", summary: "Null input fails.", action: "Handle null.",
-                requirement: { path: "docs/spec.md", line: 12 }, failingCheck: "null-input", scope: "API handoff" }]]) {
+                requirement: { path: "docs/spec.md", line: 12 }, failingCheck: "null-input", scope: "API handoff",
+                basis: "demonstrated-defect", reason: "Null input prevents the required response.", evidence: "null.log" }]]) {
             const record = { status: "completed", workResult: { kind: "review", checksValid, findings,
                 summary: "Review submitted.", agree: true, taskComplete: true, ownerStatus: "complete" } };
             const result = workOutcome(record);
-            assert.equal(result.title, !checksValid ? "Check suitability changes requested"
-                : findings[0]?.type === "blocking" ? "Checks suitable; blocking claims submitted"
+            assert.equal(result.title, findings[0]?.type === "blocking" ? "Blocking claims submitted; validation pending"
+                : !checksValid ? "Check concerns recorded; no blocking claim"
                     : "Checks suitable; acceptance unconfirmed");
-            assert.equal(result.tone, checksValid ? "waiting" : "error");
+            assert.equal(result.tone, "waiting");
+            assert.match(result.summary, /alone is diagnostic, not a mandatory correction for any role/);
             assert.match(result.summary, /assessment of check suitability, not task completion or final acceptance/);
             assert.match(result.summary, /not runtime-verified by Studio/);
             assert.match(result.summary, /blocking claims require runtime validation/);
@@ -185,6 +187,9 @@ test("check reviews judge suitability without treating raw blocking claims as va
                 assert.match(result.summary, /Requirement: docs\/spec.md:12/);
                 assert.match(result.summary, /Submitted failing check: null-input/);
                 assert.match(result.summary, /Scope: API handoff/);
+                assert.match(result.summary, /Basis: demonstrated-defect/);
+                assert.match(result.summary, /Failure reason: Null input/);
+                assert.match(result.summary, /Submitted evidence: null.log/);
             }
         }
     }
@@ -192,6 +197,15 @@ test("check reviews judge suitability without treating raw blocking claims as va
         summary: "x".repeat(20_000) } });
     assert.equal(bounded.summary.length, 12_000);
     assert.match(bounded.summary, /not runtime-verified by Studio/);
+});
+
+test("owner correction judgments remain visible without becoming independent acceptance", () => {
+    const displayed = workOutcome({ workResult: { status: "rework", summary: "The correction is not established.",
+        correctionAssessments: [{ correctionId: "Architect:1", verdict: "unresolved",
+            reason: "No reproduction establishes a defect.", evidence: "" }] } });
+    assert.match(displayed.summary, /Owner assessment Architect:1: unresolved/);
+    assert.match(displayed.summary, /require independent verification by the existing reviewers/);
+    assert.equal(displayed.tone, "waiting");
 });
 
 test("completed governance shows its retained outcome without becoming an acceptance vote", () => {

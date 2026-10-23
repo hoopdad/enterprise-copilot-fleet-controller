@@ -56,14 +56,14 @@ and a corresponding regression test, within existing user authority. Declined
 proposals never enter this ledger. No reviewer can grant additional permissions;
 missing authority or credentials uses the ordinary `needs-input` path.
 
-Critic and Red Team findings block only when grounded in either a specific
-`docs/requirements` file:line or a failing check emitted by the owner. Unsupported
-suggestions, including claims that an addition is unnecessary without either
-anchor, are nonblocking in both report schema and runtime even if raw `agree`
-is false. Red Team reviews only infrastructure configuration and application-
-library CVEs; a CVE finding identifies the CVE, library and affected version.
-Reviewers remain read-only and inspect the ledger, implementation and emitted
-evidence rather than inventing new acceptance criteria.
+Every role's mandatory corrections must identify an original user requirement,
+an explicitly approved amendment, or a demonstrated defect preventing that
+requirement, with a citation and a falsifiable reason why the current work fails.
+Everything else stays optional, including Architect, Product Owner and Scrum
+Master suggestions. Committed agent interpretations and newly invented failing
+tests do not create user authority. Red Team remains limited to infrastructure
+configuration and application-library CVEs, identifying the affected library,
+version and CVE. Reviewers remain read-only; no new role or approval stage is added.
 
 Do-er report: `{status:"complete"|"rework"|"needs-replan"|"needs-input",summary:string,artifact:object,workCard:object,checks:array}`.
 An optional `nextAction` can identify the exact decision needed for human input.
@@ -82,24 +82,61 @@ also requires a passing deployed check; local checks alone cannot complete it.
 
 Reviewer reports require `{feedback,workCard,checksValid:boolean,findings}`; `agree`
 is not a required field or a completion vote.
-`findings` are discriminated by `type:"blocking"|"observation"`. A blocking finding
-supplies exactly one anchor: `requirement:{path,line}` identifying a
-`docs/requirements` location, or `failingCheck` identifying a failed emitted
-check. All findings require `summary` and `action`; requirement line numbers
-are positive integers and `failingCheck` is the emitted check ID.
-Requirement citations must resolve inside `projectRoot/docs/requirements`;
-symlink escapes are rejected even when they target another repository directory.
-The cited nonempty working-tree line must match committed `HEAD` at the same
-path and line number. New or dirty fabricated requirement lines normalize to
-observations rather than blocking acceptance. Verification uses fixed read-only
-Git arguments, never emitted check commands or shell evaluation.
-Unsupported suggestions use `type:"observation"`. Red Team findings require
-`scope:"infrastructure-config"|"dependency-cve"`; dependency CVE findings identify
-the CVE, library and affected version.
-`checksValid` assesses whether checks are suitable
-for the requirements and their results actually verified, not a subjective
-`taskComplete` vote. Unsupported Critic/Red Team findings cannot block via raw
-disagreement. Owner `rework` is never promoted to completion by a reviewer.
+`findings` discriminate `type:"blocking"|"observation"`. Every finding requires
+`summary` and `action`. Blocking findings additionally require:
+
+- `basis:"original-requirement"|"approved-amendment"|"demonstrated-defect"`.
+- `requirement:{path,line}` citing the original request or explicit approval
+  directly, and `reason` explaining the specific, falsifiable failure.
+- For `demonstrated-defect`, `evidence`: a readable nonempty repository-relative
+  source/log showing how the defect prevents the cited requirement. Optional
+  `failingCheck` must identify an emitted nonzero-exit check with that same evidence.
+
+Citation paths may identify existing original request/approval files outside
+`docs/requirements`; no duplicate authority ledger is needed. They must remain
+inside projectRoot without traversal or symlink escapes, and their positive,
+nonempty line must match committed `HEAD`. New/dirty citations, missing reasons
+and unsupported defects normalize to observations. Fixed read-only Git commands
+verify citation integrity, **not** user authorship, execution or semantic truth.
+The existing owner and reviewers must inspect the actual request/approval and
+judge whether the cited text entails the correction; an agent's committed
+interpretation is not approval.
+
+`checksValid` remains diagnostic for suitability and credibility. It cannot
+block **any** role without a supported structured finding. Explain an omitted
+required behavior or fabricated execution against the actual requirement in a
+finding instead of using a bare false vote. Raw votes and feedback prose do not
+create mandatory work. Red Team findings retain their required
+`scope:"infrastructure-config"|"dependency-cve"`. Actual missing/failing execution
+checks, deployment checks, permission boundaries and owner `rework` still
+prevent completion; optional suggestions do not waive them.
+
+The runtime assigns supported findings a `correctionId` such as `Architect:1`.
+On the next existing do-er turn, `correctionAssessments` must address every
+previous supported correction exactly once:
+
+```json
+{
+  "correctionAssessments": [{
+    "correctionId": "Architect:1",
+    "verdict": "refuted",
+    "reason": "The existing endpoint and probe already cover the requested response.",
+    "evidence": "checks/health-response.log"
+  }]
+}
+```
+
+This is a response fragment, not a full owner report. Verdicts are `confirmed`,
+`refuted` or `unresolved`; confirmed/refuted judgments require inspectable
+repository-relative evidence. Unresolved may leave evidence empty but must
+explain the uncertainty. Missing, duplicate, invented or malformed assessments
+fail explicitly. The original reviewers verify the owner's reasoning in the
+next existing review, withdraw refuted claims and uphold only currently
+supported failures. Architect checks technical reasoning and Product Owner
+checks requirement entailment where already assigned; absent roles are not
+summoned. Unresolved opinion is not a mandatory correction, and an owner
+refutation is not a waiver of an actual failing required check. Assessments
+remain in outcomes, handoffs and Studio alongside the submitted claims.
 
 All newly requested owner and reviewer reports require a
 `workCard` using `work-cards.mjs`'s shared schema. Historical records may omit it;
@@ -281,8 +318,9 @@ useful evidence, not successful completion. Other application results
 include `needs-input`, `limit-reached` and dependency `not-run`; errors remain
 errors. Check the result as well as the SDK envelope.
 
-The engine identity is `yaml-loops-v2`. A run-version marker distinguishes
-compatible runs; existing unversioned context history is rejected. Prior
+The engine identity is `yaml-loops-v2` with correction contract
+`requirement-grounded-v1` in the run marker. Older v2 correction contracts and
+unversioned context history are rejected without modifying old journals. Prior
 `yaml-loops-v1` accepted journal steps cannot bypass new checks or replay as v2
 acceptance: preserve them as history and start a new run after adoption. Retired `.delivery-runs`
 native journals also remain historical, not migration/replay input.

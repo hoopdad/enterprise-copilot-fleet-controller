@@ -1,7 +1,7 @@
 import path from "node:path";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { definition as installedDefinition, loadWorkflow, flattenLoops } from "./loop-source.mjs";
-import { runLoop } from "./lab-loops.mjs";
+import { runLoop, CORRECTION_CONTRACT } from "./lab-loops.mjs";
 import { validateWorkCard } from "./work-cards.mjs";
 import { archiveContext, documentContext, historyLocation, outcomeContext, outcomeIndex } from "./task-context.mjs";
 import { createAgentScheduler, createResourceScheduler, criticalPathPriorities, scheduleTasks } from "./scheduling.mjs";
@@ -22,7 +22,9 @@ async function engineHistory(history) {
     const marker = path.join(directory, "engine.json");
     const validateMarker = async () => {
         const recorded = JSON.parse(await readFile(marker, "utf8"));
-        if (recorded.engine !== ENGINE) throw new Error("This run uses an older workflow engine. Preserve its history and explicitly start a new yaml-loops-v2 run.");
+        if (recorded.engine !== ENGINE || recorded.correctionContract !== CORRECTION_CONTRACT) {
+            throw new Error("This run uses an older workflow engine or correction contract. Preserve its history and explicitly start a new yaml-loops-v2 run.");
+        }
     };
     try { await validateMarker(); return; }
     catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -33,7 +35,7 @@ async function engineHistory(history) {
     } catch (error) { if (error.code !== "ENOENT") throw error; }
     await mkdir(directory, { recursive: true });
     try {
-        await writeFile(marker, JSON.stringify({ engine: ENGINE }) + "\n", { flag: "wx" });
+        await writeFile(marker, JSON.stringify({ engine: ENGINE, correctionContract: CORRECTION_CONTRACT }) + "\n", { flag: "wx" });
     } catch (error) {
         if (error.code !== "EEXIST") throw error;
         await validateMarker();
@@ -197,7 +199,7 @@ export function createLoopRunner() {
             projectRoot: root, request: args, specification: await specification(args, root),
             ...(history ? { history } : {}),
             roleDescriptions: source.roles, engine: ENGINE,
-            orchestration: "Repository docs/requirements and tests are the scope ledger. Owners execute completeWhen checks with ordinary permission-bound tools; reviewers inspect evidence and check adequacy. Only evidence-backed findings block Critic/Red Team. Deploy the azd walking skeleton first, then verify deployed checks, E2E and DevOps after each assignment before its dependents. No disposition ledger or feedback governance chain.",
+            orchestration: "Repository docs/requirements and tests are the scope ledger, not authority to invent scope. Every role's mandatory correction needs an original user requirement or explicitly approved amendment citation and a falsifiable failure reason; demonstrated defects additionally need evidence. Owners assess corrections and original reviewers verify those assessments. checksValid:false and unsupported suggestions alone never block. Owners execute completeWhen checks with ordinary permission-bound tools. Deploy the azd walking skeleton first, then verify deployed checks, E2E and DevOps after each assignment before its dependents. No disposition ledger, extra arbiter or feedback governance chain.",
         };
         const context = (extra = {}) => taskContext(common, documents, outcomes, extra, audits, documentAudits);
         const attemptsFor = (id) => args.attempts?.[id] ?? args.attempts?.[

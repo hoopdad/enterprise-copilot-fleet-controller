@@ -250,6 +250,29 @@ test("bounds check review fields and rejects unsupported finding shapes", async 
     assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-/);
 });
 
+test("projects grounded correction reasons and owner judgments without importing arbitrary metadata", async (t) => {
+    const file = await logFixture(t);
+    const assessment = { correctionId: "Architect:1", verdict: "refuted",
+        reason: "The existing endpoint and probe meet the original request.", evidence: "checks.log" };
+    const finding = { type: "blocking", summary: "Health response missing.", action: "Add the response.",
+        basis: "demonstrated-defect", reason: "A missing response prevents the user's health check.",
+        requirement: { path: "prompts/original-request.md", line: 1 }, evidence: "health.log" };
+    await writeFile(file, lines([
+        workEvent("claim", "reviewer", { checksValid: false, feedback: "Claim submitted.",
+            findings: [{ ...finding, secret: "PRIVATE-CLAIM" }] }),
+        workEvent("judgment", "owner", { status: "complete", summary: "The claim is refuted.",
+            correctionAssessments: [{ ...assessment, secret: "PRIVATE-ASSESSMENT" }] }),
+        workEvent("bad-judgment", "bad-owner", { status: "rework", summary: "Unknown.",
+            correctionAssessments: [{ ...assessment, verdict: "opinion" }] }),
+    ]));
+    const state = await new UsageReader().read(file);
+    assert.deepEqual(agentWork(state, "run", { id: "reviewer" }).workResult.findings, [finding]);
+    assert.deepEqual(agentWork(state, "run", { id: "owner" }).workResult.correctionAssessments, [assessment]);
+    assert.equal(agentWork(state, "run", { id: "bad-owner" }).workResult.correctionAssessments, undefined);
+    assert.match([...state.warnings].join(), /Malformed correction assessments/);
+    assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-/);
+});
+
 test("projects all governance formats without artifacts, acceptance votes or cross-run attribution", async (t) => {
     const file = await logFixture(t);
     const cases = [

@@ -54,17 +54,22 @@ existing user authority; declined proposals never enter the ledger. Historical
 audits remain readable, not authoritative. No runtime dispositions or governance
 are carried forward.
 
-Critic/Red Team findings block only with a `docs/requirements` file:line or a
-failing owner-emitted check, even if unsupported feedback has raw `agree:false`.
-Red Team reviews only infrastructure configuration and application-library CVEs
-(identify CVE, library and affected version). Findings use
-`type:"blocking"|"observation"`; blocking findings carry exactly one of
-`requirement:{path,line}` or `failingCheck`. All findings require `summary` and
-`action`; requirement lines are positive integers and `failingCheck` names an
-emitted check ID. Required Red Team scope is
-`infrastructure-config` or `dependency-cve`. Requirement paths must resolve under
-`docs/requirements`; cited nonempty working-tree lines must match committed `HEAD`
-at the same path/line. New or altered requirement anchors are nonblocking.
+Every role's mandatory correction needs an original user requirement or explicitly
+approved amendment citation and a falsifiable failure reason. Demonstrated defects
+also need evidence showing how they prevent the requirement. Everything else is
+optional, including Architect, Product Owner and Scrum Master suggestions.
+Findings use `type:"blocking"|"observation"`, `summary` and `action`; blockers add
+`basis:"original-requirement"|"approved-amendment"|"demonstrated-defect"`,
+`requirement:{path,line}` and `reason`. Defects also need `evidence`; optional
+`failingCheck` must name an emitted failed check with matching evidence.
+Cite the original request/approval directly in existing repository-local files;
+the positive nonempty line must match committed HEAD without traversal or symlink
+escapes. Git verifies integrity, not user authorship or semantic truth.
+On retry the owner returns confirmed/refuted/unresolved `correctionAssessments`;
+existing reviewers verify that reasoning without adding a new approval stage.
+Red Team remains limited to infrastructure configuration and application-library
+CVEs (identify CVE/library/version), with required
+`scope:"infrastructure-config"|"dependency-cve"`. See LAB-CONTRACT.md for examples.
 Owners emit required
 `checks:[{id,kind,command,requirement,environment,exitCode,evidence}]`, where kind
 is `test`, `schema` or `deployed-probe` and environment is `local` or `deployed`.
@@ -74,7 +79,8 @@ The runtime checks readability and repository confinement; reviewers verify
 actual execution and credibility.
 Complete means nonempty passing checks; assigned work must pass a deployed
 check. Reviewers return `checksValid`, `findings`, `feedback` and `workCard`,
-not `agree`, to assess suitability and verification.
+not `agree`, to assess suitability and verification. `checksValid:false` alone
+cannot block any role. Actual failing/missing execution checks remain binding.
 
 Sprint 1 begins with a dependency-free DevOps `walkingSkeleton:true` assignment
 using `azd`; all other assignments depend on it transitively and their `doneWhen`
@@ -115,6 +121,7 @@ For existing installations, deliberately review/replace the old runtime and
 instructions instead of rerunning the non-overwriting installer. Old native
 journals are history, not resumable through the new engine. See [README.md](README.md).
 
-The current engine is `yaml-loops-v2`. A run-version marker rejects existing
-unversioned context history. Preserve accepted `yaml-loops-v1` journals as history;
-they cannot bypass new checks or replay as v2 acceptance. Start a new run after adoption.
+The current engine is `yaml-loops-v2` with correction contract
+`requirement-grounded-v1`. A run marker rejects older v2 contracts and unversioned
+history. Preserve old journals as history; they cannot bypass the new correction
+rules. Start a fresh run after adoption.

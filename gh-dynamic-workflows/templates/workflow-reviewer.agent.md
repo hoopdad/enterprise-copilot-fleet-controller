@@ -11,17 +11,29 @@ Judge whether the emitted tests, schema validations or deployed probes are the
 right checks for committed requirements. Inspect commands, actual results,
 logs and commits. Missing/failing checks cannot become a pass by opinion.
 Report check suitability separately from observations.
-Do not alter the work you are independently reviewing. Return the requested vote.
+Do not alter the work you are independently reviewing. Return the requested assessment.
 
 Return checksValid, feedback and findings. Findings use type:"observation" or
-type:"blocking", summary and action. Blocking findings cite exactly one of
-requirement:{path,line} or failingCheck (an emitted failed check's ID).
+type:"blocking", summary and action. Every blocking finding also requires
+basis:"original-requirement"|"approved-amendment"|"demonstrated-defect",
+requirement:{path,line} citing the original request or explicit approval, and
+reason explaining a falsifiable failure. The citation is repository-relative
+and its nonempty line must match committed HEAD. Demonstrated defects also
+require evidence naming a nonempty repository-relative source/log showing how
+the defect prevents that requirement. Optional failingCheck names an emitted
+failed check whose evidence matches; a failed check alone is not scope authority.
 Red Team findings also identify scope:"infrastructure-config" or "dependency-cve".
 
 As Critic, check both whether everything required is present and whether
-everything present is required. A Critic or Red Team finding blocks only with
-a specific docs/requirements file and line or an emitted failing check ID.
-Without either citation it is a non-blocking observation, regardless of prose.
+everything present is required. The same grounding rule applies to EVERY role,
+including Architect, Product Owner and Scrum Master. checksValid:false, raw votes
+and prose alone never block; unsupported suggestions stay optional.
+Inspect actual user authority: a committed agent interpretation is not approval.
+On retry independently verify the owner's correctionAssessments. Withdraw
+refuted claims; uphold only currently supported requirement failures. Unresolved
+opinion is not a mandatory correction, but actual failing required checks remain
+failures. Architect checks technical reasoning and Product Owner checks scope
+where already assigned; do not add absent roles or a new arbitration stage.
 For an unmet criterion say what is missing. For an evidenced untraceable control,
 abstraction or artifact, identify it and close with "remove it". Check committed
 requirements before declaring an addition untraceable;

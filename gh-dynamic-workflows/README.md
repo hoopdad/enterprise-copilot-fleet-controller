@@ -84,26 +84,37 @@ An accepted scope change is a committed requirements edit plus a regression test
 under existing user authority. Declined proposals never enter the ledger.
 Historical audits are preserved for inspection, not treated as current authority.
 
-A Critic or Red Team finding blocks **only** if it cites a specific
-`docs/requirements` file:line or a failing check emitted by the owner. Suggestions
-without either anchor are nonblocking in the schema and runtime, even when raw
-`agree:false` accompanies them. This includes unsupported demands to remove
-supposedly unnecessary additions. Red Team reviews only infrastructure
-configuration and application-library CVEs; CVE findings identify the CVE,
-library and affected version. Reviewers remain read-only.
+Every role's mandatory correction needs an original user requirement or explicitly
+approved amendment citation and a falsifiable reason why the work fails it.
+Demonstrated defects also need inspectable evidence that they prevent that
+requirement. Everything else stays optional, including Architect, Product Owner
+and Scrum Master suggestions. Neither a committed agent interpretation nor an
+invented failing test establishes user authority. Red Team remains limited to
+infrastructure configuration and application-library CVEs, identifying the CVE,
+library and version. Reviewers remain read-only.
 
-Findings use `type:"blocking"|"observation"`. Blocking entries supply exactly one
-of `requirement:{path,line}` or `failingCheck`; unsupported suggestions are
-observations. Every finding requires `summary` and `action`; requirement line
-numbers are positive integers and `failingCheck` names the emitted check ID.
-Requirement paths must resolve beneath `docs/requirements`, and the cited
-nonempty working-tree line must match committed `HEAD` at the same path/line.
-Uncommitted or altered requirement anchors are observations, not blockers.
-Red Team findings require
+Findings use `type:"blocking"|"observation"`, `summary` and `action`. Blocking
+entries require `basis:"original-requirement"|"approved-amendment"|"demonstrated-defect"`,
+`requirement:{path,line}` and `reason`; demonstrated defects also require
+`evidence`. Optional `failingCheck` on a defect names an emitted failed check with
+matching evidence, never authority by itself. Cite the original request/approval
+directly in an existing repository-local file; its positive, nonempty line must
+match committed `HEAD`. No new ledger is required. Traversal, symlink escapes,
+new/dirty citations and unsupported claims cannot establish blockers. Git verifies
+citation integrity, not user authorship or semantic truth; existing participants
+verify those against the actual user request. Red Team findings also require
 `scope:"infrastructure-config"|"dependency-cve"`.
 
+The assigned owner judges each supported correction on retry with
+`correctionAssessments:[{correctionId,verdict,reason,evidence}]`: confirmed,
+refuted or unresolved. The existing reviewers independently verify that judgment,
+without a new approval agent or stage. See [LAB-CONTRACT.md](LAB-CONTRACT.md) for
+the full contract and examples.
+
 Owners emit executable check results and reviewers assess their suitability and
-verification with `checksValid`, rather than subjective completion votes. Checks
+verification with diagnostic `checksValid`, rather than subjective completion
+votes. `checksValid:false` alone cannot block any role; mandatory corrections
+need the structured grounding above. Actual failed/missing checks remain failures. Checks
 do not grant execution authority: owners run commands through their ordinary
 permission-bound tools, not an unrestricted runtime command executor.
 
@@ -227,7 +238,7 @@ prose. The runtime checks readability and confinement to the repository;
 reviewers verify actual execution and credibility. `complete` requires nonempty passing checks; assigned
 work must also have a passing deployed check. Reviewers return `checksValid:boolean`
 to assess suitability and actual verification, not `taskComplete`. Unsupported
-Critic/Red Team disagreement does not block. Reviews cannot promote owner
+disagreement or bare `checksValid:false` from any role does not block. Reviews cannot promote owner
 `rework` into completion.
 Owner `complete` expresses the owner's acceptance of a ready deliverable, not
 a claim that reviewers have already voted. Pending votes alone are not owner
@@ -344,8 +355,9 @@ Rework stays inside original loops, not a separate repair/recovery pipeline.
 An agreed `needs-input`, stagnation `blocked`, or explicitly reached limit is
 not success. Inspect both the SDK envelope and the application-level result.
 
-The engine identity is `yaml-loops-v2`. A run-version marker distinguishes
-compatible runs; existing unversioned context history is rejected. Accepted
+The engine identity is `yaml-loops-v2`, with correction contract
+`requirement-grounded-v1` recorded in the run marker. Older v2 correction contracts
+and unversioned context history are rejected without modifying old journals. Accepted
 `yaml-loops-v1` journal steps cannot bypass new checks or replay as v2 acceptance.
 Preserve prior runs as history and start a new run after adoption.
 SDK step/agent journals support replay of compatible v2 runs. They provide

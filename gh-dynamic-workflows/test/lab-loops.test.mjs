@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { definition, flattenLoops, parseWorkflow } from "../loop-source.mjs";
 import { runLoop } from "../lab-loops.mjs";
-import { owner, review, context, fixtureRoot, checks } from "./evidence.fixture.mjs";
+import { owner, review, context, fixtureRoot, checks, authorityProject, correction, assessCorrections } from "./evidence.fixture.mjs";
 
 const loops = flattenLoops(definition.workflows.ReleaseLoop.steps);
 const loop = loops.find((node) => node.id === "AssignedWorkDeveloperLoop");
@@ -91,15 +91,15 @@ test("workflow parser rejects malformed hierarchy and duplicate IDs without intr
     assert.throws(() => parseWorkflow("workflows:\n  ReleaseLoop:\n    steps:\n      - {id: x, name: X, owner: Developer, reviewers: [Critic]}\n      - {id: x, name: X, owner: Developer, reviewers: [Critic]}"), /unique/);
 });
 
-test("check inadequacy retries the same doer and original reviewers; observations allow acceptance", async () => {
-    let round = 0;
+test("check inadequacy and optional suggestions alone cannot force rework for any role", async () => {
     const result = await run((input) => {
-        if (input.kind === "doer") { round++; return owner(); }
-        return review({ checksValid: round > 1 || ["Critic", "Red Team"].includes(input.role),
+        if (input.kind === "doer") return owner();
+        return review({ checksValid: false,
             findings: [{ type: "observation", summary: "Improve naming later", action: "Consider naming" }] });
-    });
+    }, { loop: { ...loop, reviewers: ["Architect", "Product Owner", "Scrum Master", "Critic", "Red Team"] } });
     assert.equal(result.status, "agreed");
-    assert.equal(result.rounds, 2);
+    assert.equal(result.rounds, 1);
+    assert.ok(result.reviews.every((review) => review.accepted && !review.checksValid));
 });
 
 test("explicit attempt limits and genuine human-input outcomes never pass", async () => {
@@ -231,17 +231,19 @@ test("deployed acceptance and verification loops reject local-only checks even w
     }
 });
 
-test("dispatch is joined before plan retry, threshold stops and reviewer errors", async () => {
+test("dispatch is joined before grounded plan retry, threshold stops and reviewer errors", async (t) => {
+    const root = await authorityProject(t);
     let joined = false, round = 0;
     const result = await run((input) => {
         if (input.kind === "doer") {
             if (++round > 1) assert.ok(joined);
-            return owner();
+            return owner({ checks: checks({ evidence: "checks.log" }),
+                correctionAssessments: assessCorrections(input.feedback) });
         }
-        return review({ checksValid: false });
+        return review({ checksValid: false, findings: [correction()] });
     }, {
         loop: { ...loop, id: "SprintPlanLoop", reviewers: ["Architect"] },
-        context: { projectRoot: fixtureRoot }, maxNoProgressRounds: 2,
+        context: { projectRoot: root }, maxNoProgressRounds: 2,
         dispatch: () => ({ context: { status: "dispatched" }, settle: async () => { joined = true; return [{ status: "agreed" }]; } }),
     });
     assert.equal(result.status, "blocked");

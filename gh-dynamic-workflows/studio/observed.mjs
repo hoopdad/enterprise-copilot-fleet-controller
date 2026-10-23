@@ -103,22 +103,26 @@ export function workOutcome(agent, { phase } = {}) {
         if (typeof work.checksValid === "boolean") {
             const findings = work.findings ?? [];
             return {
-                title: !work.checksValid ? "Check suitability changes requested"
-                    : findings.some((item) => item.type === "blocking") ? "Checks suitable; blocking claims submitted"
+                title: findings.some((item) => item.type === "blocking") ? "Blocking claims submitted; validation pending"
+                    : !work.checksValid ? "Check concerns recorded; no blocking claim"
                         : "Checks suitable; acceptance unconfirmed",
                 summary: [
                     "Reviewer assessment of check suitability, not task completion or final acceptance.",
                     "Submitted findings and evidence are not runtime-verified by Studio; blocking claims require runtime validation.",
+                    "checksValid:false alone is diagnostic, not a mandatory correction for any role.",
                     work.summary,
                     ...findings.map((item) => [
                         `Submitted ${item.type === "blocking" ? "blocking claim" : "observation"}: ${item.summary}`,
                         item.action ? `Action: ${item.action}` : null,
                         item.requirement ? `Requirement: ${item.requirement.path}:${item.requirement.line}` : null,
+                        item.basis ? `Basis: ${item.basis}` : null,
+                        item.reason ? `Failure reason: ${item.reason}` : null,
+                        item.evidence ? `Submitted evidence: ${item.evidence}` : null,
                         item.failingCheck ? `Submitted failing check: ${item.failingCheck}` : null,
                         item.scope ? `Scope: ${item.scope}` : null,
                     ].filter(Boolean).join(" ")),
                 ].filter(Boolean).join("\n").slice(0, 12_000),
-                tone: work.checksValid ? "waiting" : "error",
+                tone: "waiting",
             };
         }
         if (!work.agree) return { title: "Changes requested", summary: work.summary, tone: "error" };
@@ -132,7 +136,13 @@ export function workOutcome(agent, { phase } = {}) {
     if (work) return {
         title: work.status === "complete" ? "Work reported complete" : work.status === "needs-input" ? "Awaiting input"
             : work.status === "needs-replan" ? "Needs scoped replanning" : "Work needs revision",
-        summary: work.summary, tone: work.status === "complete" ? "success" : "waiting",
+        summary: [
+            work.summary,
+            ...(work.correctionAssessments ?? []).map((item) =>
+                `Owner assessment ${item.correctionId}: ${item.verdict}. ${item.reason}${item.evidence ? ` Evidence: ${item.evidence}` : ""}`),
+            ...(work.correctionAssessments?.length ? ["Owner judgments require independent verification by the existing reviewers."] : []),
+        ].join("\n").slice(0, 12_000),
+        tone: work.status === "complete" ? "success" : "waiting",
     };
     const status = String(agent.status ?? "").toLowerCase().replaceAll(/[_\s]+/g, "-");
     if (active.has(status) || ["stale", "unsettled"].includes(status)) {

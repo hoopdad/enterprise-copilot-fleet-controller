@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { mkdir, writeFile, symlink, readFile } from "node:fs/promises";
 import { normalizeFindings, verifyChecks, runLoop, ownerSchema, reviewerSchema } from "../lab-loops.mjs";
-import { checks, skeletonChecks, owner, review, context, project, commitRequirements } from "./evidence.fixture.mjs";
+import { checks, skeletonChecks, owner, review, context, project, commitRequirements,
+    authorityProject, correction, assessCorrections } from "./evidence.fixture.mjs";
 
 const loop = { id: "AssignedWorkDeveloperLoop", name: "Work", owner: "Developer", reviewers: ["Critic", "Red Team", "Architect"] };
 test("response contracts require executable checks and structured check suitability, not completion votes", () => {
@@ -16,74 +17,90 @@ test("response contracts require executable checks and structured check suitabil
         ["id", "kind", "command", "requirement", "environment", "exitCode", "evidence"]);
 });
 
-test("Critic blockers need a real nonempty requirement line or an emitted failing check; everything else is observation", async (t) => {
-    const root = await project(t);
-    await mkdir(path.join(root, "docs/requirements"), { recursive: true });
-    await writeFile(path.join(root, "docs/requirements/api.md"), "Health endpoint must respond.\n\n");
-    await commitRequirements(root);
-    const finding = { type: "blocking", summary: "Health endpoint absent.", action: "Implement the endpoint." };
+test("all mandatory corrections need original requirement or approved amendment citations and falsifiable reasons", async (t) => {
+    const root = await authorityProject(t);
+    const finding = correction();
+    const defect = correction({ basis: "demonstrated-defect", evidence: "checks.log", failingCheck: "failure" });
     const cases = [
-        [{ ...finding, requirement: { path: "docs/requirements/api.md", line: 1 } }, "blocking"],
-        [{ ...finding, requirement: { path: "docs/requirements/api.md", line: 2 } }, "observation"],
+        [finding, "blocking"],
+        [{ ...finding, basis: "approved-amendment", requirement: { path: "docs/requirements/api.md", line: 2 } }, "blocking"],
+        [defect, "blocking"],
+        [{ ...defect, failingCheck: undefined }, "blocking"],
+        [{ ...finding, requirement: { path: "docs/requirements/api.md", line: 3 } }, "observation"],
         [{ ...finding, requirement: { path: "docs/requirements/missing.md", line: 1 } }, "observation"],
         [{ ...finding, requirement: { path: "README.md", line: 1 } }, "observation"],
         [{ ...finding, requirement: { path: "docs/requirements/../../checks.log", line: 1 } }, "observation"],
         [{ ...finding, requirement: { path: "docs/requirements/api.md", line: 0 } }, "observation"],
-        [{ ...finding, failingCheck: "failure" }, "blocking"],
+        [{ ...finding, requirement: { path: "docs\\requirements\\api.md", line: 1 } }, "blocking"],
+        [{ ...finding, requirement: { path: path.join(root, "docs/requirements/api.md"), line: 1 } }, "observation"],
+        [{ ...finding, requirement: undefined }, "observation"],
+        [{ ...finding, basis: undefined }, "observation"],
+        [{ ...finding, basis: "architect-preference" }, "observation"],
+        [{ ...finding, reason: "" }, "observation"],
+        [{ ...finding, failingCheck: "failure" }, "observation"],
         [{ ...finding, failingCheck: "pass" }, "observation"],
-        [{ ...finding, failingCheck: "unknown" }, "observation"],
-        [{ ...finding, requirement: { path: "docs/requirements/api.md", line: 1 }, failingCheck: "failure" }, "observation"],
-        [finding, "observation"],
+        [{ ...defect, failingCheck: "pass" }, "observation"],
+        [{ ...defect, failingCheck: "unknown" }, "observation"],
+        [{ ...defect, evidence: "missing.log" }, "observation"],
+        [{ ...defect, evidence: undefined }, "observation"],
+        [{ ...defect, evidence: "../evidence.fixture.mjs" }, "observation"],
+        [{ ...defect, evidence: "gh-dynamic-workflows/package.json" }, "observation"],
+        [{ ...defect, requirement: undefined }, "observation"],
         [{ ...finding, type: "observation", blocking: true }, "observation"],
     ];
-    const emitted = [...checks({ id: "failure", exitCode: 1 }), ...checks({ id: "pass" })];
-    for (const [input, expected] of cases) {
-        const [result] = await normalizeFindings([input], { role: "Critic", checks: emitted, projectRoot: root });
-        assert.equal(result.type, expected, JSON.stringify(input));
-        if (expected === "observation") {
-            assert.equal(result.failingCheck, undefined);
-            assert.equal(result.requirement, undefined);
+    const emitted = [...checks({ id: "failure", exitCode: 1, evidence: "checks.log" }), ...checks({ id: "pass" })];
+    for (const role of ["Architect", "Product Owner", "Scrum Master", "Developer", "Designer", "DevOps Engineer", "Stakeholder", "Critic"]) {
+        for (const [input, expected] of cases) {
+            const [result] = await normalizeFindings([input], { role, checks: emitted, projectRoot: root });
+            assert.equal(result.type, expected, `${role}: ${JSON.stringify(input)}`);
+            if (expected === "observation") {
+                assert.equal(result.failingCheck, undefined);
+                assert.equal(result.requirement, undefined);
+                assert.equal(result.correctionId, undefined);
+            } else {
+                assert.equal(result.correctionId, `${role}:1`);
+                assert.equal(result.reason, input.reason);
+            }
         }
     }
 });
 
 test("Red Team only blocks infrastructure configuration and application dependency CVE findings", async (t) => {
-    const root = await project(t);
+    const root = await authorityProject(t);
     for (const scope of ["infrastructure-config", "dependency-cve", "product-security", undefined]) {
-        const [finding] = await normalizeFindings([{
-            type: "blocking", summary: "A check failed.", action: "Fix the failure.", failingCheck: "bad", scope,
-        }], { role: "Red Team", projectRoot: root, checks: checks({ id: "bad", exitCode: 2 }) });
+        const [finding] = await normalizeFindings([correction({ scope })], { role: "Red Team", projectRoot: root });
         assert.equal(finding.type, ["infrastructure-config", "dependency-cve"].includes(scope) ? "blocking" : "observation");
     }
 });
 
-test("requirement citations cannot invent authority through new/dirty lines or symlink escapes", async (t) => {
+test("original request files outside the requirements ledger may be cited directly", async (t) => {
     const root = await project(t);
-    await mkdir(path.join(root, "docs/requirements"), { recursive: true });
-    await mkdir(path.join(root, "src"), { recursive: true });
-    await writeFile(path.join(root, "docs/requirements/api.md"), "Committed required endpoint.\n");
-    await writeFile(path.join(root, "src/not-a-requirement.md"), "Invented requirement outside the scope ledger.\n");
-    await symlink("../../src/not-a-requirement.md", path.join(root, "docs/requirements/escape.md"));
-    await commitRequirements(root);
-    const finding = (name, line = 1) => ({ type: "blocking", summary: "A requirement is unmet.", action: "Fix.",
-        requirement: { path: `docs/requirements/${name}`, line } });
+    await writeFile(path.join(root, "user-request.md"), "Original user: provide a health response.\n");
+    await commitRequirements(root, ["user-request.md"]);
+    const [finding] = await normalizeFindings([correction({ requirement: { path: "user-request.md", line: 1 } })],
+        { role: "Architect", projectRoot: root });
+    assert.equal(finding.type, "blocking");
+});
+
+test("requirement citations reject new/dirty lines and directory-symlink escapes", async (t) => {
+    const root = await authorityProject(t);
+    const finding = (name, line = 1) => correction({ requirement: { path: `docs/requirements/${name}`, line } });
     const normalize = async (item) => (await normalizeFindings([item], { role: "Critic", projectRoot: root }))[0];
     assert.equal((await normalize(finding("api.md"))).type, "blocking");
-    assert.equal((await normalize(finding("escape.md"))).type, "observation");
     await writeFile(path.join(root, "docs/requirements/api.md"), "A fabricated replacement requirement.\n");
     assert.equal((await normalize(finding("api.md"))).type, "observation");
     await writeFile(path.join(root, "docs/requirements/new.md"), "An uncommitted invented requirement.\n");
     assert.equal((await normalize(finding("new.md"))).type, "observation");
-    const outside = await project(t);
-    await mkdir(path.join(outside, "docs"), { recursive: true });
-    await symlink(path.join(root, "docs/requirements"), path.join(outside, "docs/requirements"));
-    assert.equal((await normalizeFindings([finding("new.md")], { role: "Critic", projectRoot: outside }))[0].type, "observation");
+    const outside = await authorityProject(t);
+    await symlink(path.join(outside, "docs/requirements"), path.join(root, "escape"),
+        process.platform === "win32" ? "junction" : "dir");
+    assert.equal((await normalize(correction({ requirement: { path: "escape/api.md", line: 1 } }))).type, "observation");
 });
 
 test("missing, failed, malformed, duplicate, empty or escaped check evidence cannot complete", async (t) => {
     const root = await project(t);
     await writeFile(path.join(root, "empty.log"), "");
-    await symlink(path.join(root, ".."), path.join(root, "outside"));
+    await symlink(path.join(root, ".."), path.join(root, "outside"), process.platform === "win32" ? "junction" : "dir");
     const valid = checks({ evidence: "checks.log" });
     assert.equal(await verifyChecks(valid, { projectRoot: root, assignment: {} }), null);
     for (const invalid of [
@@ -114,7 +131,7 @@ test("walking skeleton needs actual emitted azd deployment and a distinct deploy
     }
 });
 
-test("unsupported critic/red-team votes and prose cannot gate; other reviewers assess check adequacy", async (t) => {
+test("unsupported votes, prose and check-adequacy objections cannot gate ANY reviewer role", async (t) => {
     const root = await project(t);
     let round = 0;
     const calls = [];
@@ -138,7 +155,8 @@ test("unsupported critic/red-team votes and prose cannot gate; other reviewers a
         }), loop, key: "votes", context: { projectRoot: root, assignment: {} }, attempts: 3,
     });
     assert.equal(result.status, "agreed");
-    assert.equal(result.rounds, 2);
+    assert.equal(result.rounds, 1);
+    assert.ok(result.reviews.every((review) => review.accepted));
     assert.ok(calls.every((call) => ["doer", "reviewer"].includes(call.kind)));
     assert.ok(!JSON.stringify(result).includes("disposition"));
     assert.ok(!JSON.stringify(result).includes("governanceHistory"));
@@ -161,12 +179,10 @@ test("valid requirement-backed findings force rework and retain evidence without
                     assert.equal(input.feedback.reviews[0].findings[0].requirement.line, 1);
                     assert.equal(input.feedback.governance, undefined);
                 }
-                return owner({ checks: checks({ evidence: "checks.log" }) });
+                return owner({ checks: checks({ evidence: "checks.log" }),
+                    correctionAssessments: assessCorrections(input.feedback) });
             }
-            return review({ findings: input.role === "Critic" && round === 1 ? [{
-                type: "blocking", summary: "Health missing.", action: "Implement.",
-                requirement: { path: "docs/requirements/api.md", line: 1 },
-            }] : [] });
+            return review({ findings: input.role === "Critic" && round === 1 ? [correction()] : [] });
         }), loop, key: "requirement", context: { projectRoot: root, assignment: {} },
     });
     assert.equal(result.status, "agreed");
@@ -187,10 +203,7 @@ test("valid requirement blockers use only original parallel reviewers and cannot
         ctx: context((input) => {
             calls.push(input);
             if (input.kind === "doer") return owner({ checks: checks({ evidence: "checks.log" }) });
-            return review({ findings: input.role === "Critic" ? [{
-                type: "blocking", summary: "Health endpoint is absent.", action: "Implement the required endpoint.",
-                requirement: { path: "docs/requirements/api.md", line: 1 },
-            }] : [] });
+            return review({ findings: input.role === "Critic" ? [correction()] : [] });
         }),
         loop, key: "original-reviews", context: { projectRoot: root, assignment: {} }, attempts: 1,
     });
@@ -199,6 +212,83 @@ test("valid requirement blockers use only original parallel reviewers and cannot
     assert.deepEqual(calls.filter((call) => call.kind === "reviewer").map((call) => call.role), loop.reviewers);
     assert.equal(calls.length, 1 + loop.reviewers.length);
     assert.ok(!calls.some((call) => call.kind === "governance" || call.citationVerification));
+});
+
+test("every reviewer role must ground mandatory corrections, regardless of check-suitability opinion", async (t) => {
+    const root = await authorityProject(t);
+    for (const role of ["Architect", "Product Owner", "Scrum Master", "Developer", "Designer", "DevOps Engineer", "Stakeholder", "Critic", "Red Team"]) {
+        const result = await runLoop({
+            ctx: context((input) => input.kind === "doer" ? owner({ checks: checks({ evidence: "checks.log" }) })
+                : review({ checksValid: true, findings: [correction(role === "Red Team" ? { scope: "infrastructure-config" } : {})] })),
+            loop: { ...loop, reviewers: [role] }, key: role, context: { projectRoot: root }, attempts: 1,
+        });
+        assert.equal(result.status, "limit-reached", role);
+        assert.equal(result.feedback.reviews[0].accepted, false);
+        assert.equal(result.feedback.reviews[0].findings[0].correctionId, `${role}:1`);
+    }
+});
+
+test("owner judges corrections and existing reviewers verify confirmed, refuted and unresolved responses", async (t) => {
+    const root = await authorityProject(t);
+    for (const verdict of ["confirmed", "refuted", "unresolved"]) {
+        let round = 0;
+        const result = await runLoop({
+            ctx: context((input, options) => {
+                if (input.kind === "doer") {
+                    round++;
+                    if (round === 2) assert.ok(options.schema.required.includes("correctionAssessments"));
+                    return owner({ checks: checks({ evidence: "checks.log" }),
+                        correctionAssessments: assessCorrections(input.feedback, verdict, verdict === "unresolved" ? "" : "checks.log") });
+                }
+                if (round === 2) {
+                    assert.equal(input.owner.correctionAssessments[0].verdict, verdict);
+                    assert.match(input.instructions.join("\n"), /Independently verify correctionAssessments/);
+                }
+                return review({ checksValid: false, findings: round === 1 ? [correction()] : [] });
+            }),
+            loop: { ...loop, reviewers: ["Architect", "Product Owner"] },
+            key: verdict, context: { projectRoot: root }, attempts: 2,
+        });
+        assert.equal(result.status, "agreed");
+        assert.equal(result.rounds, 2);
+        assert.deepEqual(result.correctionAssessments.map((item) => item.verdict), [verdict, verdict]);
+    }
+});
+
+test("missing, duplicate, invented and unsupported owner correction assessments fail explicitly", async (t) => {
+    const root = await authorityProject(t);
+    for (const alter of [
+        () => undefined, () => [], (items) => [...items, ...items],
+        (items) => [{ ...items[0], correctionId: "Invented:1" }],
+        (items) => [{ ...items[0], verdict: "agree" }],
+        (items) => [{ ...items[0], reason: "" }],
+        (items) => [{ ...items[0], evidence: "" }],
+        (items) => [{ ...items[0], evidence: "missing.log" }],
+        (items) => [{ ...items[0], evidence: "../evidence.fixture.mjs" }],
+    ]) {
+        let round = 0;
+        await assert.rejects(runLoop({
+            ctx: context((input) => input.kind === "doer" ? owner({
+                checks: checks({ evidence: "checks.log" }),
+                ...(++round > 1 ? { correctionAssessments: alter(assessCorrections(input.feedback)) } : {}),
+            }) : review({ findings: [correction()] })),
+            loop: { ...loop, reviewers: ["Architect"] }, key: "bad-assessment", context: { projectRoot: root }, attempts: 2,
+        }), /[Cc]orrection assessment/);
+    }
+});
+
+test("an owner refutation or unresolved response cannot waive an actual failing required check", async (t) => {
+    const root = await authorityProject(t);
+    let round = 0;
+    const result = await runLoop({
+        ctx: context((input) => input.kind === "doer" ? owner({
+            checks: checks({ evidence: "checks.log", exitCode: ++round > 1 ? 1 : 0 }),
+            correctionAssessments: assessCorrections(input.feedback, "refuted"),
+        }) : review({ findings: round === 1 ? [correction()] : [] })),
+        loop: { ...loop, reviewers: ["Architect"] }, key: "refuted-check", context: { projectRoot: root }, attempts: 2,
+    });
+    assert.equal(result.status, "limit-reached");
+    assert.match(result.reason, /Check contract failed/);
 });
 
 test("checks are never executed by runtime and human limitations never fabricate completion", async (t) => {

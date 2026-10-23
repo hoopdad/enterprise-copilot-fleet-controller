@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createLoopRunner, sprintTasks, releasePlan, ENGINE } from "../loop-workflow.mjs";
-import { owner, review, project, checks, skeletonChecks, task, skeleton, context } from "./evidence.fixture.mjs";
+import { owner, review, project, authorityProject, correction, assessCorrections, checks, skeletonChecks, task, skeleton, context } from "./evidence.fixture.mjs";
 
-async function fake(t, { tasks = [skeleton(), task("api", "developer", ["skeleton"])], artifact, inspect, args = {} } = {}) {
-    const root = await project(t);
+async function fake(t, { tasks = [skeleton(), task("api", "developer", ["skeleton"])], artifact, inspect, args = {}, withAuthority = false } = {}) {
+    const root = await (withAuthority ? authorityProject(t) : project(t));
     const calls = [], phases = [], journal = new Map();
     const ctx = {
         ...context(async (input, options) => {
@@ -18,6 +18,7 @@ async function fake(t, { tasks = [skeleton(), task("api", "developer", ["skeleto
             if (input.loop.id === "ReleasePlanLoop") output = { ReleasePlan: { sprints: [{ id: "s1" }] } };
             if (input.loop.id === "SprintPlanLoop") output = { SprintPlan: { tasks } };
             return owner({ checks: input.context.assignment?.walkingSkeleton ? skeletonChecks("checks.log") : checks({ evidence: "checks.log" }),
+                correctionAssessments: assessCorrections(input.feedback),
                 artifact: await artifact?.(input, output) ?? output });
         }),
         runId: "synthetic-offline", args: { projectRoot: root, ...args },
@@ -186,13 +187,15 @@ test("file-backed plans dispatch before plan agreement without waiting for imple
 test("plan retries join already dispatched work and use new assignment step keys", async (t) => {
     let planRound = 0;
     const f = await fake(t, {
+        withAuthority: true,
         inspect: (input) => {
             if (input.kind === "doer" && input.loop.id === "SprintPlanLoop") {
                 planRound++;
                 if (planRound === 2) assert.ok(input.feedback.dispatchedWork.every((item) => item.status === "agreed"));
             }
             if (input.kind === "reviewer" && input.loop.id === "SprintPlanLoop") return review({
-                checksValid: planRound > 1 || ["Critic", "Red Team"].includes(input.role),
+                checksValid: planRound > 1,
+                findings: planRound === 1 && input.role === "Architect" ? [correction()] : [],
             });
         },
     });
@@ -228,8 +231,8 @@ test("SDK replay preserves accepted evidence using new engine keys; legacy accep
     assert.ok(f.calls.some((call) => call.kind === "doer" && call.loop.id === "ArchitectureLoop"));
 });
 
-test("existing v1 or unversioned durable context requires a new run without modifying history", async (t) => {
-    for (const version of [undefined, "yaml-loops-v1"]) {
+test("older engines or v2 correction contracts require a new run without modifying history", async (t) => {
+    for (const version of [undefined, "yaml-loops-v1", "yaml-loops-v2"]) {
         const f = await fake(t);
         const directory = path.join(f.root, "gh-dynamic-workflows", ".delivery-runs", f.ctx.runId);
         await mkdir(path.join(directory, "context"), { recursive: true });

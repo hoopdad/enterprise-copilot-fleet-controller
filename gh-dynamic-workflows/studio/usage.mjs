@@ -74,6 +74,10 @@ function projectCheckReview(result) {
         summary: result.feedback.slice(0, 12_000),
         findings: result.findings.slice(0, 100).map((item) => ({
             type: item.type, summary: item.summary.slice(0, 4000), action: item.action.slice(0, 4000),
+            ...(["original-requirement", "approved-amendment", "demonstrated-defect"].includes(item.basis)
+                ? { basis: item.basis } : {}),
+            ...(text(item.reason) ? { reason: item.reason.slice(0, 4000) } : {}),
+            ...(text(item.evidence) ? { evidence: item.evidence.slice(0, 1000) } : {}),
             ...(text(item.requirement?.path) && Number.isSafeInteger(item.requirement.line) && item.requirement.line > 0
                 ? { requirement: { path: item.requirement.path.slice(0, 1000), line: item.requirement.line } } : {}),
             ...(text(item.failingCheck) ? { failingCheck: item.failingCheck.slice(0, 1000) } : {}),
@@ -154,11 +158,22 @@ function ingest(state, line) {
                 if (!names.some(([id]) => id === task.id)) names.push([task.id, plannedCard.action]);
             }
         }
+        let correctionAssessments;
+        if (work && result.correctionAssessments !== undefined) {
+            if (entries(result.correctionAssessments, ["correctionId", "verdict", "reason", "evidence"]) &&
+                result.correctionAssessments.every((item) => ["confirmed", "refuted", "unresolved"].includes(item.verdict))) {
+                correctionAssessments = result.correctionAssessments.slice(0, 100).map((item) => ({
+                    correctionId: item.correctionId.slice(0, 1000), verdict: item.verdict,
+                    reason: item.reason.slice(0, 4000), evidence: item.evidence.slice(0, 1000),
+                }));
+            } else state.warnings.add("Malformed correction assessments were skipped; owner judgments may be unavailable.");
+        }
         state.results.set(event.agentId, {
             kind: review ? "review" : "work", agree: review ? result.agree : null,
             status: work ? result.status : null,
             taskComplete: review && typeof result.taskComplete === "boolean" ? result.taskComplete : null,
             summary: (review ? result.feedback : result.summary).slice(0, 12_000), names, card, assignments,
+            ...(correctionAssessments ? { correctionAssessments } : {}),
         });
         return;
     }
@@ -321,6 +336,7 @@ export function agentWork(state, runId, agent, agents = []) {
         : taskCard ? "Recorded assignment" : null, workResult: {
         kind: result.kind, ...(typeof result.checksValid === "boolean" ? {} : { agree: result.agree }), status: result.status, summary,
         ...(result.kind === "governance" ? { stage: result.stage } : {}),
+        ...(result.correctionAssessments ? { correctionAssessments: result.correctionAssessments } : {}),
         ...(result.kind === "review" && typeof result.checksValid === "boolean"
             ? { checksValid: result.checksValid, findings: result.findings }
             : result.kind === "review" ? { taskComplete: result.taskComplete, ownerStatus: owner ? resultFor(owner)?.status ?? null : null } : {}),

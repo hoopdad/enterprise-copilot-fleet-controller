@@ -153,19 +153,21 @@ regression test within existing user authority. Declined proposals never enter
 the ledger. Cards and historical audits are evidence, not authority; no runtime
 dispositions or governance are needed.
 
-Critic/Red Team findings block only with a `docs/requirements` file:line or a
-failing owner-emitted check. Unsupported findings remain nonblocking even with
-raw `agree:false`. Red Team reviews only infrastructure configuration and
-application-library CVEs; CVE findings identify the CVE, library and version.
-Findings use `type:"blocking"|"observation"`; a blocking finding has exactly
-one of `requirement:{path,line}` or `failingCheck`. Every finding requires
-`summary` and `action`; requirement lines are positive integers and `failingCheck`
-names an emitted check ID. Red Team findings require
-`scope:"infrastructure-config"|"dependency-cve"`. Observation cards do not
-invent blocking authority.
-Requirement paths must resolve beneath `docs/requirements`; cited nonempty
-working-tree lines must match committed `HEAD` at the same path/line. New or
-altered requirement anchors remain observations, not blocking authority.
+Every role's mandatory corrections need an original user requirement or explicitly
+approved amendment citation and a falsifiable reason why the work fails it.
+Demonstrated defects also need inspectable evidence showing how they prevent that
+requirement. Everything else stays optional, including Architect, Product Owner
+and Scrum Master suggestions and `checksValid:false` alone.
+Findings use `type:"blocking"|"observation"`, `summary` and `action`; blockers add
+`basis`, `requirement:{path,line}` and `reason`, plus `evidence` for demonstrated
+defects. Cite original requests/approvals directly in existing repository-local
+files; nonempty positive lines must match committed HEAD without traversal or
+symlink escapes. Git integrity is not proof of user authority or semantic truth.
+The owner judges supported corrections as confirmed/refuted/unresolved and the
+existing reviewers independently verify the reasoning. See LAB-CONTRACT.md.
+Red Team remains limited to infrastructure configuration/application-library
+CVEs, identifies CVE/library/version, and retains required
+`scope:"infrastructure-config"|"dependency-cve"`. Cards do not create authority.
 
 Do not invent names, diagnoses, verification, or human-action requirements
 for historical work lacking that information.
@@ -228,7 +230,8 @@ metadata do not gain invented pending-card context.
 Preserve existing reviewer roles, real permissions, authority and exact evidence
 attribution while applying the check-based completion contract. Framework source changes do not
 automatically update an installed or active target workflow.
-The current engine is `yaml-loops-v2`; a run-version marker rejects existing
+The current engine is `yaml-loops-v2` with correction contract
+`requirement-grounded-v1`; the run marker rejects older v2 contracts and
 unversioned context history. Accepted `yaml-loops-v1` journals remain historical
 evidence, not a way to bypass or replay new checks.
 Start a new run after adoption rather than treating historical cards as current acceptance.

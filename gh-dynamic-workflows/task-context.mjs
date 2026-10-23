@@ -11,6 +11,7 @@ export const contextInstructions = [
     "If a mixed shell command is denied, inspect its requested paths and operations. A denied ancestor-directory probe does not establish that repository-local Git or tests are denied. Omit the unnecessary external probe and separately attempt the authorized repository-local operation before declaring needs-input. Never retry the denied external access through another tool, bypass authentication/content exclusions, or treat a genuinely required denied operation as approved. Report the precise remaining denial and distinguish it from operations that succeeded.",
     "Read applicable document paths and audit files before changing their contracts or claiming their acceptance. Full original reports, reviews and scope history remain available there and in SDK journals. Do not reconstruct missing facts, treat omitted history as success, or reopen accepted work merely because its full report is not inline.",
     "Repository docs/requirements and tests are the scope ledger. Historical audits remain readable but old dispositions and acceptance votes never bypass executable checks. Keep handoffs concise: status, source/commit references, checks and inspectable evidence, remaining limitations and receiving owner.",
+    "Only original user requirements, explicitly approved amendments and demonstrated defects preventing those requirements justify mandatory corrections. Cite the authority and explain the falsifiable failure; agent-authored requirements, role seniority and historical suggestions do not grant authority. Everything else stays optional, including Architect, Product Owner and Scrum Master suggestions.",
 ];
 
 export function historyLocation(root, runId) {
@@ -40,7 +41,7 @@ export function outcomeContext(outcome, audit) {
     if (!outcome || typeof outcome !== "object") return outcome;
     return {
         ...pick(outcome, ["key", "loopId", "taskId", "status", "summary", "artifact", "reason", "nextAction", "workCard",
-            "rounds", "stopCause", "limit", "replacements", "checks", "limitation"]),
+            "rounds", "stopCause", "limit", "replacements", "checks", "limitation", "correctionAssessments"]),
         ...(outcome.reviews ? { reviews: outcome.reviews.map((review) =>
             pick(review, ["role", "checksValid", "findings", "accepted", "verifiedProgress", "workCard"])) } : {}),
         ...(audit ? { audit } : {}),

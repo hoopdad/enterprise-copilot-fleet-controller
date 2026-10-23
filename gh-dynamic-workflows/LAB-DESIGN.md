@@ -16,21 +16,28 @@ requirements edit and regression test within existing user authority. Declined
 proposals never enter the ledger. Historical audits remain available but are
 not current authority or recursively recopied into later prompts.
 
-Critic and Red Team findings block only with a specific `docs/requirements`
-file:line or failing owner-emitted check. Unsupported findings are nonblocking
-in schema and runtime even when raw `agree:false` accompanies them. Red Team
-scope is infrastructure configuration and application-library CVEs; CVE findings
-identify the CVE, library and affected version. Reviewers inspect evidence
-read-only and use `checksValid` for check suitability and verification.
-Findings discriminate `type:"blocking"|"observation"`; blocking findings carry
-exactly one of `requirement:{path,line}` or `failingCheck`. Every finding requires
-`summary` and `action`; requirement lines are positive integers and `failingCheck`
-names an emitted check ID. Required Red Team scope is
-`infrastructure-config` or `dependency-cve`.
-Requirement citations resolve beneath `projectRoot/docs/requirements`, with
-nonempty working-tree lines matching committed `HEAD` at the same path/line.
-Symlink escapes and new/altered requirement anchors cannot establish blockers.
-Fixed read-only Git arguments verify citations without evaluating emitted commands.
+Every role's mandatory corrections require an original user requirement or
+explicitly approved amendment citation and a falsifiable failure reason.
+Demonstrated defects additionally need evidence showing how they prevent that
+requirement. Everything else is optional, including Architect, Product Owner and
+Scrum Master suggestions. `checksValid:false` alone cannot gate any role.
+Red Team remains limited to infrastructure configuration and application-library
+CVEs, with `scope:"infrastructure-config"|"dependency-cve"` and the affected
+library/version/CVE. Reviewers remain read-only.
+Findings discriminate `type:"blocking"|"observation"`. Blocking findings add
+`basis:"original-requirement"|"approved-amendment"|"demonstrated-defect"`,
+`requirement:{path,line}` and `reason`; demonstrated defects also need `evidence`.
+Optional defect `failingCheck` identifies an emitted failed check with matching
+evidence, not authority on its own. Direct original request/approval citations
+may use existing files anywhere inside projectRoot; their positive nonempty
+lines must match committed HEAD. Traversal and symlink escapes are rejected.
+Fixed read-only Git operations verify integrity, not authorship or entailment.
+Committing an agent interpretation does not make it a user requirement.
+On the next do-er turn, supported correction IDs require confirmed/refuted/
+unresolved `correctionAssessments` with reasons and evidence. Original reviewers
+verify those judgments in the existing review; no arbiter, stage or governance
+chain is added. Actual failed/missing execution checks remain binding. See
+LAB-CONTRACT.md for field definitions and the division of semantic responsibility.
 Both workflow registration names use that same runner. Its default shared writing
 profile is `workflow-owner` (`agents.owner`, then legacy `agents.doer` overrides);
 concrete YAML roles, stable doer kinds/labels and historical Studio remain intact.
@@ -58,7 +65,7 @@ prose. The runtime verifies readability and repository confinement; reviewers
 verify actual execution and credibility. Commands run by owners, not by an
 unrestricted runtime executor. Complete reports require
 nonempty passing checks; assigned work also requires a passing deployed check.
-Reviewers validate suitability and actual results with `checksValid`, not
+Reviewers describe suitability and actual results with diagnostic `checksValid`, not
 subjective `taskComplete` votes. Research and technical repair remain in the loops.
 Reviewer reports require `checksValid`, `findings`, `feedback` and `workCard`,
 not `agree`.
@@ -126,15 +133,18 @@ commit IDs and abandonment reason in a feature-branch commit message. No code
 is silently discarded and no new role, stage or native Git gate is added. The
 scheduler does not run Git on the user's behalf or require a clean starting tree.
 
-Sprint Review may append work to ReleasePlan. Retro may update Architecture,
-UserExperience and ReleasePlan. Subsequent sprints use these accepted updates;
+Sprint Review may append required work to ReleasePlan only with the same grounding.
+Retro may propose optional improvements to Architecture, UserExperience and
+ReleasePlan; they do not silently become mandatory dependencies. Subsequent sprints use authorized updates;
 there is no initial-plan freeze or required separate asset-harvest sprint.
 Accurate E2E failure reports are actionable feedback, not completion. The
 continuous DevOps-then-E2E loops require passing deployed verification before
 releasing dependents.
 
-The engine identity is `yaml-loops-v2`. A run-version marker distinguishes
-compatible runs; existing unversioned context history is rejected. Accepted
+The engine identity is `yaml-loops-v2`, with correction contract
+`requirement-grounded-v1` recorded in the run marker. Older v2 runs without that
+contract, other contract versions and unversioned context history are rejected
+without rewriting their journals. Start a fresh run after adoption. Accepted
 `yaml-loops-v1` journal steps cannot bypass new checks or replay as v2 acceptance;
 preserve them as history and
 start a new run after adoption. Results and rounds are journaled by SDK durable

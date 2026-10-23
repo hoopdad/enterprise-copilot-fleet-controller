@@ -38,6 +38,20 @@ Complete the assigned doneWhen/exclusions/handoff, not the entire product.
 Material scope/contract/architecture changes use needs-replan under the same
 repository requirements and test contract, not invented human needs-input.
 
+Every mandatory correction, from any role, must cite an original user requirement
+or explicitly approved amendment and explain a falsifiable failure. Demonstrated
+defects also need inspectable evidence showing how they prevent that requirement.
+Committing an agent-written requirement or failing a newly invented test does
+not create authority. Unsupported suggestions and checksValid:false alone stay
+optional, including Architect, Product Owner and Scrum Master suggestions.
+Do not add their proposed work, tests or dependencies through replanning.
+On retry return correctionAssessments for each supplied correctionId:
+confirmed, refuted or unresolved, with a reason and repository-relative evidence.
+Confirmed/refuted judgments need inspectable evidence; unresolved may leave
+evidence empty but is not proof. The existing reviewers verify your judgment;
+no new approval agent is involved. Actual failing required checks and real
+permission boundaries remain binding.
+
 The Scrum Master owns contract-first task decomposition, critical-path planning
 and assignment of Git reconciliation. Sprint 1's first task is a DevOps-owned
 walking skeleton marked walkingSkeleton:true with no dependencies, deployed
