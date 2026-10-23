@@ -5,6 +5,66 @@ import { runLoop } from "../lab-loops.mjs";
 import { governanceResponse } from "./scope-governance.fixture.mjs";
 
 const loops = flattenLoops(definition.workflows.ReleaseLoop.steps);
+test("Critic checks both traceability directions in every original review loop", async () => {
+    assert.match(definition.roles.find((role) => role.name === "Critic").description,
+        /everything required is present and everything present is required/);
+    for (const loop of loops.filter((node) => node.reviewers?.includes("Critic"))) {
+        const calls = [];
+        const result = await runLoop({
+            ctx: context(async (prompt) => {
+                const input = JSON.parse(prompt);
+                calls.push(input);
+                return input.kind === "doer" ? { status: "complete", summary: "Done.", artifact: {} }
+                    : { agree: true, feedback: "Non-blocking observation." };
+            }),
+            loop, key: loop.id, context: {},
+        });
+        assert.equal(result.status, "agreed");
+        const critic = calls.find((call) => call.role === "Critic");
+        const instructions = critic.instructions.join("\n");
+        assert.match(instructions, /everything required present.*everything present required/);
+        assert.match(instructions, /Unmet criterion: cite the exact requirement line.*state what is missing.*agree:false/);
+        assert.match(instructions, /Untraceable addition:.*control, abstraction or artifact.*agree:false.*"remove it"/);
+        assert.match(instructions, /Anything else is a non-blocking observation: return agree:true/);
+        assert.match(instructions, /Required implementation details are traceable through the criterion they serve/);
+        for (const call of calls.filter((call) => call.role !== "Critic")) {
+            assert.doesNotMatch(call.instructions.join("\n"), /Make Critic review bidirectional/);
+        }
+    }
+});
+
+test("Critic blockers require correction while observations allow assigned-work acceptance", async () => {
+    for (const finding of [
+        "Unmet criterion: docs/requirements/api.md:12 requires a health endpoint; endpoint missing. Add it.",
+        "Untraceable addition: src/controls.mjs:8 adds an approval control with no requirement behind it; remove it",
+    ]) {
+        let round = 0;
+        const result = await runLoop({
+            ctx: context(async (prompt) => {
+                const input = JSON.parse(prompt);
+                if (input.kind === "doer") {
+                    round++;
+                    if (round > 1) {
+                        assert.equal(input.feedback.reviews.find((review) => review.role === "Critic").feedback, finding);
+                        assert.ok(input.feedback.governance.instructions.some((item) => item.evidence.includes(finding)));
+                    }
+                    return { status: "complete", summary: "Delivered.", artifact: {} };
+                }
+                const blocked = input.role === "Critic" && round === 1;
+                return { agree: !blocked, taskComplete: !blocked,
+                    unmetCriteria: blocked && finding.startsWith("Unmet") ? [finding] : [],
+                    feedback: blocked ? finding : "Non-blocking observation: naming could improve." };
+            }),
+            loop: loops.find((node) => node.id === "AssignedWorkDeveloperLoop"), key: "critic",
+            context: { assignment: { id: "api", doneWhen: "Provide the required health endpoint." } },
+        });
+        assert.equal(result.status, "agreed");
+        assert.equal(result.rounds, 2);
+        assert.equal(result.governanceHistory[0].reviews.find((review) => review.role === "Critic").agree, false);
+        assert.equal(result.reviews.find((review) => review.role === "Critic").agree, true);
+    }
+});
+
 function context(agent) {
     return { agent: async (prompt, options) => {
         const input = JSON.parse(prompt);

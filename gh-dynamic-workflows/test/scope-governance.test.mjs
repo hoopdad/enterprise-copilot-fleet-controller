@@ -50,6 +50,9 @@ test("every retry receives Scrum-only required correction without an opt-in guar
             assert.equal(options.agent, "workflow-reviewer");
             assert.match(input.instructions.join("\n"), /even if nobody flags scope expansion/);
             assert.match(input.instructions.join("\n"), /Never rewrite requirements or waive actual/);
+            assert.match(input.instructions.join("\n"), /untraceable present control, abstraction or artifact requires removal, not an optional enhancement/);
+            assert.match(input.instructions.join("\n"), /action closes with "remove it"/);
+            assert.match(input.instructions.join("\n"), /Anything else from Critic is a non-blocking observation, not mandatory work/);
         }
     });
     const result = await f.run();

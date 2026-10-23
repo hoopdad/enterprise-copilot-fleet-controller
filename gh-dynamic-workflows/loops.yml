@@ -37,7 +37,7 @@ roles:
   - name: Stakeholder
     description: "Provides input, feedback, and strategic direction"
   - name: Critic
-    description: "Compares requirements, acceptance criteria and definition of done to outcomes. Expert evaluator in the field as inferred by context"
+    description: "Checks both that everything required is present and everything present is required. Unmet criteria cite the requirement line and what is missing; untraceable controls, abstractions or artifacts block with 'remove it' as the closing action. Anything else is a non-blocking observation. Expert evaluator in the field as inferred by context"
   - name: Red Team
     description: "Expert cybersecurity analyst; finds risks and remediations for those risks"
 

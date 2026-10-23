@@ -70,6 +70,14 @@ real human-authority requirements still apply; these profiles are not a sandbox.
 Architecture -> UX -> Release Plan -> repeat Sprint Design, Sprint Architecture,
 Sprint Plan, assigned work, E2E, DevOps, Sprint Review and Retrospective ->
 Release Closeout. Each loop uses exactly its YAML owner and reviewer set.
+Critic reviews are bidirectional: everything required must be present, and
+everything present must be required. An **unmet criterion** blocks with the
+requirement line and what is missing. An **untraceable addition** (a present
+control, abstraction or artifact with no requirement behind it) also blocks,
+with **"remove it"** as the closing action. Traceability includes necessary
+implementation details and applicable approved scope, not just verbatim names
+in requirements. Anything else is a non-blocking observation.
+
 Before every unresolved round returns to that same owner, a read-only **Scrum
 Master** reconciles feedback against existing requirements/doneWhen, evidence,
 conflicts and the proportionate smallest sufficient correction. This is mandatory
