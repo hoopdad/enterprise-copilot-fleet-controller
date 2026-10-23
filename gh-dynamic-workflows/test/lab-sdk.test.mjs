@@ -7,8 +7,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { labMetadata } from "../lab-workflow.mjs";
 import { metadata } from "../workflow.mjs";
-import { ownerSchema, reviewerSchema } from "../lab-loops.mjs";
-import { triageSchema, architectureSchema, scopeDecisionSchema } from "../scope-governance.mjs";
+import { ownerSchema, reviewerSchema, findingSchema, checkSchema } from "../lab-loops.mjs";
 
 test("every declared schema object has an explicit type and no guessed SDK limits", () => {
     function check(schema) {
@@ -21,9 +20,8 @@ test("every declared schema object has an explicit type and no guessed SDK limit
     check(labMetadata.argsSchema);
     check(ownerSchema);
     check(reviewerSchema);
-    check(triageSchema);
-    check(architectureSchema);
-    check(scopeDecisionSchema);
+    check(findingSchema);
+    check(checkSchema);
     assert.equal(Object.hasOwn(labMetadata, "limits"), false);
 });
 
@@ -46,7 +44,9 @@ await joinSession({ workflows: [defineWorkflow({
     run: async (ctx) => {
         if (!ctx.args.nested) return { status: "needs-input", summary: "Fixture only; no delivery executed." };
         const tasks = [
-            { id: "a", title: "Fixture a", kind: "developer", owner: "Developer", dependsOn: [] },
+            { id: "skeleton", title: "Skeleton", kind: "devops", owner: "DevOps Engineer", dependsOn: [],
+                walkingSkeleton: true, doneWhen: "Deployed checks pass; azd handoff." },
+            { id: "a", title: "Fixture a", kind: "developer", owner: "Developer", dependsOn: ["skeleton"] },
             { id: "b", title: "Fixture b", kind: "ui", owner: "Developer", dependsOn: ["a"] },
         ];
         return createLoopRunner()({
@@ -58,16 +58,19 @@ await joinSession({ workflows: [defineWorkflow({
                 if (input.kind === "reviewer") {
                     if (input.loop.id === "SprintPlanLoop" && input.dispatch?.status !== "dispatched")
                         throw new Error("Planning review preceded actual original-loop dispatch");
-                    return { agree: true, feedback: "Fixture review only", taskComplete: true, unmetCriteria: [] };
+                    return { checksValid: true, findings: [], feedback: "Fixture review only", verifiedProgress: [] };
                 }
                 const artifact = input.loop.id === "ReleasePlanLoop" ? { ReleasePlan: { sprints: [{ id: "fixture" }] } }
                     : input.loop.id === "SprintPlanLoop" ? { SprintPlan: { tasks } } : {};
-                return { status: "complete", summary: "Fixture only; no tools or actual agents", artifact };
+                return { status: "complete", summary: "Fixture only; no tools or actual agents", artifact, progress: [],
+                    checks: [{ id: "fixture", kind: "schema", command: "fixture only", requirement: "Synthetic fixture contract",
+                        environment: "deployed", exitCode: 0, evidence: "fixture.log" }] };
             },
         });
     },
 })] });
 `);
+    await writeFile(path.join(root, "fixture.log"), "Fixture only, not live delivery proof.\n");
     assert.equal(spawnSync("git", ["-C", root, "init", "--quiet"]).status, 0);
     const resultFile = path.join(root, "result.json");
     const probe = spawnSync("copilot", [
@@ -94,7 +97,7 @@ await joinSession({ workflows: [defineWorkflow({
     const nestedResult = JSON.parse(await readFile(resultFile, "utf8"));
     assert.equal(nestedResult.status, "completed", JSON.stringify(nestedResult));
     assert.equal(nestedResult.outcomes.find((outcome) => outcome.loopId === "SprintPlanLoop").dispatch.status, "dispatched");
-    assert.equal(nestedResult.outcomes.filter((outcome) => outcome.key.includes("/task/")).length, 2);
+    assert.equal(nestedResult.outcomes.filter((outcome) => outcome.key.includes("/task/") && !outcome.key.includes("/continuous/")).length, 3);
 });
 
 test("actual installed SDK accepts both workflow registrations", {

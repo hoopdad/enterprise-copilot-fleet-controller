@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import os from "node:os";
 import path from "node:path";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { workCardSchema, validateWorkCard, validateTaskCards } from "../work-cards.mjs";
@@ -8,6 +7,7 @@ import { runLoop, ownerSchema, reviewerSchema } from "../lab-loops.mjs";
 import { createLoopRunner, sprintTasks } from "../loop-workflow.mjs";
 import { outcomeContext } from "../task-context.mjs";
 import { definition, flattenLoops } from "../loop-source.mjs";
+import { checks, owner, review, fixtureRoot, fixtureBase, skeleton } from "./evidence.fixture.mjs";
 
 const card = (changes = {}) => ({
     role: "Developer", action: "Fix database-write access in QuestionAnswer API",
@@ -64,11 +64,11 @@ test("architecture, planning, owners and original reviewers share names and evid
             agent: async (prompt, options) => {
                 const input = JSON.parse(prompt);
                 calls.push({ ...input, schema: options.schema });
-                return input.kind === "doer" ? { status: "complete", summary: "Bounded work done.", artifact: {}, workCard }
-                    : { agree: true, feedback: "Inspected work.", workCard: card({ role: input.role }) };
+                return input.kind === "doer" ? owner({ workCard })
+                    : review({ workCard: card({ role: input.role }) });
             },
         };
-        const result = await runLoop({ ctx, loop: loops.find((loop) => loop.id === id), key: id, context: {} });
+        const result = await runLoop({ ctx, loop: loops.find((loop) => loop.id === id), key: id, context: { projectRoot: fixtureRoot } });
         assert.deepEqual(result.workCard, workCard);
         assert.equal(calls.filter((call) => call.kind === "reviewer").length,
             loops.find((loop) => loop.id === id).reviewers.length);
@@ -83,12 +83,15 @@ test("architecture, planning, owners and original reviewers share names and evid
 });
 
 test("file-backed plans retain identical cards through actual dispatch, reviews and dependency handoffs", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "work-card-plan-"));
+    const root = await mkdtemp(path.join(fixtureBase, ".work-card-plan-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const planned = card({ evidence: "", cause: "", failureCategories: [] });
     const task = { id: "api", title: planned.action, kind: "developer", owner: planned.role,
-        doneWhen: planned.doneWhen, dependsOn: [], workCard: planned };
-    await writeFile(path.join(root, "plan.json"), JSON.stringify({ tasks: [task] }));
+        doneWhen: planned.doneWhen, dependsOn: ["skeleton"], workCard: planned };
+    const walkingSkeleton = skeleton();
+    walkingSkeleton.workCard = card({ role: walkingSkeleton.owner, action: walkingSkeleton.title, doneWhen: walkingSkeleton.doneWhen });
+    await writeFile(path.join(root, "plan.json"), JSON.stringify({ tasks: [walkingSkeleton, task] }));
+    await writeFile(path.join(root, "checks.log"), "Synthetic deployed test fixture passed.\n");
     const calls = [];
     const solutionModel = { components: [{ id: "api", name: "QuestionAnswer API", supports: [] }],
         flows: [{ id: "qa", name: "Question-Answer", trigger: "User submits a question.", steps: [] }] };
@@ -98,30 +101,29 @@ test("file-backed plans retain identical cards through actual dispatch, reviews 
         agent: async (prompt) => {
             const input = JSON.parse(prompt);
             calls.push(input);
-            if (input.kind === "reviewer") return {
-                agree: true, taskComplete: true, unmetCriteria: [], feedback: "Checks inspected.",
-                workCard: card({ role: input.role }),
-            };
+            if (input.kind === "reviewer") return review({ workCard: card({ role: input.role }) });
             const artifact = input.loop.id === "ArchitectureLoop" ? { Architecture: { solutionModel } }
                 : input.loop.id === "ReleasePlanLoop" ? { ReleasePlan: { sprints: [{ id: "s1" }] } }
                 : input.loop.id === "SprintPlanLoop" ? { SprintPlan: { path: "plan.json" } } : {};
-            return { status: "complete", summary: "Bounded deliverable complete.", artifact,
+            return owner({ artifact, checks: checks({ evidence: "checks.log" }),
                 workCard: card({ role: input.role }),
-                ...(input.loop.id === "SprintPlanLoop" ? { taskCards: [{ id: task.id, workCard: planned }] } : {}) };
+                ...(input.loop.id === "SprintPlanLoop" ? { taskCards: [
+                    { id: walkingSkeleton.id, workCard: walkingSkeleton.workCard }, { id: task.id, workCard: planned },
+                ] } : {}) });
         },
     });
     assert.equal(result.status, "completed");
-    const worker = calls.find((call) => call.kind === "doer" && call.context.assignment);
+    const worker = calls.find((call) => call.kind === "doer" && call.context.assignment?.id === "api");
     assert.deepEqual(worker.context.assignment.workCard, planned);
     assert.deepEqual(worker.context.documents.Architecture.solutionModel, solutionModel);
     const plannerReview = calls.find((call) => call.kind === "reviewer" && call.loop.id === "SprintPlanLoop");
     assert.equal(plannerReview.dispatch.status, "dispatched");
-    assert.deepEqual(plannerReview.owner.taskCards[0].workCard, planned);
+    assert.deepEqual(plannerReview.owner.taskCards[1].workCard, planned);
     assert.deepEqual(result.outcomes.find((outcome) => outcome.loopId === "AssignedWorkDeveloperLoop").workCard,
         card({ role: "Developer" }));
 });
 
-test("feedback coordination records its own scoped card without adding an acceptance reviewer", async () => {
+test("feedback retains owner/reviewer cards directly without governance calls or additional reviewers", async () => {
     const loop = flattenLoops(definition.workflows.ReleaseLoop.steps).find((item) => item.id === "ArchitectureLoop");
     let round = 0;
     const governanceCalls = [];
@@ -129,22 +131,17 @@ test("feedback coordination records its own scoped card without adding an accept
         log() {}, step: async (_, fn) => fn(), parallel: (items) => Promise.all(items.map((fn) => fn())),
         agent: async (prompt, options) => {
             const input = JSON.parse(prompt);
-            if (input.kind === "governance") {
-                governanceCalls.push(input);
-                assert.ok(options.schema.required.includes("workCard"));
-                return { summary: "Original correction remains.", requiredCorrections: [], scopeQuestions: [],
-                    workCard: card({ role: "Scrum Master", action: "Reconcile Question-Answer access feedback" }) };
-            }
-            if (input.kind === "doer") return {
+            if (input.kind === "governance") governanceCalls.push(input);
+            if (input.kind === "doer") return owner({
                 status: ++round === 1 ? "rework" : "complete", summary: "Architecture finding.", artifact: {},
                 workCard: card({ role: input.role }),
-            };
-            return { agree: true, feedback: "Accurate finding.", workCard: card({ role: input.role }) };
+            });
+            return review({ workCard: card({ role: input.role }) });
         },
     };
-    const result = await runLoop({ ctx, loop, key: "feedback", context: {} });
+    const result = await runLoop({ ctx, loop, key: "feedback", context: { projectRoot: fixtureRoot } });
     assert.equal(result.status, "agreed");
-    assert.equal(governanceCalls.length, 1);
-    assert.equal(result.governanceHistory[0].governance.triage.workCard.role, "Scrum Master");
+    assert.equal(governanceCalls.length, 0);
+    assert.equal(result.governanceHistory, undefined);
     assert.deepEqual(result.reviews.map((review) => review.role), loop.reviewers);
 });

@@ -1,6 +1,6 @@
 # HUMAN-EDITED SOURCE: Edit this file directly, then run: ./compact.sh docs/runbooks/loops.yml docs/runbooks/compact-loop.yml
 # Optional local guard automation: ./install-git-hooks.sh
-version: "1.0"
+version: "2.0"
 entities:
   - name: Architecture
     description: "End-to-end technical design including principles, toolsets, and frameworks"
@@ -37,9 +37,9 @@ roles:
   - name: Stakeholder
     description: "Provides input, feedback, and strategic direction"
   - name: Critic
-    description: "Checks both that everything required is present and everything present is required. Unmet criteria cite the requirement line and what is missing; untraceable controls, abstractions or artifacts block with 'remove it' as the closing action. Anything else is a non-blocking observation. Expert evaluator in the field as inferred by context"
+    description: "Reviews requirement-to-outcome and outcome-to-requirement traceability and completion-check suitability. A finding blocks only with a docs/requirements line citation or a failing emitted check; otherwise it is a non-blocking observation. Untraceable additions close with 'remove it' only when backed by such evidence."
   - name: Red Team
-    description: "Expert cybersecurity analyst; finds risks and remediations for those risks"
+    description: "Reviews infrastructure configurations and application-library CVEs only. Cite the affected configuration or library/version and CVE. Findings block only with a docs/requirements line citation or a failing emitted check; otherwise they are non-blocking observations, not invented controls."
 
 workflows:
   ReleaseLoop:
@@ -60,7 +60,7 @@ workflows:
           - "Product Owner"
           - "Red Team"
           - "Critic"
-        completeWhen: "Owner and reviewers agree."
+        completeWhen: "Emitted architecture schema/contract checks pass; reviewers verify the checks cover requirements and assess suitability."
 
       - step: "2"
         id: UserExperienceLoop
@@ -76,7 +76,7 @@ workflows:
         reviewers:
           - "Product Owner"
           - "Critic"
-        completeWhen: "Owner and reviewers agree."
+        completeWhen: "Emitted UX schema/contract checks pass; reviewers assess coverage and suitability, with qualitative observations non-blocking."
 
       - step: "3"
         id: ReleasePlanLoop
@@ -95,7 +95,7 @@ workflows:
           - "Architect"
           - "Designer"
           - "Critic"
-        completeWhen: "Owner and reviewers agree."
+        completeWhen: "Emitted release-plan validation checks pass; reviewers verify requirement coverage and that sprint 1 starts with a deployed azd walking skeleton."
 
       - step: "4"
         id: SprintLoop
@@ -117,7 +117,7 @@ workflows:
             reviewers:
               - "Product Owner"
               - "Critic"
-            completeWhen: "Owner and reviewers agree."
+            completeWhen: "Emitted design schema/contract checks pass and reviewers verify suitability; assigned design work also passes in the deployed environment."
 
           - step: "4.2"
             id: SprintArchitectureLoop
@@ -135,12 +135,12 @@ workflows:
               - "Product Owner"
               - "Critic"
               - "Red Team"
-            completeWhen: "Owner and reviewers agree."
+            completeWhen: "Emitted architecture schema/contract checks pass and reviewers verify suitability against committed requirements."
 
           - step: "4.3"
             id: SprintPlanLoop
             name: "Sprint Plan Loop"
-            description: "Plan and assign sprint work with dependency-aware sequencing and parallel fan-out for independent tasks."
+            description: "Plan sprint work with dependency-aware parallel fan-out. Sprint 1 starts with a devops task marked walkingSkeleton:true, with no dependencies, deploying a walking skeleton through azd. All other sprint-1 tasks transitively depend on it. Every assignment's doneWhen includes passing in the deployed environment. Accepted scope changes land as committed docs/requirements edits plus tests, not runtime dispositions."
             inputs:
               - "Sprint"
               - "SprintArchitecture"
@@ -156,12 +156,12 @@ workflows:
               - "Product Owner"
               - "Architect"
               - "Critic"
-            completeWhen: "Owner and reviewers agree, all todos are assigned, and independent work is dispatched in parallel."
+            completeWhen: "Emitted plan schema/dependency checks pass, all todos are assigned, and independent work is dispatched in parallel; reviewers verify the checks, deployed-first dependencies and requirement coverage."
 
           - step: "4.4"
             id: AssignedWorkUIDeveloperLoop
             name: "Assigned Work - UI Developer Loop"
-            description: "Build, test, and validate UI work for sprint scope."
+            description: "Build, deploy, and validate UI work continuously against the walking skeleton."
             inputs:
               - "AssignedWorkUIDeveloper"
               - "SprintDesign"
@@ -175,12 +175,12 @@ workflows:
               - "Architect"
               - "Designer"
               - "Critic"
-            completeWhen: "Owner and reviewers agree."
+            completeWhen: "Emitted checks pass in the deployed environment and reviewers verify that the checks cover assigned requirements."
 
           - step: "4.5"
             id: AssignedWorkDeveloperLoop
             name: "Assigned Work - Developer Loop"
-            description: "Build, test, and validate backend and business logic across all relevant tiers."
+            description: "Build, deploy, and validate backend and business logic continuously across all relevant tiers."
             inputs:
               - "AssignedWorkDeveloper"
               - "Architecture"
@@ -192,12 +192,12 @@ workflows:
             reviewers:
               - "Architect"
               - "Critic"
-            completeWhen: "Owner and reviewers agree."
+            completeWhen: "Emitted checks pass in the deployed environment and reviewers verify that the checks cover assigned requirements."
 
           - step: "4.6"
             id: EndToEndTestLoop
             name: "End-to-End Test Loop"
-            description: "Run integration tests across UI and all backend tiers."
+            description: "Continuously run deployed integration tests across UI and backend tiers after each accepted assignment, before releasing dependent work."
             inputs:
               - "Architecture"
               - "SprintDesign"
@@ -212,12 +212,12 @@ workflows:
               - "Architect"
               - "Critic"
               - "Product Owner"
-            completeWhen: "Owner and reviewers agree test outcomes are accurate and actionable."
+            completeWhen: "Emitted deployed E2E checks pass and reviewers verify requirement coverage and check suitability. A reported FAIL remains a failure, not completed work."
 
           - step: "4.7"
             id: DevOpsWorkLoop
             name: "DevOps Work Loop"
-            description: "Write and run scripts for scan, build, and deploy (wrapped with azd)."
+            description: "Deploy the initial walking skeleton through azd and continuously scan, build, deploy and probe each assignment. DevOps tasks participate in the same dependency graph as implementation, not a late stage."
             inputs:
               - "Architecture"
               - "UIWork"
@@ -230,7 +230,7 @@ workflows:
               - "Architect"
               - "Critic"
               - "Developer"
-            completeWhen: "Owner and reviewers agree and cloud-deployed system passes tests."
+            completeWhen: "Cloud-deployed system passes emitted tests/probes and reviewers verify the checks are appropriate. All deployment uses azd within existing authority."
 
           - step: "4.8"
             id: SprintReviewLoop
@@ -248,7 +248,7 @@ workflows:
               - "Critic"
               - "Architect"
               - "Red Team"
-            completeWhen: "Owner and reviewers agree."
+            completeWhen: "Emitted deployed acceptance checks pass and Git accounts for intended sprint changes; reviewers verify the checks cover committed requirements."
 
           - step: "4.9"
             id: SprintRetroLoop
@@ -269,7 +269,7 @@ workflows:
               - "Red Team"
               - "Designer"
               - "Developer"
-            completeWhen: "Owner and reviewers agree."
+            completeWhen: "Emitted artifact schema/consistency checks pass; reviewers assess check suitability and record process suggestions as observations."
 
       - step: "5"
         id: ReleaseCloseoutLoop
@@ -286,4 +286,4 @@ workflows:
           - "Stakeholder"
           - "Architect"
           - "Critic"
-        completeWhen: "Owner and reviewers agree."
+        completeWhen: "Emitted release acceptance and Git reconciliation checks pass; reviewers verify coverage of committed requirements and tests."

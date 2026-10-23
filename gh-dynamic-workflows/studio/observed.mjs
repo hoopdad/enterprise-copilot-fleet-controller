@@ -100,6 +100,27 @@ export function workOutcome(agent, { phase } = {}) {
         tone: "waiting",
     };
     if (work?.kind === "review") {
+        if (typeof work.checksValid === "boolean") {
+            const findings = work.findings ?? [];
+            return {
+                title: !work.checksValid ? "Check suitability changes requested"
+                    : findings.some((item) => item.type === "blocking") ? "Checks suitable; blocking claims submitted"
+                        : "Checks suitable; acceptance unconfirmed",
+                summary: [
+                    "Reviewer assessment of check suitability, not task completion or final acceptance.",
+                    "Submitted findings and evidence are not runtime-verified by Studio; blocking claims require runtime validation.",
+                    work.summary,
+                    ...findings.map((item) => [
+                        `Submitted ${item.type === "blocking" ? "blocking claim" : "observation"}: ${item.summary}`,
+                        item.action ? `Action: ${item.action}` : null,
+                        item.requirement ? `Requirement: ${item.requirement.path}:${item.requirement.line}` : null,
+                        item.failingCheck ? `Submitted failing check: ${item.failingCheck}` : null,
+                        item.scope ? `Scope: ${item.scope}` : null,
+                    ].filter(Boolean).join(" ")),
+                ].filter(Boolean).join("\n").slice(0, 12_000),
+                tone: work.checksValid ? "waiting" : "error",
+            };
+        }
         if (!work.agree) return { title: "Changes requested", summary: work.summary, tone: "error" };
         const title = work.ownerStatus === "needs-replan" ? "Agrees: scoped replanning needed"
             : work.ownerStatus === "needs-input" ? "Agrees: human input needed"

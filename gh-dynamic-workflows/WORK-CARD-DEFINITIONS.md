@@ -94,7 +94,7 @@ Show the following where relevant:
 | Failure category | The kind of problem, allowing multiple categories |
 | Must act | The role responsible for the next action |
 | Goal | The assigned action or intended result |
-| Done when | Task-specific acceptance goal |
+| Done when | Task-specific acceptance goal, including passing deployed checks for assigned work |
 | Location | One file, or a meaningful common folder for several files |
 | Evidence | What was observed, what is known, and what remains uncertain |
 | Verification | What has actually been verified, or not yet verified |
@@ -133,6 +133,37 @@ and reviewer agreement do not establish that an end-to-end flow works.
 The assigned acceptance goal describes what must become true, not what has
 already been proven.
 
+Owners emit required `checks` arrays containing
+`{id,kind,command,requirement,environment,exitCode,evidence}`. Kind is `test`,
+`schema` or `deployed-probe`; environment is `local` or `deployed`. Each check's
+`evidence` is a nonempty repository-relative log/result file path, not
+arbitrary prose. The runtime checks readability and repository confinement;
+reviewers verify actual execution and credibility. Completion
+requires nonempty passing checks, and assigned work requires a passing deployed
+check. Commands run through owners' ordinary permission-bound tools, not an
+unrestricted runtime executor. Reviewers remain read-only and report `checksValid`
+for check suitability and verification rather than a subjective completion vote.
+Required reviewer fields are `checksValid`, `findings`, `feedback` and `workCard`,
+not `agree`.
+
+The Git-tracked `docs/requirements` files and regression tests are the durable
+ledger, replacing Scrum feedback triage, Architect advice and Product Owner
+disposition ledgers. Accepted changes require a committed requirements edit and
+regression test within existing user authority. Declined proposals never enter
+the ledger. Cards and historical audits are evidence, not authority; no runtime
+dispositions or governance are needed.
+
+Critic/Red Team findings block only with a `docs/requirements` file:line or a
+failing owner-emitted check. Unsupported findings remain nonblocking even with
+raw `agree:false`. Red Team reviews only infrastructure configuration and
+application-library CVEs; CVE findings identify the CVE, library and version.
+Findings use `type:"blocking"|"observation"`; a blocking finding has exactly
+one of `requirement:{path,line}` or `failingCheck`. Every finding requires
+`summary` and `action`; requirement lines are positive integers and `failingCheck`
+names an emitted check ID. Red Team findings require
+`scope:"infrastructure-config"|"dependency-cve"`. Observation cards do not
+invent blocking authority.
+
 Do not invent names, diagnoses, verification, or human-action requirements
 for historical work lacking that information.
 
@@ -150,7 +181,7 @@ This is an example, not a diagnosis of an existing task.
 | Failure category | Identity/access |
 | Must act | Developer |
 | Goal | Allow the API identity to save questions and answers |
-| Done when | The API identity can save both questions and answers |
+| Done when | Deployed checks verify that the API identity saves both questions and answers |
 | Location | `infra\` (if several relevant files are there) |
 | Evidence | Write attempt returned permission denied; missing permission not yet identified |
 | Verification | Not yet verified |
@@ -170,14 +201,20 @@ display labels:
    technical provenance in details without exposing arbitrary prompts or tools.
 
 Implementation surfaces include `work-cards.mjs`, `lab-loops.mjs`,
-`loop-workflow.mjs`, `task-context.mjs`, `scope-governance.mjs`,
+`loop-workflow.mjs`, `task-context.mjs`,
 `studio/usage.mjs`, `studio/observed.mjs`, and `studio/app.mjs`.
 `work-cards.mjs` owns the report schema, runtime validation and shared
 component/flow instructions; it is shipped by the workflow installer.
-The original `loops.yml` stages and roles are unchanged.
+Existing roles are reused. DevOps assignments share the task graph; Sprint 1
+starts with a dependency-free DevOps `walkingSkeleton:true` task using `azd`,
+and every other task depends on it transitively. After every assignment, existing
+DevOps deploys/verifies the increment, then E2E tests the latest deployment before
+dependents are released, not as late-only stages. All assigned loops acquire
+`workflow:deployed-environment` through assignment, DevOps and E2E verification,
+serializing otherwise independent work against the shared environment.
 
-New report schemas request cards for owners, reviewers and feedback
-coordinators. Supplied cards are validated; legacy replay can omit them.
+New report schemas request cards for owners and reviewers.
+Supplied cards are validated; historical records can omit them.
 SprintPlan task metadata supplies context for pending work when its exact
 planning invocation is available in observed records; final reports supersede
 that planned context. New SprintPlan reports include a compact `taskCards`
@@ -185,6 +222,9 @@ projection even for file-backed plans; the runner checks it against the resolved
 assignments before dispatch. File-only historical plans without retained task
 metadata do not gain invented pending-card context.
 
-Preserve existing workflow stages, reviewer sets, acceptance semantics,
-authority, and exact evidence attribution. Framework source changes do not
+Preserve existing reviewer roles, real permissions, authority and exact evidence
+attribution while applying the check-based completion contract. Framework source changes do not
 automatically update an installed or active target workflow.
+The current engine is `yaml-loops-v2-evidence`; accepted `yaml-loops-v1` and earlier
+v2 journals remain historical evidence, not a way to bypass or replay new checks.
+Start a new run after adoption rather than treating historical cards as current acceptance.

@@ -1,278 +1,260 @@
-import { dispositionContext, promptFeedback, priorDispositionInstructions, reconcileFeedback } from "./scope-governance.mjs";
+import path from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { contextInstructions } from "./task-context.mjs";
 import { workCardSchema, taskCardsSchema, validateWorkCard, validateTaskCards, workCardInstructions, architectureCardInstructions, planningCardInstructions } from "./work-cards.mjs";
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const text = (value) => typeof value === "string" && !!value.trim();
+const executeFile = promisify(execFile);
+export const checkSchema = {
+    type: "object", additionalProperties: false,
+    required: ["id", "kind", "command", "requirement", "environment", "exitCode", "evidence"],
+    properties: {
+        id: { type: "string", minLength: 1 },
+        kind: { type: "string", enum: ["test", "schema", "deployed-probe"] },
+        command: { type: "string", minLength: 1 }, requirement: { type: "string", minLength: 1 },
+        environment: { type: "string", enum: ["local", "deployed"] },
+        exitCode: { type: "integer" }, evidence: { type: "string", minLength: 1 },
+    },
+};
+const findingFields = {
+    summary: { type: "string", minLength: 1 }, action: { type: "string", minLength: 1 },
+    scope: { type: "string", enum: ["infrastructure-config", "dependency-cve"] },
+};
+export const findingSchema = { oneOf: [
+    { type: "object", additionalProperties: false, required: ["type", "summary", "action"],
+        properties: { type: { const: "observation" }, ...findingFields } },
+    { type: "object", additionalProperties: false, required: ["type", "summary", "action"],
+        properties: { type: { const: "blocking" }, ...findingFields,
+            requirement: { type: "object", additionalProperties: false, required: ["path", "line"],
+                properties: { path: { type: "string", pattern: "^docs/requirements/.+" }, line: { type: "integer", minimum: 1 } } },
+            failingCheck: { type: "string", minLength: 1 } },
+        oneOf: [{ type: "object", required: ["requirement"], not: { type: "object", required: ["failingCheck"] } },
+            { type: "object", required: ["failingCheck"], not: { type: "object", required: ["requirement"] } }] },
+] };
 export const ownerSchema = {
-    type: "object", required: ["status", "summary", "artifact", "workCard"],
+    type: "object", required: ["status", "summary", "artifact", "workCard", "checks"],
     properties: {
         status: { type: "string", enum: ["complete", "rework", "needs-replan", "needs-input"] },
-        summary: { type: "string" }, artifact: { type: "object" },
-        nextAction: { type: "string" },
-        workCard: workCardSchema,
-        taskCards: taskCardsSchema,
-        progress: { type: "array", items: {
-            type: "object", required: ["id", "evidence"],
-            properties: { id: { type: "string", minLength: 1 }, evidence: { type: "string", minLength: 1 } },
-        } },
+        summary: { type: "string" }, artifact: { type: "object" }, nextAction: { type: "string" },
+        limitation: { type: "string" }, workCard: workCardSchema, taskCards: taskCardsSchema,
+        checks: { type: "array", items: checkSchema },
+        progress: { type: "array", items: { type: "object", required: ["id", "evidence"],
+            properties: { id: { type: "string", minLength: 1 }, evidence: { type: "string", minLength: 1 } } } },
     },
 };
 export const reviewerSchema = {
-    type: "object", required: ["agree", "feedback", "workCard"],
+    type: "object", required: ["checksValid", "findings", "feedback", "workCard"],
     properties: {
-        agree: { type: "boolean" }, feedback: { type: "string" },
-        workCard: workCardSchema,
-        taskComplete: { type: "boolean" },
-        unmetCriteria: { type: "array", items: { type: "string" } },
+        checksValid: { type: "boolean" }, findings: { type: "array", items: findingSchema },
+        feedback: { type: "string" }, workCard: workCardSchema,
         verifiedProgress: { type: "array", items: { type: "string", minLength: 1 }, uniqueItems: true },
     },
 };
 
+// Resolve only repository-local evidence; neither evidence nor citations may escape through symlinks.
+async function sourceFile(root, relative) {
+    if (!root || !text(relative) || path.isAbsolute(relative)) throw new Error("Expected a repository-relative evidence path");
+    const base = await realpath(root);
+    const file = await realpath(path.resolve(base, relative));
+    if (!file.startsWith(base + path.sep)) throw new Error("Evidence must stay inside projectRoot");
+    return readFile(file, "utf8");
+}
+
+async function requirementLine(root, requirement) {
+    const base = await realpath(root);
+    const file = await realpath(path.resolve(base, requirement.path));
+    if (!file.startsWith(path.join(base, "docs", "requirements") + path.sep)) return false;
+    const lines = (await sourceFile(base, requirement.path)).split(/\r?\n/);
+    const current = lines[requirement.line - 1];
+    if (!current?.trim()) return false;
+    // Fixed read-only Git operations verify authority; emitted check commands never run here.
+    const git = async (args) => (await executeFile("git", ["--no-pager", "-C", base, ...args],
+        { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 })).stdout;
+    const prefix = (await git(["rev-parse", "--show-prefix"])).replace(/[\r\n]+$/, "");
+    const committed = await git(["show", `HEAD:${prefix}${requirement.path}`]);
+    return committed.split(/\r?\n/)[requirement.line - 1] === current;
+}
+
+export async function verifyChecks(checks, context = {}) {
+    if (!Array.isArray(checks) || !checks.length) return "Completion requires nonempty executable checks.";
+    const ids = new Set();
+    for (const check of checks) {
+        if (!object(check) || !["id", "command", "requirement", "evidence"].every((field) => text(check[field])) ||
+            !["test", "schema", "deployed-probe"].includes(check.kind) ||
+            !["local", "deployed"].includes(check.environment) || !Number.isInteger(check.exitCode) ||
+            ids.has(check.id) || (check.kind === "deployed-probe" && check.environment !== "deployed")) {
+            return "Checks need unique ids and all structured execution/evidence fields.";
+        }
+        ids.add(check.id);
+        if (check.exitCode !== 0) return `Check ${check.id} failed with exit code ${check.exitCode}.`;
+        try {
+            if (!(await sourceFile(context.projectRoot, check.evidence)).trim()) throw new Error("Empty evidence");
+        } catch {
+            return `Check ${check.id} needs an inspectable nonempty repository-relative evidence file.`;
+        }
+    }
+    if ((context.assignment || context.continuousVerification) && !checks.some((check) => check.environment === "deployed")) {
+        return "Every assignment and continuous verification requires a passing deployed-environment check.";
+    }
+    return null;
+}
+
+export async function normalizeFindings(findings, { role, checks = [], projectRoot } = {}) {
+    return Promise.all((Array.isArray(findings) ? findings : []).map(async (finding) => {
+        const normalized = {
+            type: "observation", summary: text(finding?.summary) ? finding.summary : "Unsupported finding",
+            action: text(finding?.action) ? finding.action : "No blocking action established.",
+            ...(["infrastructure-config", "dependency-cve"].includes(finding?.scope) ? { scope: finding.scope } : {}),
+        };
+        if (!object(finding) || finding.type !== "blocking" || !text(finding.summary) || !text(finding.action) ||
+            (role === "Red Team" && !["infrastructure-config", "dependency-cve"].includes(finding.scope))) return normalized;
+        const requirement = finding.requirement;
+        const hasRequirement = requirement !== undefined, hasCheck = finding.failingCheck !== undefined;
+        if (hasRequirement === hasCheck) return normalized;
+        if (hasCheck && checks.some((check) => text(check.id) && check.id === finding.failingCheck &&
+            Number.isInteger(check.exitCode) && check.exitCode !== 0)) {
+            return { ...normalized, type: "blocking", failingCheck: finding.failingCheck };
+        }
+        if (object(requirement) && /^docs\/requirements\/.+/.test(requirement.path) &&
+            !requirement.path.split("/").includes("..") && Number.isInteger(requirement.line) && requirement.line > 0) {
+            try {
+                if (await requirementLine(projectRoot, requirement)) {
+                    return { ...normalized, type: "blocking", requirement };
+                }
+            } catch { /* Missing or inaccessible citations are observations, not authority. */ }
+        }
+        return normalized;
+    }));
+}
+
+const ownerInstructions = [
+    ...contextInstructions, ...workCardInstructions,
+    "Carry out this loop's work using ordinary permission-bound repository tools. Execute checks through those tools; this runtime never executes supplied command strings or broadens permissions.",
+    "The scope ledger is repository docs/requirements and tests, within the assigned doneWhen and exclusions. completeWhen must be verified by executable checks each round, not reviewer completion votes.",
+    "Return checks:[{id,kind:test|schema|deployed-probe,command,requirement,environment:local|deployed,exitCode,evidence}]. Record actual commands and exit codes; evidence is a repository-relative nonempty log/result file reviewers can inspect against actual source and commits. Never fabricate successful checks. All assignments require a passing deployed-environment check.",
+    "For genuinely non-executable work, report limitation explaining exactly why no suitable executable check exists and return needs-input or rework with nextAction. Empty checks never complete a loop; schema checks can validate planning artifacts but must actually run.",
+    "Return complete only when your own status and nonempty passing checks satisfy this loop's completeWhen. Reviewer pending responses are not owner rework. Return rework for correctable failures, needs-input for missing human authority, or needs-replan for a material scoped contract/architecture change.",
+    "Use artifact keys matching YAML outputs. ReleasePlan contains sprints with unique ids. SprintPlan contains tasks with id,title,kind (ui/developer/designer/devops),owner,dependsOn,doneWhen,exclusions,handoff.",
+    "Deployment comes first: the first sprint starts with walkingSkeleton:true,kind:devops,owner:DevOps Engineer,dependsOn:[],doneWhen requiring a deployed pass and azd handoff. Every other first-sprint task transitively depends on it. Include exclusiveResources for shared deployment/configuration state.",
+    "EndToEndTestLoop and DevOpsWorkLoop run after every accepted assignment, before its dependents. Failing E2E or deployment is not successful completion, even when accurately reported.",
+    "Read normalized feedback directly; observations are optional and never imply scope expansion. Fix evidence-backed blockers or failing/unsuitable checks. No Scrum triage, Architect advice, Product Owner decision or disposition ledger runs between rounds.",
+    "Before ending every turn that changes files, including rework or needs-input, commit your own intended changes before reviewers inspect them. Never commit secrets, generated junk or another person's work. Report branch and commit IDs; if committing fails, report the problem, not complete.",
+    "Inspect Git status first and preserve concurrent changes. Stage explicit owned paths and use path-scoped git commit --only in shared checkouts. Do not switch branches underneath active agents, discard work, force-push or remove Git locks. Keep task commits available for integration.",
+    "Use request.git.featureBranch when supplied. Include observed model/usage/elapsed metadata in commit messages only when actually available; never invent counters.",
+    "At SprintReview, SprintRetro and ReleaseCloseout reconcile intended work onto the feature branch or retain abandoned commits on a named branch with concrete abandonment reasons recorded in a feature-branch commit.",
+];
+const reviewInstructions = [
+    ...contextInstructions, ...workCardInstructions,
+    "Independently inspect actual source, command logs/result files and Git commits, not just owner summaries. Confirm checks actually exercise completeWhen, requirements and doneWhen on the claimed environment. Return checksValid:boolean for check suitability and evidence credibility, not a completion vote.",
+    "Return findings as a discriminated union: {type:observation,summary,action} OR {type:blocking,summary,action,requirement:{path:docs/requirements/...,line:positive integer}} OR {type:blocking,summary,action,failingCheck:id}. Cite exactly one source. Requirement lines must resolve inside projectRoot/docs/requirements and match the committed HEAD line; dirty/new fabricated lines cannot block. FailingCheck must name an emitted check with nonzero exitCode. Unsupported claims become observations.",
+    "Critic and Red Team can block ONLY with a valid structured finding citing a requirement line or failing check. Raw agree:false, taskComplete:false, prose and checksValid:false without a supported blocker cannot gate these roles. Other reviewers assess check adequacy using checksValid, not substitute completion votes.",
+    "Critic: is everything required present and everything present required? Missing work or untraceable additions need a real requirement line or failing check to block; otherwise record an observation. Requirements and tests are the scope ledger.",
+    "Red Team: findings are limited to infrastructure-config or dependency-cve; include scope with one of those values. Review infrastructure configurations and application library CVEs only, not general product security or invented governance controls.",
+    "Observations never block and there is no zero-findings requirement. Pending parallel reviewer responses are not unmet owner criteria. Preserve human authorization boundaries.",
+    "Keep review read-only. Inspect actual Git commits for changed files and require credible logs; do not fabricate missing evidence or waive deployed assignment checks. No dispositions or governance triage.",
+];
+
 export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgressRounds, agents = {}, decode, dispatch,
     scheduleAgent = (_, work) => work(), priority = 0 }) {
-    if (attempts !== undefined && (!Number.isSafeInteger(attempts) || attempts < 1)) {
-        throw new Error("An explicitly supplied loop attempt limit must be a positive integer");
-    }
-    if (maxNoProgressRounds !== undefined && (!Number.isSafeInteger(maxNoProgressRounds) || maxNoProgressRounds < 1)) {
-        throw new Error("An explicitly supplied maxNoProgressRounds must be a positive integer");
-    }
-    const guarded = maxNoProgressRounds !== undefined;
-    const unassignedPlanning = !context.assignment && [
-        "ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop",
-        "SprintDesignLoop", "SprintArchitectureLoop", "SprintPlanLoop",
-    ].includes(loop.id);
-    const doerSchema = { ...ownerSchema, required: [...ownerSchema.required,
-        ...(guarded ? ["progress"] : []), ...(loop.id === "SprintPlanLoop" ? ["taskCards"] : [])] };
-    const reviewSchema = { ...reviewerSchema, required: [...reviewerSchema.required,
-        ...(guarded ? ["verifiedProgress"] : []), ...(context.assignment ? ["taskComplete", "unmetCriteria"] : [])] };
+    if (attempts !== undefined && (!Number.isSafeInteger(attempts) || attempts < 1)) throw new Error("An explicitly supplied loop attempt limit must be a positive integer");
+    if (maxNoProgressRounds !== undefined && (!Number.isSafeInteger(maxNoProgressRounds) || maxNoProgressRounds < 1)) throw new Error("An explicitly supplied maxNoProgressRounds must be a positive integer");
+    const guardLimit = maxNoProgressRounds ?? 3;
+    const doerSchema = { ...ownerSchema, required: [...ownerSchema.required, "progress",
+        ...(loop.id === "SprintPlanLoop" ? ["taskCards"] : [])] };
+    const reviewSchema = { ...reviewerSchema, required: [...reviewerSchema.required, "verifiedProgress"] };
     return ctx.step(key, async () => {
-        let feedback = null;
-        const governanceHistory = [];
-        let noProgressRounds = 0;
-        const creditedProgress = new Map();
-        const creditedEvidence = new Set();
-        const evidenceKey = (item) => item.evidence.trim().replace(/\s+/g, " ").toLowerCase();
-        const progressState = () => ({ noProgressRounds, limit: maxNoProgressRounds, credited: [...creditedProgress.values()] });
+        let feedback = null, noProgressRounds = 0;
+        const credited = [], evidence = new Set();
+        const progressState = () => ({ noProgressRounds, limit: guardLimit, credited: [...credited] });
         for (let attempt = 1; attempts === undefined || attempt <= attempts; attempt++) {
             ctx.signal?.throwIfAborted();
             ctx.log(`${loop.name}: ${loop.owner}, round ${attempt}`);
-            const owner = await scheduleAgent("doer", async () => ctx.agent(JSON.stringify({
-                kind: "doer", role: loop.owner, loop, context, feedback: await promptFeedback(context, feedback),
-                priorDispositions: dispositionContext(context, governanceHistory.at(-1)?.governance),
-                ...(guarded ? { progressState: progressState() } : {}),
-                instructions: [
-                    ...contextInstructions,
-                    ...workCardInstructions,
+            const owner = await scheduleAgent("doer", () => ctx.agent(JSON.stringify({
+                kind: "doer", role: loop.owner, loop, context, feedback, progressState: progressState(),
+                instructions: [...ownerInstructions,
                     ...(["ArchitectureLoop", "SprintArchitectureLoop"].includes(loop.id) ? architectureCardInstructions : []),
                     ...(loop.id === "SprintPlanLoop" ? planningCardInstructions : []),
-                    "Carry out this loop's work, not just a proposal. Use ordinary repository tools as needed, including commands and deployment when authorized.",
-                    "Follow actual project instructions and the supplied user authority. This workflow does not expand permissions.",
-                    ...priorDispositionInstructions,
-                    "When feedback exists, act on its governance.instructions as ONE reconciled set, reflecting decisions in your next report/artifact. Raw feedback.owner/reviews and governanceHistory are audit evidence, not extra mandatory suggestions. Deferred/declined enhancements in governance.nonBlocking cannot block original acceptance. Preserve previous scope decisions unless explicitly superseded; do not replay conflicting or discarded demands. Never waive actual failures or rewrite requirements. If no correction remains, accurately report the original deliverable complete for the original reviewers to verify.",
-                    "Research and resolve technical issues within your work loop; do not invent prerequisite approval stages.",
-                    "Return complete when you accept your deliverable and have satisfied this loop's substantive completeWhen criteria. Owner status complete is your own acceptance, not a claim that reviewers have already agreed. Pending reviewer votes are not owner rework: the orchestrator collects the original reviews after your response and records agreement only when the original reviewers agree. Never claim collective acceptance before those votes or waive substantive criteria such as passing cloud-deployed tests. Return rework for a concrete unmet criterion you can address, or needs-input for a decision or authority only the user can supply.",
-                    "Judge completion against the assigned task's doneWhen, exclusions and handoff, not the whole product ambition or all sprint-level criteria it contributes to. Bounded research can complete with actionable negative or unresolved findings when that satisfies its scope; task completion never asserts a working or live-ready capability.",
-                    "Use rework only for a concrete unmet assigned criterion or an untraceable addition identified by Critic, with a next action that can close it (remove it for an untraceable addition), not merely because further useful investigation is possible. Return needs-replan when a finding materially changes architecture, contracts, feasibility or task scope; identify the decision and affected deliverable in summary. This is internal Architect/Scrum Master coordination, not human needs-input.",
-                    ...(unassignedPlanning ? [
-                        "For an unassigned planning/release loop, resolve internal replanning in this existing owner loop using the retained feedback and artifacts. Correct architecture/ownership here when you are Architect; describe concrete downstream work for the original ReleasePlan/Scrum Master stages. Do not repeatedly return needs-replan merely to request those later stages or other parallel reviewers' votes. Do not claim complete until this loop's own deliverable is satisfied.",
-                    ] : []),
-                    ...(!context.assignment && !unassignedPlanning ? [
-                        "For an execution, test or deployment loop, report a material prerequisite/architecture/contract change as needs-replan for the existing Architect/Scrum Master roles. Do not repeatedly reread an unchanged prerequisite blocker or claim substantive completion just because its report is accurate. Original stage order, reviewers and deployed-test conditions remain required.",
-                    ] : []),
-                    "Use artifact keys matching the YAML outputs. ReleasePlan contains sprints with unique ids; SprintPlan contains assigned tasks with id, title, kind (ui/developer/designer/devops), owner and dependsOn.",
-                    "Report actual failures and uncertainty. Accurate FAIL with feedback can satisfy the EndToEndTestLoop's agreement condition; do not turn it into a fabricated PASS.",
-                    "Before ending every turn that changes files, including rework or needs-input, commit your own intended changes before reviewers inspect them. Include documentation, tests and partial work worth retaining; never commit secrets or ignored build outputs. Report the branch and commit IDs in your summary/artifact. If committing fails, report the actual problem; do not claim complete.",
-                    "When actually available, include model name, input tokens, cached/cache-read tokens, output tokens and elapsed time in the Git commit message. Use observed values with units/scope; omit unavailable values, never invent zeroes or infer exact counters from estimates. If final usage becomes available only afterward, an ordinary follow-up metadata commit can reference the original code commit; do not amend reviewed history just to add usage.",
-                    "Use request.git.featureBranch when supplied, otherwise the project's intended feature branch. Establish that branch before parallel writing begins; do not switch a checkout underneath active agents. If working on a separate task branch, keep its commits available for integration and never delete unmerged work.",
-                    "Inspect Git status first and preserve other agents' and the user's changes. Stage and commit explicit owned paths only; in a shared checkout use path-scoped git commit --only rather than committing the whole index. Do not switch a shared checkout's branch during concurrent work, force-push, discard work or remove another process's Git lock. Retry ordinary transient index contention rather than losing changes.",
-                    "For needs-input, state the exact missing decision or authority in summary and an actionable nextAction. Do not request new approval for already-authorized ordinary work.",
-                    ...(guarded ? [
-                        "Return progress: [{id,evidence}] for concrete advances made this round toward completeWhen; return [] if none. Use stable milestone/check/feedback IDs and exact inspectable file, test, or outcome evidence.",
-                        "Previously existing work, changed prose, file churn, repeated tests/results, new labels for the same advance, and activity alone are not new progress. Do not reclaim anything in progressState.credited under another ID. Independent reviewers must verify advances against prior evidence.",
-                        "Productive rounds have no total cap unless attempts was explicitly supplied. Consecutive rounds without new progress verified by every original reviewer stop at progressState.limit.",
-                    ] : []),
-                    ...(dispatch ? [
-                        "For SprintPlanLoop, return complete with assigned SprintPlan.tasks when your plan is ready to dispatch. The orchestrator then dispatches dependency-ready original work loops before your planning reviewers inspect the plan and actual dispatch.",
-                        "Do not start substitute agents yourself or report needs-input merely because dispatch is owned by the orchestrator. Planning agreement requires assignment and dispatch, not completion of implementation.",
-                        "Use critical-path analysis with rough estimatedMinutes:{implementation,review,integration}; do not spend excessive time predicting durations. Distinguish needing an agreed interface or fixture from needing the full implementation. dependsOn must name the smallest useful accepted handoff, not a whole subsystem by habit.",
-                        "Split broad foundations into useful contract/fixture handoffs, substantial independent implementation tasks and explicit integration/refactoring tasks using existing task kinds. Document what tasks produce/consume and their acceptance criteria. Favor large amounts of parallel work with a small amount of integration refactoring; contracts are working agreements, not frozen monuments.",
-                        "File overlap is an integration risk, not automatically a technical dependency. Coordinate genuinely conflicting shared edits, branch operations, test databases, ports and other mutable resources using matching exclusiveResources names. These resources are held for the assignment including reviews; split tasks at useful boundaries to avoid unnecessarily serializing whole subsystems. No worktree isolation is supplied by this runner.",
-                        "As Scrum Master, identify the authorized feature branch (request.git.featureBranch when supplied), establish ownership of shared files and Git reconciliation, and include integration work to get every task's commits onto that feature branch. Never silently commit, stash or discard pre-existing user work. Do not require implementation to finish merely to approve this dispatch-ready plan.",
-                        "Give every task a concise doneWhen string, exclusions array and handoff string. Separate what this task must satisfy from sprint/product acceptance it merely contributes to. Research tasks must state whether actionable unresolved/unsupported findings complete the assignment, and leave live implementation/verification in their actual owning tasks.",
-                    ] : []),
-                    ...(context.scopeRevision ? [
-                        "This is a scoped amendment using the existing Architect and Scrum Master roles, not a full architecture restart or new approval stage. Resolve only the reported scope/contract issue; preserve user requirements, authority and unrelated running/accepted work.",
-                        "Architect: return the affected SprintArchitecture disposition. Scrum Master: return SprintPlan.tasks as a self-contained replacement graph for this one assignment, with explicit doneWhen/exclusions/handoffs. Its already accepted prerequisites are in scopeRevision.dependencies; do not reference unrelated in-flight task IDs. Keep new dependency edges inside this replacement graph. Preserve the outer plan on disk too: use a separate scoped amendment file if saving this replacement graph. Do not change the outer graph or require later DevOps before implementation; defer live work to its original stage.",
-                    ] : []),
-                    ...(["SprintReviewLoop", "SprintRetroLoop", "ReleaseCloseoutLoop"].includes(loop.id) ? [
-                        "Reconcile all sprint/release work in Git before reporting complete: every intended file change must be committed and every task commit merged into the authorized feature branch, or explicitly abandoned. Resolve ordinary integration/refactoring here; do not invent a new acceptance stage.",
-                        "For abandoned work, retain its code commits on a named branch and record the task, retained branch/commit IDs and concrete abandonment reason in a commit message on the feature branch (an empty documentation commit is acceptable). Do not delete the retained branch. A chat note or uncommitted explanation is not sufficient. Report actual merged/abandoned dispositions for the Scrum Master reviewer.",
-                    ] : []),
+                    "Report progress:[{id,evidence}] only for substantive NEW advances; repeated evidence, prose churn and activity alone are not progress.",
+                    ...(dispatch ? ["Plan completion requires dispatch-ready assignments, not completed implementation. Use rough estimatedMinutes critical paths and bounded contract handoffs. Match exclusiveResources for mutable contention, not merely file overlap."] : []),
+                    ...(context.scopeRevision ? ["Resolve only the affected scoped amendment with existing Architect/Scrum Master loops. Preserve unrelated accepted work and requirements; use a separate replacement graph with internal dependency IDs."] : []),
                 ],
             }), { agent: agents.owner ?? agents.doer ?? "workflow-owner", label: `${key}:doer:${attempt}`, schema: doerSchema }), priority);
             if (!object(owner) || !["complete", "rework", "needs-replan", "needs-input"].includes(owner.status) ||
-                typeof owner.summary !== "string" || !object(owner.artifact)) {
-                throw new Error(`Invalid do-er response in ${loop.id}; no completion was recorded`);
-            }
+                typeof owner.summary !== "string" || !object(owner.artifact)) throw new Error(`Invalid do-er response in ${loop.id}; no completion was recorded`);
             validateWorkCard(owner.workCard, `${loop.id} owner`);
-            if (guarded && (!Array.isArray(owner.progress) || owner.progress.some((item) =>
-                !object(item) || typeof item.id !== "string" || !item.id.trim() || item.id !== item.id.trim() ||
-                typeof item.evidence !== "string" || !item.evidence.trim()) ||
-                new Set(owner.progress.map((item) => item.id)).size !== owner.progress.length)) {
-                throw new Error(`Invalid do-er progress in ${loop.id}; no progress was credited`);
-            }
-            let transportIssue = null;
-            if (owner.status === "complete" && decode) {
+            if (!Array.isArray(owner.checks)) throw new Error(`Invalid do-er checks in ${loop.id}; no completion was recorded`);
+            if (!Array.isArray(owner.progress) || owner.progress.some((item) => !object(item) || !text(item.id) || !text(item.evidence)) ||
+                new Set(owner.progress.map((item) => item.id)).size !== owner.progress.length) throw new Error(`Invalid do-er progress in ${loop.id}; no progress was credited`);
+            let transportIssue = await verifyChecks(owner.checks, context);
+            if (owner.status === "complete" && !transportIssue && decode) {
                 try {
                     await decode(owner.artifact);
                     if (loop.id === "SprintPlanLoop") validateTaskCards(owner.taskCards, owner.artifact.SprintPlan?.tasks, loop.id);
-                }
-                catch (error) { transportIssue = error.message; }
+                } catch (error) { transportIssue = error.message; }
             }
-            const dispatched = owner.status === "complete" && !transportIssue && dispatch
-                ? await dispatch(owner.artifact, attempt, dispositionContext(context, governanceHistory.at(-1)?.governance)) : undefined;
+            const dispatched = owner.status === "complete" && !transportIssue && dispatch ? await dispatch(owner.artifact, attempt) : undefined;
             let reviews;
-            try { reviews = await ctx.parallel(loop.reviewers.map((role) => async () => {
-                const review = await scheduleAgent("reviewer", async () => ctx.agent(JSON.stringify({
-                    kind: "reviewer", role, loop, context, owner, transportIssue, dispatch: dispatched?.context, feedback: await promptFeedback(context, feedback),
-                    priorDispositions: dispositionContext(context, governanceHistory.at(-1)?.governance),
-                    ...(guarded ? { progressState: progressState() } : {}),
-                    instructions: [
-                        ...contextInstructions,
-                        ...workCardInstructions,
-                        "Independently check the owner's workCard against the actual assignment, Architect-established names and evidence. Your card describes your review action and findings, not invented implementation work; mustAct names the actual next responsible role. A missing legacy card alone does not change substantive acceptance.",
-                        "Independently review the actual work and the YAML completeWhen condition. Read the relevant files, not just the do-er's summary.",
-                        ...priorDispositionInstructions,
-                        "Return agree:true when you agree with the reported outcome. Feedback may include observations even when you agree; there is no zero-findings requirement.",
-                        "Judge only your own independent vote. The orchestrator collects the other parallel reviewers' votes; their pending responses are not an unmet owner criterion and must not require another round.",
-                        "Use the same reconciled feedback.governance.instructions and retained scope decisions as the owner. Deferred/declined enhancements cannot block original acceptance; raw suggestions are audit evidence only. Independently verify required corrections and approved bounded acceptance; never waive actual failures or rewrite requirements. Flag suspected expansion, but Scrum Master triage also checks independently.",
-                        "Separately judge report accuracy and assignment completion. For assigned work return taskComplete:boolean and unmetCriteria:[specific assigned criteria still unmet]. Agreement with an accurate incomplete report is not task acceptance. Do not demand full product/live readiness from a bounded contract or research handoff.",
-                        "If continued rework is justified, identify a specific unmet doneWhen criterion or a Critic untraceable addition and a closing next action. If the assigned deliverable is already satisfied and no untraceable addition remains, ask the owner to report complete rather than endorsing indefinite investigation. Material scope changes should be reported as needs-replan for existing Architect/Scrum Master coordination, not invented human permission.",
-                        "Disagree with concrete feedback when more work is needed. Judge risk and evidence in context using the project's instructions, not an invented global policy.",
-                        "A role named Stakeholder is a reviewer role, not a substitute for an actual required human authorization.",
-                        "For any changed files, inspect the do-er's actual Git commits as well as the code. Uncommitted intended changes or an unsuccessful commit need concrete rework feedback, not a new proof protocol. Do not demand a commit for a turn that changed no files; never ask to commit secrets, generated junk or another person's work.",
-                        ...(guarded ? [
-                            "Return verifiedProgress: [id,...] containing only owner.progress IDs whose underlying evidence you independently inspected and verified as a substantive NEW advance this round toward completeWhen. Return [] if none, even if the summary claims progress.",
-                            "Compare with progressState.credited and prior feedback. Never credit pre-existing work, repeated evidence, relabeled milestones, cosmetic edits, regression-free test reruns alone, or activity without improvement. A newly resolved finding, newly passing relevant failing test, or newly completed verifiable plan milestone can count.",
-                            "Progress is separate from agreement: you can verify an advance while disagreeing that the loop is complete. Do not agree merely to avoid the stagnation stop.",
-                        ] : []),
-                        ...(dispatch ? [
-                            "SprintPlan completion requires assigned todos and dispatched independent work, not finished implementation. Judge the orchestrator's actual dispatch context; do not require the Scrum Master to invent a second dispatcher or an additional approval stage.",
-                            "Challenge unnecessary dependency chains: does a consumer need an agreed interface/fixture or the whole implementation? Check rough critical-path estimates, useful foundation handoffs, substantial parallel tasks and explicit integration work. Prefer economical refactoring over serializing all work for perfect contracts. File overlap alone is not a dependency; genuine mutable contention should be declared in exclusiveResources.",
-                            "Check that the Scrum Master identified the feature branch and assigned Git integration/reconciliation responsibility. Plan review does not wait for all future code to exist or be merged.",
-                            "Check each task's doneWhen, exclusions and handoff. Sprint-level acceptance references describe contribution unless explicitly assigned in full. Do not silently turn a bounded research task into a live implementation or deployment obligation.",
-                        ] : []),
-                        ...(context.scopeRevision ? [
-                            "Review only this scoped architectural/plan amendment. Preserve the original requirements and outer task handoff; allow useful internal handoffs and honest capability limitations. Do not restart unrelated work or introduce another gate.",
-                        ] : []),
-                        ...(role === "Scrum Master" ? [
-                            "You are accountable for Git reconciliation in this existing review role. Inspect all sprint task commits and their disposition: merged into the authorized feature branch, or retained on a branch with the task, commit IDs and abandonment reason recorded in a feature-branch commit message. Missing or uncommitted code requires the current do-er to reconcile it; remain read-only yourself. Do not accept chat-only abandonment or discard unmerged code.",
-                        ] : []),
-                        ...(role === "Critic" ? [
-                            "Make Critic review bidirectional: is everything required present, and is everything present required? Trace the actual deliverable to applicable requirements, acceptance criteria and definition of done within this assignment's scope and retained decisions.",
-                            "Unmet criterion: cite the exact requirement line (file:line, or the exact supplied criterion when no file exists) and state what is missing. This blocks: return agree:false with the closing action in feedback.",
-                            "Untraceable addition: identify the present control, abstraction or artifact and its location, and explain why it has no requirement behind it after checking applicable requirements and approved scope. This blocks too: return agree:false with \"remove it\" as the closing action in feedback. Do not invent a new requirement to justify the addition or ask for more controls instead of removal.",
-                            "For assigned work, either blocking finding also means taskComplete:false; keep unmetCriteria specific to unmet assigned criteria and describe untraceable additions in feedback. Anything else is a non-blocking observation: return agree:true when neither blocking category remains, without demanding zero findings. Required implementation details are traceable through the criterion they serve; they need not be named verbatim in a requirement.",
-                        ] : []),
-                        ...(loop.id === "ReleaseCloseoutLoop" ? [
-                            "Check final Git reconciliation across the release: intended changes committed, task commits merged into the feature branch or retained with an abandonment-reason commit. This is part of the existing closeout review, not a separate gate.",
-                        ] : []),
-                    ],
-                }), { agent: agents.reviewer ?? "workflow-reviewer", label: `${key}:reviewer:${role}:${attempt}`, schema: reviewSchema }), priority);
-                if (!object(review) || typeof review.agree !== "boolean" || typeof review.feedback !== "string") {
-                    throw new Error(`Invalid ${role} reviewer response in ${loop.id}`);
-                }
-                validateWorkCard(review.workCard, `${loop.id} ${role} reviewer`);
-                if (context.assignment && (typeof review.taskComplete !== "boolean" ||
-                    !Array.isArray(review.unmetCriteria) || review.unmetCriteria.some((item) => typeof item !== "string"))) {
-                    throw new Error(`Invalid ${role} assignment completion assessment in ${loop.id}`);
-                }
-                if (guarded && (!Array.isArray(review.verifiedProgress) ||
-                    review.verifiedProgress.some((id) => typeof id !== "string" || !owner.progress.some((item) => item.id === id)) ||
-                    new Set(review.verifiedProgress).size !== review.verifiedProgress.length)) {
-                    throw new Error(`Invalid ${role} reviewer progress in ${loop.id}; no progress was credited`);
-                }
-                return { role, ...review };
-            })); } catch (error) {
+            try {
+                reviews = await ctx.parallel(loop.reviewers.map((role) => async () => {
+                    const review = await scheduleAgent("reviewer", () => ctx.agent(JSON.stringify({
+                        kind: "reviewer", role, loop, context, owner, transportIssue, dispatch: dispatched?.context, feedback,
+                        progressState: progressState(), instructions: [...reviewInstructions,
+                            "Return verifiedProgress:[id,...] only for independently inspected NEW advances in owner.progress. Compare prior credited evidence; repeated tests alone do not count."],
+                    }), { agent: agents.reviewer ?? "workflow-reviewer", label: `${key}:reviewer:${role}:${attempt}`,
+                        schema: role === "Red Team" ? { ...reviewSchema, properties: { ...reviewSchema.properties,
+                            findings: { type: "array", items: { oneOf: findingSchema.oneOf.map((branch) => ({
+                                ...branch, required: [...branch.required, "scope"],
+                            })) } },
+                        } } : reviewSchema }), priority);
+                    if (!object(review) || typeof review.checksValid !== "boolean" || typeof review.feedback !== "string" ||
+                        !Array.isArray(review.findings)) throw new Error(`Invalid ${role} reviewer response in ${loop.id}`);
+                    validateWorkCard(review.workCard, `${loop.id} ${role} reviewer`);
+                    if (!Array.isArray(review.verifiedProgress) || review.verifiedProgress.some((id) => !owner.progress.some((item) => item.id === id)) ||
+                        new Set(review.verifiedProgress).size !== review.verifiedProgress.length) throw new Error(`Invalid ${role} reviewer progress in ${loop.id}; no progress was credited`);
+                    const findings = await normalizeFindings(review.findings, { role, checks: owner.checks, projectRoot: context.projectRoot });
+                    const accepted = !findings.some((finding) => finding.type === "blocking") &&
+                        (["Critic", "Red Team"].includes(role) || review.checksValid);
+                    return { role, checksValid: review.checksValid, feedback: review.feedback, findings,
+                        verifiedProgress: review.verifiedProgress, ...(review.workCard ? { workCard: review.workCard } : {}), accepted };
+                }));
+                if (reviews.some((review) => !review)) throw new Error(`Reviewer execution failed in ${loop.id}`);
+            } catch (error) { await dispatched?.settle(); throw error; }
+            const accepted = reviews.every((review) => review.accepted);
+            const result = { artifact: owner.artifact, summary: owner.summary, checks: owner.checks, reviews, rounds: attempt,
+                ...(owner.workCard ? { workCard: owner.workCard } : {}),
+                ...(text(owner.limitation) ? { limitation: owner.limitation } : {}) };
+            if (owner.status === "needs-input") {
                 await dispatched?.settle();
-                throw error;
+                return { ...result, status: "needs-input", nextAction: owner.nextAction ?? "Supply the exact missing authority or input." };
             }
-            if (reviews.some((review) => review === null)) {
-                await dispatched?.settle();
-                throw new Error(`Reviewer execution failed in ${loop.id}`);
+            if (owner.status === "complete" && !transportIssue && accepted) {
+                return { ...result, status: "agreed", ...(dispatched ? { dispatch: dispatched.context } : {}) };
             }
-            const agreed = reviews.every((review) => review.agree);
-            if (agreed && owner.status === "complete" && !transportIssue &&
-                (!context.assignment || reviews.every((review) => review.taskComplete))) {
-                return {
-                    status: "agreed", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
-                    ...(owner.workCard ? { workCard: owner.workCard } : {}),
-                    ...(governanceHistory.length ? { governanceHistory } : {}),
-                    ...(dispatched ? { dispatch: dispatched.context } : {}),
-                };
-            }
-            if (agreed && owner.status === "needs-input") {
-                return {
-                    status: "needs-input", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
-                    ...(owner.workCard ? { workCard: owner.workCard } : {}),
-                    ...(governanceHistory.length ? { governanceHistory } : {}),
-                    nextAction: owner.nextAction ?? "Resolve the reported missing decision or authority, then start a new run against the existing project work.",
-                };
-            }
-            // Join dispatched work before revising its plan, so old and revised assignments cannot race.
             const dispatchedWork = await dispatched?.settle();
-            const previousGovernance = feedback?.governance;
-            feedback = { owner, reviews, transportIssue, ...(dispatchedWork ? { dispatchedWork } : {}),
-                ...(previousGovernance ? { governance: previousGovernance } : {}),
-                governanceHistory: [...governanceHistory] };
-            const needsReplan = agreed && owner.status === "needs-replan" && !unassignedPlanning;
-            if (attempt !== attempts || needsReplan) {
-                const governance = await reconcileFeedback({
-                    ctx, loop, key, context, feedback, attempt, agents, scheduleAgent, priority,
-                });
-                governanceHistory.push({ round: attempt, owner, reviews, transportIssue,
-                    ...(dispatchedWork ? { dispatchedWork } : {}), governance });
-                feedback = { ...feedback, governance, governanceHistory: [...governanceHistory] };
+            feedback = { owner, reviews, transportIssue, ...(dispatchedWork ? { dispatchedWork } : {}) };
+            if (owner.status === "needs-replan" && !["ArchitectureLoop", "UserExperienceLoop", "ReleasePlanLoop",
+                "SprintDesignLoop", "SprintArchitectureLoop", "SprintPlanLoop"].includes(loop.id)) {
+                return { ...result, status: "needs-replan", feedback,
+                    nextAction: owner.nextAction ?? "Revise only the affected assignment through existing architecture/planning loops." };
             }
-            const governance = feedback.governance;
-            if (needsReplan &&
-                (!governance.nonBlocking.length || governance.instructions.length)) {
-                return { status: "needs-replan", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
-                    ...(owner.workCard ? { workCard: owner.workCard } : {}),
-                    feedback, governanceHistory,
-                    nextAction: owner.nextAction ?? "Resolve the affected assignment through the existing Architect and Scrum Master loops." };
+            const advances = owner.progress.filter((item) => !credited.some((prior) => prior.id === item.id) &&
+                !evidence.has(item.evidence.trim().replace(/\s+/g, " ").toLowerCase()) &&
+                reviews.every((review) => review.verifiedProgress.includes(item.id)));
+            for (const item of advances) {
+                credited.push({ ...item, round: attempt });
+                evidence.add(item.evidence.trim().replace(/\s+/g, " ").toLowerCase());
             }
-            if (guarded) {
-                const advances = owner.progress.filter((item) => !creditedProgress.has(item.id) && !creditedEvidence.has(evidenceKey(item)) &&
-                    reviews.every((review) => review.verifiedProgress.includes(item.id)));
-                for (const item of advances) {
-                    creditedProgress.set(item.id, { ...item, round: attempt });
-                    creditedEvidence.add(evidenceKey(item));
-                }
-                noProgressRounds = advances.length ? 0 : noProgressRounds + 1;
-                ctx.log(`${loop.name}: ${advances.length} verified new advances; ${noProgressRounds}/${maxNoProgressRounds} consecutive no-progress rounds`);
-                if (noProgressRounds >= maxNoProgressRounds) {
-                    return {
-                        status: "blocked", rounds: attempt, stopCause: "no-progress",
-                        ...(owner.workCard ? { workCard: owner.workCard } : {}),
-                        summary: `${loop.id} stopped after ${noProgressRounds} consecutive rounds without reviewer-verified new progress.`,
-                        reason: transportIssue ?? `No new advance was verified by every original reviewer. ${owner.summary}`,
-                        nextAction: "Inspect the unresolved feedback and evidence, resolve the blocker or change approach, then explicitly start a new run against the existing work.",
-                        progress: progressState(), feedback,
-                    };
-                }
-            }
+            noProgressRounds = advances.length ? 0 : noProgressRounds + 1;
+            if (noProgressRounds >= guardLimit) return { ...result, status: "blocked", stopCause: "no-progress",
+                reason: transportIssue ?? "No new advance verified by every original reviewer.",
+                nextAction: "Inspect unresolved checks and findings and change approach.", progress: progressState(), feedback };
         }
-        const disagreements = feedback.reviews.filter((review) => !review.agree).map((review) => review.role);
-        return {
-            status: "limit-reached", rounds: attempts, limit: attempts,
-            ...(feedback.owner.workCard ? { workCard: feedback.owner.workCard } : {}),
+        return { status: "limit-reached", rounds: attempts, limit: attempts,
             summary: `${loop.id} stopped at the explicitly supplied ${attempts}-round limit.`,
-            reason: feedback.transportIssue ?? (disagreements.length
-                ? `Reviewers still disagreed: ${disagreements.join(", ")}. ${feedback.owner.summary}`
-                : `The do-er reported ${feedback.owner.status}: ${feedback.owner.summary}`),
-            nextAction: "Continue from the existing work and the unresolved feedback in a new run; change the explicit round limit only if desired.",
-            feedback,
-        };
+            reason: feedback.transportIssue ?? `The do-er reported ${feedback.owner.status}: ${feedback.owner.summary}`,
+            nextAction: "Continue from existing work and unresolved checks/findings in a new run.", feedback };
     });
 }

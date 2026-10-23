@@ -35,7 +35,7 @@ export const definition = loadWorkflow();
 export function workflowMetadata(name) {
     return {
         name,
-        description: "Execute original YAML owner/reviewer loops with reconciled Scrum Master feedback and Architect-advised Product Owner scope decisions.",
+        description: "Execute evidence-backed YAML loops with executable completion checks, deployed-first assignments and continuous E2E/DevOps verification.",
         phases: flattenLoops(definition.workflows.ReleaseLoop.steps).map((node) => ({
             title: node.name,
             detail: `${node.completeWhen ?? node.description}${["AssignedWorkUIDeveloperLoop", "AssignedWorkDeveloperLoop"].includes(node.id)

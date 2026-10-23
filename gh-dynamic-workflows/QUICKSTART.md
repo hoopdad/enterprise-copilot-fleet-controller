@@ -45,15 +45,43 @@ Supply repeated `--add-dir <path>` only for authorized sibling context roots.
 `--check-only` reads configuration without starting work. See the README for
 non-success exit codes and the unique ignored result/log locations.
 
-The do-ers research, edit and execute within their original YAML loops, and the
-original reviewers decide agreement. There is no mandatory baseline/bootstrap
-gate or prebuilt adapter requirement. Before returning to the same owner,
-unresolved feedback always receives read-only Scrum Master triage; ambiguous
-scope receives Architect advice then a Product Owner required/approve/defer/
-decline decision. The next owner and original reviewers receive the same
-reconciled instructions. Deferred/declined enhancements cannot block original
-acceptance; actual defects still do. This runtime coordination adds no YAML
-stage or user authority and is independent of the optional progress guard.
+Owners research, edit and run commands through ordinary permission-bound tools;
+reviewers remain read-only. There is no unrestricted runtime command executor.
+Git-tracked `docs/requirements` files and regression tests replace Scrum feedback
+triage, Architect advice and Product Owner disposition ledgers. Accepted scope
+changes require a committed requirements edit plus a regression test within
+existing user authority; declined proposals never enter the ledger. Historical
+audits remain readable, not authoritative. No runtime dispositions or governance
+are carried forward.
+
+Critic/Red Team findings block only with a `docs/requirements` file:line or a
+failing owner-emitted check, even if unsupported feedback has raw `agree:false`.
+Red Team reviews only infrastructure configuration and application-library CVEs
+(identify CVE, library and affected version). Findings use
+`type:"blocking"|"observation"`; blocking findings carry exactly one of
+`requirement:{path,line}` or `failingCheck`. All findings require `summary` and
+`action`; requirement lines are positive integers and `failingCheck` names an
+emitted check ID. Required Red Team scope is
+`infrastructure-config` or `dependency-cve`. Owners emit required
+`checks:[{id,kind,command,requirement,environment,exitCode,evidence}]`, where kind
+is `test`, `schema` or `deployed-probe` and environment is `local` or `deployed`.
+Each check's `evidence` is a nonempty repository-relative path to its log/result
+file, not arbitrary prose.
+The runtime checks readability and repository confinement; reviewers verify
+actual execution and credibility.
+Complete means nonempty passing checks; assigned work must pass a deployed
+check. Reviewers return `checksValid`, `findings`, `feedback` and `workCard`,
+not `agree`, to assess suitability and verification.
+
+Sprint 1 begins with a dependency-free DevOps `walkingSkeleton:true` assignment
+using `azd`; all other assignments depend on it transitively and their `doneWhen`
+includes deployed checks. DevOps uses the same graph as other tasks. Existing
+DevOps runs after every assignment, then E2E tests that latest deployment before
+releasing dependents, not only late in the sprint. All assigned loops acquire
+`workflow:deployed-environment` through assignment and verification, serializing
+otherwise independent work against the shared environment.
+Prepare authorized tools and deployment access;
+missing credentials or user-only permissions requires `needs-input`.
 The default writing profile is `workflow-owner`, retaining the concrete YAML
 role. `agents.owner` overrides it; legacy `agents.doer` still works.
 No limits are invented; optionally supply positive `maxSprints` and
@@ -83,3 +111,7 @@ behavioral copy paths; `install.mjs` is the complete distribution manifest.
 For existing installations, deliberately review/replace the old runtime and
 instructions instead of rerunning the non-overwriting installer. Old native
 journals are history, not resumable through the new engine. See [README.md](README.md).
+
+The current engine is `yaml-loops-v2-evidence`. Preserve accepted `yaml-loops-v1`
+and earlier v2 journals as history; they cannot bypass new checks or replay as
+current acceptance. Start a new run after adopting v2-evidence.
