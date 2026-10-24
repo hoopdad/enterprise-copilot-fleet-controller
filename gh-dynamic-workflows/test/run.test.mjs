@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import os from "node:os";
+import { fixtureBase } from "./evidence.fixture.mjs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { writeFileSync } from "node:fs";
@@ -48,6 +48,19 @@ test("SDK completion does not mask application stops; final loop and decisive fe
     assert.throws(() => describeOutcome(envelope(), {}), /no recognized application outcome/);
 });
 
+test("structured check review reporting ignores unsupported legacy votes and accepted observations", () => {
+    const result = { status: "blocked", stoppedAt: "AssignedWorkDeveloperLoop", outcomes: [{
+        loopId: "AssignedWorkDeveloperLoop", status: "blocked", feedback: { reviews: [
+            { role: "Critic", accepted: true, checksValid: false, agree: false, feedback: "Uncited observation" },
+            { role: "Architect", accepted: false, checksValid: false, feedback: "Command omits the assigned API probe" },
+        ] },
+    }] };
+    const outcome = describeOutcome(envelope(), result);
+    assert.deepEqual(outcome.reviewers.map((item) => item.role), ["Architect"]);
+    assert.match(formatOutcome(outcome, { outcome: "outcome", stdout: "stdout", stderr: "stderr", result: "result" }),
+        /Check review - Architect: Command omits/);
+});
+
 test("runtime error, pause, cancellation and unknown envelopes are never reported as success", () => {
     assert.deepEqual(parseEnvelope('{"type":"workflow.result","data":{"run":{"status":"completed","runId":"real-shape"}}}\n'), {
         status: "completed", runId: "real-shape",
@@ -91,7 +104,7 @@ test("waiting reports retained construction and partial sprints without disguisi
 });
 
 async function fixture(t) {
-    const cwd = await mkdtemp(path.join(os.tmpdir(), "workflow-report-"));
+    const cwd = await mkdtemp(path.join(fixtureBase, ".workflow-report-"));
     t.after(() => rm(cwd, { recursive: true, force: true }));
     await writeFile(path.join(cwd, "input with spaces.json"), JSON.stringify({ projectRoot: "." }));
     return { cwd, options: parseOptions(["--input", "input with spaces.json", "--add-dir", "..\\context with spaces"]) };
@@ -100,7 +113,7 @@ function fakeSpawn({ result = stoppedResult, sdk = envelope(), code = 0, signal 
     return (command, args, options) => {
         assert.equal(command, "copilot");
         assert.ok(args.includes("--silent") && args.includes("--result-file"));
-        assert.ok(args.includes("--allow-all-tools"));
+        assert.ok(!args.includes("--allow-all-tools"));
         assert.ok(!args.some((arg) => ["--allow-all-paths", "--allow-all-urls", "--allow-all"].includes(arg)));
         assert.equal(args[args.indexOf("--args") + 1], `@${path.join(options.cwd, "input with spaces.json")}`);
         assert.equal(options.env.GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS, "true");

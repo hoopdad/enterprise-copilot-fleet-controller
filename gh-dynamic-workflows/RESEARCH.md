@@ -42,13 +42,15 @@ explicit exception to earlier no-added-gate prose, not a new YAML stage or
 permission expansion. Actual defects remain blockers; deferred/declined
 enhancements do not. See LAB-CONTRACT.md for structured decision validation.
 
-On 2026-10-20 the user also authorized work-conserving release traversal:
-localize blockers, retain partial sprints and continue all feasible approved
-construction before waiting. Existing Architect/Scrum Master loops assess
-source/component/flow readiness, splits and later backlog; exact evidence-backed
-reassessments preserve original acceptance. This explicitly supersedes the old
-runtime's first-incomplete-sprint/stage return, not YAML roles, real prerequisites,
-DevOps cloud-test requirements or permissions. See DELIVERY-PRINCIPLES.md.
+On 2026-10-24 the user approved reconciliation items 1, 3, 4 and 5: continue
+independent authorized construction, serialize shared-environment mutation
+rather than all development, replan only material changes, and use targeted
+Network/Infrastructure Security rather than broad red teaming. Item 2 was not
+approved: deployed verification remains mandatory for assignment acceptance.
+This supersedes the historical runtime governance and mandatory continuation/
+exhaustion assessments described above. Existing requirements-and-tests
+grounding, genuine prerequisites, permissions and explicit caps remain binding.
+See DELIVERY-PRINCIPLES.md.
 
 ## Platform versus project policy
 

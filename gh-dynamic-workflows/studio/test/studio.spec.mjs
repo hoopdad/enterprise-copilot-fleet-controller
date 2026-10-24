@@ -448,7 +448,7 @@ test("shows original nested YAML do-ers/reviewers and previews/exports without c
     await expect(page.locator("#graph .phase-node")).toHaveCount(14);
     await page.locator('[data-phase="DevOpsWorkLoop"]').click();
     await expect(page.locator("#inspector")).toContainText("DevOps Engineer");
-    await expect(page.locator("#inspector")).toContainText("cloud-deployed system passes tests");
+    await expect(page.locator("#inspector")).toContainText("Cloud-deployed system passes emitted tests/probes");
     await page.locator('[data-phase="AssignedWorkUIDeveloperLoop"]').click();
     await expect(page.locator("#inspector")).toContainText("Developer");
     await expect(page.locator("#inspector")).toContainText("Designer");

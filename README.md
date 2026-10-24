@@ -146,22 +146,20 @@ It covers choosing a reviewed framework checkout, preserving project instruction
 safe installation and registration checks. Installation does not run fleet
 initialization, execute a workflow or authorize cloud changes.
 
-The standalone workflows execute the original YAML's nested owner/reviewer
-loops without an additional engine admission pipeline. Unresolved feedback is
-triaged by a read-only Scrum Master before retry; ambiguous scope receives
-Architect advice and a Product Owner decision, then one reconciled instruction
-set goes to the original owner and reviewers. This requested runtime coordination
-adds no YAML stages and does not change the generated fleet's separate governance
-or deployment policy. The shared writing profile is `workflow-owner`; the
-concrete loop roles remain unchanged.
+The standalone workflows execute evidence-backed YAML owner/reviewer loops.
+Committed requirements and tests replace runtime scope adjudication. Mandatory
+corrections need original requirement/approval grounding; optional suggestions
+do not block. Network/Infrastructure Security reviews affected configuration and
+relevant dependency CVEs, not broad red-team campaigns. The shared writing
+profile is `workflow-owner`. Generated fleet governance remains separate.
 
 The accepted [work-conserving delivery principles](gh-dynamic-workflows/DELIVERY-PRINCIPLES.md)
 require the optional workflows to continue independent approved construction
-across partial sprints instead of stopping the release at its first blocked
-stream. Existing Architect/Scrum Master loops audit feasible source/component/
-flow work and exact evidence-backed reassessments before an incomplete waiting
-checkpoint. Original acceptance, permissions, cloud tests and explicit limits
-remain binding; this does not change the generated fleet.
+across partial sprints instead of stopping at the first blocked stream.
+Shared deployment mutation and E2E verification are serialized, not all
+development. Every accepted assignment still requires deployed verification.
+Existing planning roles replan material changes only; no mandatory exhaustion
+review is added. Permissions and explicit limits remain binding.
 
 The optional [Workflow Studio canvas](gh-dynamic-workflows/studio/README.md)
 combines design drafts, live observation and historical workflow results.

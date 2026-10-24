@@ -61,12 +61,12 @@ test("waiting checkpoints distinguish retained construction from accepted delive
     } });
     assert.equal(outcome(record).tone, "waiting");
     assert.match(stopReason(record), /Classifier permission remains missing/);
-    assert.match(stopReason(record), /Reviewed executable work exhausted: 2 accepted assignments retained; 1 partial sprints/);
+    assert.match(stopReason(record), /Eligible work drained: 2 accepted assignments retained; 1 partial sprints/);
     assert.match(stopReason(record), /1 pending sprints; 1 unresolved blockers/);
     assert.match(stopReason(record), /remains incomplete.*not a live SDK pause/);
     record.result.delivery.waitReason = "continuation-review";
     assert.match(stopReason(record), /Continuation review incomplete/);
-    assert.doesNotMatch(stopReason(record), /Reviewed executable work exhausted/);
+    assert.doesNotMatch(stopReason(record), /Eligible work drained/);
     record.result.delivery.waitReason = "explicit-limit";
     assert.match(stopReason(record), /Explicit user limit reached/);
     record.result.delivery.waitReason = "release-closeout";
@@ -181,6 +181,53 @@ test("new owner profiles retain historical doer attribution; read-only feedback 
         assert.match(result.summary, new RegExp(`${role} read-only ${stage} feedback coordination`));
         assert.match(result.summary, /not an original acceptance vote/);
     }
+});
+
+test("check reviews judge suitability without treating raw blocking claims as validated acceptance", () => {
+    for (const checksValid of [true, false]) {
+        for (const findings of [[], [{ type: "observation", summary: "No live evidence.", action: "Retain limitation." }],
+            [{ type: "blocking", summary: "Null input fails.", action: "Handle null.",
+                requirement: { path: "docs/spec.md", line: 12 }, failingCheck: "null-input", scope: "API handoff",
+                basis: "demonstrated-defect", reason: "Null input prevents the required response.", evidence: "null.log" }]]) {
+            const record = { status: "completed", workResult: { kind: "review", checksValid, findings,
+                summary: "Review submitted.", agree: true, taskComplete: true, ownerStatus: "complete" } };
+            const result = workOutcome(record);
+            assert.equal(result.title, findings[0]?.type === "blocking" ? "Blocking claims submitted; validation pending"
+                : !checksValid ? "Check concerns recorded; no blocking claim"
+                    : "Checks suitable; acceptance unconfirmed");
+            assert.equal(result.tone, "waiting");
+            assert.match(result.summary, /alone is diagnostic, not a mandatory correction for any role/);
+            assert.match(result.summary, /assessment of check suitability, not task completion or final acceptance/);
+            assert.match(result.summary, /not runtime-verified by Studio/);
+            assert.match(result.summary, /blocking claims require runtime validation/);
+            assert.equal(outcome(record, { agent: true }).tone, result.tone);
+            if (findings.length) {
+                assert.match(result.summary, /Submitted (observation|blocking claim):/);
+                assert.match(result.summary, new RegExp(findings[0].action));
+            }
+            if (findings[0]?.type === "blocking") {
+                assert.match(result.summary, /Requirement: docs\/spec.md:12/);
+                assert.match(result.summary, /Submitted failing check: null-input/);
+                assert.match(result.summary, /Scope: API handoff/);
+                assert.match(result.summary, /Basis: demonstrated-defect/);
+                assert.match(result.summary, /Failure reason: Null input/);
+                assert.match(result.summary, /Submitted evidence: null.log/);
+            }
+        }
+    }
+    const bounded = workOutcome({ workResult: { kind: "review", checksValid: true, findings: [],
+        summary: "x".repeat(20_000) } });
+    assert.equal(bounded.summary.length, 12_000);
+    assert.match(bounded.summary, /not runtime-verified by Studio/);
+});
+
+test("owner correction judgments remain visible without becoming independent acceptance", () => {
+    const displayed = workOutcome({ workResult: { status: "rework", summary: "The correction is not established.",
+        correctionAssessments: [{ correctionId: "Architect:1", verdict: "unresolved",
+            reason: "No reproduction establishes a defect.", evidence: "" }] } });
+    assert.match(displayed.summary, /Owner assessment Architect:1: unresolved/);
+    assert.match(displayed.summary, /require independent verification by the existing reviewers/);
+    assert.equal(displayed.tone, "waiting");
 });
 
 test("completed governance shows its retained outcome without becoming an acceptance vote", () => {

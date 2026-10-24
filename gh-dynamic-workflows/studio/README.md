@@ -72,8 +72,9 @@ the percentage to reset to 100%. **Ctrl + mouse wheel** (or **Command + wheel**)
 over the chart zooms around the pointer; an unmodified wheel still scrolls.
 Zoom and collapse remain in effect during live refresh and view changes within
 the open pane. They do not change workflow execution or saved source.
-Feedback-governance labels identify read-only Scrum Master triage, Architect
-scope advice and Product Owner scope decisions, not extra acceptance reviewers.
+Historical feedback-governance labels identify retired read-only Scrum Master
+triage, Architect advice and Product Owner decisions, not current runtime stages
+or extra acceptance reviewers.
 The `workflow-owner` profile retains stable doer labels; historical
 `workflow-doer` activity remains readable.
 

@@ -53,7 +53,8 @@ export function describeOutcome(envelope, result) {
         stopCause: result.stopCause ?? stop?.stopCause, progress: result.progress ?? stop?.progress,
         summary: result.summary ?? stop?.summary ?? (result.status === "completed" ? "Original YAML loops completed." : undefined),
         reason: result.reason ?? stop?.reason ?? stop?.feedback?.transportIssue ?? stop?.feedback?.owner?.summary,
-        reviewers: (stop?.feedback?.reviews ?? stop?.reviews ?? []).filter((review) => !review.agree),
+        reviewers: (stop?.feedback?.reviews ?? stop?.reviews ?? []).filter((review) =>
+            typeof review.accepted === "boolean" ? !review.accepted : review.agree === false),
         nextAction: result.nextAction ?? stop?.nextAction ?? (result.status === "completed" ? undefined
             : "Continue from the existing work and the reported unresolved feedback in a new run."),
         completedSprints: result.completedSprints, delivery: result.delivery, exitCode: result.status === "completed" ? 0 : 2,
@@ -68,7 +69,8 @@ export function formatOutcome(outcome, files) {
         outcome.summary && `Summary: ${compact(outcome.summary)}`,
         outcome.reason && `Reason: ${compact(outcome.reason)}`,
         outcome.delivery && `Delivery: ${outcome.delivery.acceptedWork?.length ?? 0} accepted assignments; ${outcome.delivery.partialSprints?.length ?? 0} partial sprints; ${outcome.delivery.pendingSprints?.length ?? 0} pending sprints; ${outcome.delivery.blockedWork?.length ?? 0} unresolved blockers.${outcome.delivery.state === "waiting" ? ` Waiting: ${compact(outcome.delivery.waitReason)}.` : ""}`,
-        ...(outcome.reviewers ?? []).slice(0, 3).map((review) => `Disagreement - ${compact(review.role, 80)}: ${compact(review.feedback, 240)}`),
+        ...(outcome.reviewers ?? []).slice(0, 3).map((review) =>
+            `${typeof review.accepted === "boolean" ? "Check review" : "Disagreement"} - ${compact(review.role, 80)}: ${compact(review.feedback, 240)}`),
         outcome.nextAction && `Next: ${compact(outcome.nextAction)}`,
         `Full outcome: ${files.outcome}`,
         outcome.sdkStatus === "completed" && `Application result: ${files.result}`,
@@ -100,7 +102,7 @@ export async function runWorkflow(options, { cwd = process.cwd(), spawn = spawnC
             const stderr = await open(files.stderr, "wx");
             try {
                 const cliArgs = [
-                    "--experimental", "--allow-all-tools",
+                    "--experimental",
                     ...options.addDirs.flatMap((directory) => ["--add-dir", path.resolve(cwd, directory)]),
                     "workflow", "run", options.workflow, "--args", `@${input}`,
                     "--silent", "--output-format", "json", "--result-file", files.result,

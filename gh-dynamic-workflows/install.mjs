@@ -23,13 +23,11 @@ const files = [
     ["loop-source.mjs", "gh-dynamic-workflows/loop-source.mjs"],
     ["loop-workflow.mjs", "gh-dynamic-workflows/loop-workflow.mjs"],
     ["scheduling.mjs", "gh-dynamic-workflows/scheduling.mjs"],
-    ["continuation.mjs", "gh-dynamic-workflows/continuation.mjs"],
     ["run.mjs", "gh-dynamic-workflows/run.mjs"],
     ["workflow.mjs", "gh-dynamic-workflows/workflow.mjs"],
     ["extension.mjs", "gh-dynamic-workflows/extension.mjs"],
     ["lab-loops.mjs", "gh-dynamic-workflows/lab-loops.mjs"],
     ["work-cards.mjs", "gh-dynamic-workflows/work-cards.mjs"],
-    ["scope-governance.mjs", "gh-dynamic-workflows/scope-governance.mjs"],
     ["task-context.mjs", "gh-dynamic-workflows/task-context.mjs"],
     ["lab-workflow.mjs", "gh-dynamic-workflows/lab-workflow.mjs"],
     ["LAB-CONTRACT.md", "gh-dynamic-workflows/LAB-CONTRACT.md"],
@@ -42,14 +40,17 @@ const files = [
     ...["extension.mjs", "workflow-owner.agent.md", "workflow-reviewer.agent.md"].map((file) =>
         [`templates/${file}`, `gh-dynamic-workflows/templates/${file}`]),
     ...["install.test.mjs", "lab-loops.test.mjs", "lab-workflow.test.mjs", "lab-sdk.test.mjs", "run.test.mjs", "scheduling.test.mjs",
-        "scope-governance.test.mjs", "scope-governance.fixture.mjs", "task-context.test.mjs", "work-cards.test.mjs",
-        "continuation.test.mjs"].map((file) =>
+        "scope-governance.test.mjs", "evidence.fixture.mjs", "task-context.test.mjs", "work-cards.test.mjs"].map((file) =>
         [`test/${file}`, `gh-dynamic-workflows/test/${file}`]),
     ["templates/extension.mjs", ".github/extensions/autonomous-delivery/extension.mjs"],
     ["templates/workflow-owner.agent.md", ".github/agents/workflow-owner.agent.md"],
     ["templates/workflow-reviewer.agent.md", ".github/agents/workflow-reviewer.agent.md"],
 ];
 const retired = [
+    "gh-dynamic-workflows/scope-governance.mjs",
+    "gh-dynamic-workflows/test/scope-governance.fixture.mjs",
+    "gh-dynamic-workflows/continuation.mjs",
+    "gh-dynamic-workflows/test/continuation.test.mjs",
     ...["runtime.mjs", "lab-policy.mjs", "lab-executor.mjs", "lab-scratch.mjs", "lab-preflight.mjs",
         "lab-discovery.mjs", "agent-profiles.mjs"].map((file) => `gh-dynamic-workflows/${file}`),
     ...["delivery-reader", "lab-author", "lab-reader", "lab-operator"].flatMap((name) =>

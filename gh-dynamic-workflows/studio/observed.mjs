@@ -100,6 +100,31 @@ export function workOutcome(agent, { phase } = {}) {
         tone: "waiting",
     };
     if (work?.kind === "review") {
+        if (typeof work.checksValid === "boolean") {
+            const findings = work.findings ?? [];
+            return {
+                title: findings.some((item) => item.type === "blocking") ? "Blocking claims submitted; validation pending"
+                    : !work.checksValid ? "Check concerns recorded; no blocking claim"
+                        : "Checks suitable; acceptance unconfirmed",
+                summary: [
+                    "Reviewer assessment of check suitability, not task completion or final acceptance.",
+                    "Submitted findings and evidence are not runtime-verified by Studio; blocking claims require runtime validation.",
+                    "checksValid:false alone is diagnostic, not a mandatory correction for any role.",
+                    work.summary,
+                    ...findings.map((item) => [
+                        `Submitted ${item.type === "blocking" ? "blocking claim" : "observation"}: ${item.summary}`,
+                        item.action ? `Action: ${item.action}` : null,
+                        item.requirement ? `Requirement: ${item.requirement.path}:${item.requirement.line}` : null,
+                        item.basis ? `Basis: ${item.basis}` : null,
+                        item.reason ? `Failure reason: ${item.reason}` : null,
+                        item.evidence ? `Submitted evidence: ${item.evidence}` : null,
+                        item.failingCheck ? `Submitted failing check: ${item.failingCheck}` : null,
+                        item.scope ? `Scope: ${item.scope}` : null,
+                    ].filter(Boolean).join(" ")),
+                ].filter(Boolean).join("\n").slice(0, 12_000),
+                tone: "waiting",
+            };
+        }
         if (!work.agree) return { title: "Changes requested", summary: work.summary, tone: "error" };
         const title = work.ownerStatus === "needs-replan" ? "Agrees: scoped replanning needed"
             : work.ownerStatus === "needs-input" ? "Agrees: human input needed"
@@ -111,7 +136,13 @@ export function workOutcome(agent, { phase } = {}) {
     if (work) return {
         title: work.status === "complete" ? "Work reported complete" : work.status === "needs-input" ? "Awaiting input"
             : work.status === "needs-replan" ? "Needs scoped replanning" : "Work needs revision",
-        summary: work.summary, tone: work.status === "complete" ? "success" : "waiting",
+        summary: [
+            work.summary,
+            ...(work.correctionAssessments ?? []).map((item) =>
+                `Owner assessment ${item.correctionId}: ${item.verdict}. ${item.reason}${item.evidence ? ` Evidence: ${item.evidence}` : ""}`),
+            ...(work.correctionAssessments?.length ? ["Owner judgments require independent verification by the existing reviewers."] : []),
+        ].join("\n").slice(0, 12_000),
+        tone: work.status === "complete" ? "success" : "waiting",
     };
     const status = String(agent.status ?? "").toLowerCase().replaceAll(/[_\s]+/g, "-");
     if (active.has(status) || ["stale", "unsettled"].includes(status)) {
@@ -178,7 +209,7 @@ export function stopReason(run) {
         const delivery = result?.delivery;
         if (delivery?.state === "waiting" && [delivery.acceptedWork, delivery.partialSprints, delivery.pendingSprints, delivery.blockedWork]
             .every((items) => Array.isArray(items))) {
-            const state = delivery.waitReason === "work-exhausted" ? "Reviewed executable work exhausted"
+            const state = delivery.waitReason === "work-exhausted" ? "Eligible work drained"
                 : delivery.waitReason === "explicit-limit" ? "Explicit user limit reached"
                     : delivery.waitReason === "continuation-review" ? "Continuation review incomplete"
                         : delivery.waitReason === "release-closeout" ? "Release closeout incomplete" : "Prerequisite planning incomplete";

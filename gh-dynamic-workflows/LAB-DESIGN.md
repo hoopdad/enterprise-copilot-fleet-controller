@@ -8,68 +8,44 @@
 `loop-workflow.mjs` iterates the release/sprint hierarchy, schedules the assigned
 task dependency graph and carries accepted artifacts forward. `lab-loops.mjs`
 implements the repeated do-er followed by independent original reviewers.
-`scope-governance.mjs` coordinates unresolved feedback: Scrum Master triage
-on every retry, plus Architect advice then Product Owner decisions only when
-scope is ambiguous. It validates structured responses and builds one actionable
-instruction set plus nonblocking deferred/declined decisions. Decisions persist
-across retries; raw owner/review/role evidence remains audit history, not competing
-instructions. Both owner and original reviewers receive the same reconciliation,
-even without a stagnation guard. Actual failures cannot be waived or requirements
-rewritten. Acceptance and confirmed human input skip triage. This is requested
-runtime coordination, the explicit exception to earlier no-added-gate prose;
-no YAML stages or original owner/reviewer sets change.
-Full audit history is retained in final outcomes, not recursively recopied into
-every later loop's context. Later loops receive each outcome's latest reconciled
-governance; the current loop still receives its own full round audit. This keeps
-unlimited productive runs from amplifying prior audit evidence in every prompt.
-`priorDispositions` projects bounded instructions from these existing outcomes
-and scoped/inherited request feedback onto every invocation's first owner,
-reviewer and governance turns. Plan dispatch also passes the current plan's
-projection before its result is recorded. Provenance-qualified references,
-origin task/sprint, source status and explicit acceptance/task boundaries prevent
-short-ID collisions from waiving unrelated work; applicability remains role
-judgment. Reconsidering an exact priorReference routes through Architect/PO,
-including a Scrum-proposed required reclassification. Explicit supersession
-references carry forward transitively. No separate registry/database or raw
-audit fanout is introduced. Final hard-cap rounds skip unnecessary triage while
-retaining raw feedback and normal once-per-round stagnation accounting; assigned
-needs-replan still receives governance before routing.
+Git-tracked `docs/requirements` files and regression tests form the durable
+requirements-and-tests ledger. It replaces Scrum feedback triage, Architect advice
+and Product Owner disposition ledgers; no runtime governance, dispositions or
+`priorDispositions` are supplied. Accepted scope changes require a committed
+requirements edit and regression test within existing user authority. Declined
+proposals never enter the ledger. Historical audits remain available but are
+not current authority or recursively recopied into later prompts.
+
+Every role's mandatory corrections require an original user requirement or
+explicitly approved amendment citation and a falsifiable failure reason.
+Demonstrated defects additionally need evidence showing how they prevent that
+requirement. Everything else is optional, including Architect, Product Owner and
+Scrum Master suggestions. `checksValid:false` alone cannot gate any role.
+Network/Infrastructure Security remains limited to affected networking,
+exposure, private connectivity, identity/access configuration and relevant
+application-library CVEs, with `scope:"infrastructure-config"|"dependency-cve"`
+and the affected library/version/CVE. No broad red-team campaign or invented
+controls; unchanged scope requires no findings. Reviewers remain read-only.
+Findings discriminate `type:"blocking"|"observation"`. Blocking findings add
+`basis:"original-requirement"|"approved-amendment"|"demonstrated-defect"`,
+`requirement:{path,line}` and `reason`; demonstrated defects also need `evidence`.
+Optional defect `failingCheck` identifies an emitted failed check with matching
+evidence, not authority on its own. Direct original request/approval citations
+may use existing files anywhere inside projectRoot; their positive nonempty
+lines must match committed HEAD. Traversal and symlink escapes are rejected.
+Fixed read-only Git operations verify integrity, not authorship or entailment.
+Committing an agent interpretation does not make it a user requirement.
+On the next do-er turn, supported correction IDs require confirmed/refuted/
+unresolved `correctionAssessments` with reasons and evidence. Original reviewers
+verify those judgments in the existing review; no arbiter, stage or governance
+chain is added. Actual failed/missing execution checks remain binding. See
+LAB-CONTRACT.md for field definitions and the division of semantic responsibility.
 Both workflow registration names use that same runner. Its default shared writing
 profile is `workflow-owner` (`agents.owner`, then legacy `agents.doer` overrides);
 concrete YAML roles, stable doer kinds/labels and historical Studio remain intact.
-Read-only coordination uses the ordinary reviewer profile/tools.
+Read-only reviews use the ordinary reviewer profile/tools.
 `scheduling.mjs` owns the dependency-ready queue, longest-downstream estimates,
 named assignment resources and separate do-er/reviewer agent capacity.
-`continuation.mjs` owns continuation transport validation and the shared
-work-conserving instructions. The accepted decision and guiding principles are
-in [DELIVERY-PRINCIPLES.md](DELIVERY-PRINCIPLES.md).
-
-The 2026-10-20 amendment replaces fail-fast release traversal with retained
-per-sprint stage/task state. Independent approved sprints continue after one
-branch blocks; explicit whole-sprint dependencies still wait. Partial sprints
-are not marked completed and count against an explicit entered-sprint cap.
-After runnable planned work settles, the existing SprintArchitectureLoop and
-SprintPlanLoop audit blocker blast radius and feasible construction/splits,
-approved release backlog and bounded evidence discovery. New scoped amendment
-graphs cite approved source sprints/criteria and share existing resources and
-agent capacities. They cannot introduce live DevOps before its original stage.
-
-Continuation may request exact blocker reassessment on changed authoritative
-evidence or necessary newly accepted handoffs. Only those handoffs gate that
-reassessment; accepted independent tasks/stages are reused. A blocked consumer's
-descendants are reconsidered after its real prerequisite is accepted. Each
-reassessment has a deterministic durable-step suffix and original owner/reviews;
-it never automatically promotes an incomplete task or resets a capped/error
-invocation. Per-sprint document/audit bindings survive intervening sprints.
-
-Only substantive accepted construction, execution or successful reassessment
-causes another exhaustion audit. Planning/audit agreement alone does not
-manufacture progress. Unchanged exhaustion does not poll. Local execution
-errors remain explicitly retained and are raised after independent release
-work drains; cancellation propagates without converting it into a local block.
-Final non-success results expose accepted work, partial/pending sprints,
-blockers and audit references in `delivery`. This is an application waiting
-checkpoint, not SDK pause/resume transport or exactly-once effects.
 
 The 13 leaf loops are Architecture, User Experience, Release Plan, Sprint
 Design, Sprint Architecture, Sprint Plan, UI Developer Work, Developer Work,
@@ -77,18 +53,32 @@ End-to-End Test, DevOps Work, Sprint Review, Sprint Retrospective and Release
 Closeout. Sprint Loop is their source container, not another approval stage.
 Exact owners, reviewers, descriptions and conditions remain in YAML.
 
-Do-ers can edit and execute ordinary tools; reviewers independently inspect
+Do-ers can edit and execute ordinary permission-bound tools; reviewers independently inspect
 work without editing, including read-only Git commands through their execute
 tool. That restriction is an instruction, not an OS sandbox. Named roles are
 passed with their source descriptions. There
 is no source/profile admission, native executor, ticket broker, workspace lease,
 separate operator, frozen artifact/plan, or engine-managed receipt protocol.
-The only progression agreement is the agreement in the original loop.
-Research and technical repair occur within those loops.
+Owners report required `checks` arrays of
+`{id,kind,command,requirement,environment,exitCode,evidence}`. Kind is `test`,
+`schema` or `deployed-probe`; environment is `local` or `deployed`. Each check's
+`evidence` is a nonempty repository-relative log/result file path, not arbitrary
+prose. The runtime verifies readability and repository confinement; reviewers
+verify actual execution and credibility. Commands run by owners, not by an
+unrestricted runtime executor. Complete reports require
+nonempty passing checks; assigned work also requires a passing deployed check.
+Reviewers describe suitability and actual results with diagnostic `checksValid`, not
+subjective `taskComplete` votes. Research and technical repair remain in the loops.
+Reviewer reports require `checksValid`, `findings`, `feedback` and `workCard`,
+not `agree`.
 
 SprintPlan assignments have a machine-readable dependency graph so independent
-UI/backend/design work fans out and dependants start when their own prerequisites
-are reviewed. DevOps assignments are handled in the original later DevOps loop.
+UI/backend/design/DevOps work fans out through one scheduler. Sprint 1 starts
+with a dependency-free DevOps assignment marked `walkingSkeleton:true`, using
+`azd` to deploy a minimal application; all other assignments depend on it
+transitively. After every assignment, the existing DevOps loop deploys/verifies
+the increment, then E2E tests the latest deployment. Both must pass before
+dependents start, rather than running as late-only stages.
 This validates scheduling data, not a new risk-policy review. No globally
 disjoint-file rule is imposed; planning/reviewers decide whether work is genuinely
 independent. Simultaneous tasks are labeled; SDK phase is set outside parallel
@@ -113,27 +103,32 @@ Planning submits a dispatch-ready graph; the scheduler dispatches its original
 work loops before planning reviewers verify actual assignment and dispatch.
 Implementation need not finish for that planning agreement. The following
 assigned-work steps join it. Before revising a rejected plan, already-dispatched
-work is joined before governance or plan rework to avoid old/revised assignments
-racing; its results feed the reconciliation. Each governance call individually
-uses reviewer capacity; no agent slot spans a join or the coordination sequence.
+work is joined before plan rework to avoid old/revised assignments racing.
+No agent slot spans a join or dependency/resource wait.
 Saved JSON plan references and inline graphs use the same scheduler.
 
 Task doneWhen/exclusions/handoff distinguish bounded research completion from
-live capability. Assigned reviewers separately assess report agreement and
-task completion. After triage, agreed needs-replan releases task resources, reuses the
+live capability, without waiving assigned deployed checks. Assigned reviewers
+assess check suitability and verification. Agreed needs-replan releases task resources, reuses the
 existing Sprint Architect and Scrum Master loops for a scoped replacement
 graph, and joins its accepted handoffs into the original dependency. Already
 accepted prerequisites are context; replacement dependencies stay internal.
-Unrelated work continues. Shared agent/resource queues cover replacements and
-only scoped planning do-er edits are serialized; no slot is held during review.
-Major YAML stage order and later DevOps placement are unchanged. SDK replay
+Shared agent/resource queues cover replacements. Construction owners run local
+checks without mutating the shared environment and identify the exact commit/
+immutable artifact to deploy. Existing DevOps-then-E2E loops verify that candidate
+under one `workflow:deployed-environment` lock before original assignment review
+and acceptance. Actual verification checks and provenance are retained with the
+owner report. No local-only handoff becomes accepted. DevOps assignments and
+tasks explicitly declaring the environment resource hold it throughout execution.
+Agent capacity remains separate from resource waits.
+DevOps replacements share the graph and continuous checks. SDK replay
 reuses scoped keys rather than redispatching accepted work.
 Unassigned planning/release scope corrections feed back to the existing owner,
 not terminal needs-replan or an added stage. Original later roles retain their
 responsibilities. Stopped results omit absent optional fields for SDK JSON
 compatibility; parallel reviewers never wait on one another's votes.
-When the only scope demands are deferred/declined enhancements, retry the same
-owner against original acceptance rather than forcing a replacement graph.
+Unsupported scope demands do not force a replacement graph. Accepted changes
+first update the committed requirements-and-tests ledger.
 
 Every file-changing do-er turn commits owned changes before review; reviewers
 inspect those commits with read-only Git commands. The Scrum Master remains the
@@ -144,14 +139,23 @@ commit IDs and abandonment reason in a feature-branch commit message. No code
 is silently discarded and no new role, stage or native Git gate is added. The
 scheduler does not run Git on the user's behalf or require a clean starting tree.
 
-Sprint Review may append work to ReleasePlan. Retro may update Architecture,
-UserExperience and ReleasePlan. Subsequent sprints use these accepted updates;
+Sprint Review may append required work to ReleasePlan only with the same grounding.
+Retro may propose optional improvements to Architecture, UserExperience and
+ReleasePlan; they do not silently become mandatory dependencies. Subsequent sprints use authorized updates;
 there is no initial-plan freeze or required separate asset-harvest sprint.
-E2E agreement certifies accurate actionable outcomes, including FAIL. The
-original DevOps condition still includes cloud-deployed tests passing.
+Accurate E2E failure reports are actionable feedback, not completion. The
+continuous DevOps-then-E2E loops require passing deployed verification before
+releasing dependents.
 
-Results and agreement rounds are journaled only by SDK durable steps. This
-preserves completed work on SDK replay, not exactly-once effects. An interruption
+The engine identity is `yaml-loops-v2`, with correction contract
+`requirement-grounded-v1` and delivery contract `work-conserving-v1` recorded in
+the run marker. Older v2 runs without these contracts, other contract versions
+and unversioned context history are rejected
+without rewriting their journals. Start a fresh run after adoption. Accepted
+`yaml-loops-v1` journal steps cannot bypass new checks or replay as v2 acceptance;
+preserve them as history and
+start a new run after adoption. Results and rounds are journaled by SDK durable
+steps. Compatible v2 replay preserves completed work, not exactly-once effects. An interruption
 can leave an external operation uncertain; do-ers must inspect actual state and
 report it honestly rather than repeat blindly. This is not an extra review gate.
 Old engine native journals remain historical and are not replay-compatible.
@@ -159,17 +163,23 @@ Old engine native journals remain historical and are not replay-compatible.
 Explicit user round/sprint limits are honored; unspecified limits remain absent.
 An optional `maxNoProgressRounds` counts consecutive stalled rounds per loop/
 assignment. Do-ers propose stable progress IDs with inspectable evidence; the
-original reviewers independently verify them within their existing review.
-Only new IDs verified by every reviewer reset the counter. The credited
+original check-adequacy reviewers independently verify them within their existing
+review. Critic and Network/Infrastructure Security cannot veto progress through observation-only
+responses. Only new IDs verified by every check-adequacy reviewer reset the counter. The credited
 evidence and prior feedback accompany later rounds to prevent repeated work
 being relabeled as progress. At the threshold, dispatched work has been joined
 and a `blocked`/`no-progress` result retains the counter and unresolved feedback.
 Omit total round and sprint limits to allow unlimited productive work. This
 opt-in safeguard does not change YAML agreement, introduce a review stage or
 preempt an individual agent call; semantic progress remains reviewer-judged.
-An agreed human-input blocker or stagnation stops its affected invocation, not
-independent release construction. Exhaustion or reached explicit user limits
-ends with a non-success application checkpoint. Real project permissions, credentials, actual user approvals,
+A localized human-input blocker or stagnation stop does not stop independent
+approved release work. The runner retains partial sprints and traverses eligible
+later sprints, respecting explicit `sprint.dependsOn` and entered-sprint caps.
+Replanning is conditional on material changes, not a mandatory exhaustion audit.
+Once eligible work drains, unresolved blockers return explicit non-success.
+Execution errors remain errors, with a durable delivery checkpoint after other
+release work drains. Missing credentials or user-only approval requires `needs-input`.
+Real project permissions, credentials, actual user approvals,
 scientific data provenance and product acceptance requirements are not removed.
 The shared `run.mjs` launcher keeps full CLI logs/results in unique ignored
 directories and prints a short application outcome, stopped loop, reason and

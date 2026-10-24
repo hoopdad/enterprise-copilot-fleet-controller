@@ -45,25 +45,65 @@ Supply repeated `--add-dir <path>` only for authorized sibling context roots.
 `--check-only` reads configuration without starting work. See the README for
 non-success exit codes and the unique ignored result/log locations.
 
-The do-ers research, edit and execute within their original YAML loops, and the
-original reviewers decide agreement. There is no mandatory baseline/bootstrap
-gate or prebuilt adapter requirement. Before returning to the same owner,
-unresolved feedback always receives read-only Scrum Master triage; ambiguous
-scope receives Architect advice then a Product Owner required/approve/defer/
-decline decision. The next owner and original reviewers receive the same
-reconciled instructions. Deferred/declined enhancements cannot block original
-acceptance; actual defects still do. This runtime coordination adds no YAML
-stage or user authority and is independent of the optional progress guard.
+Owners research, edit and run commands through ordinary permission-bound tools;
+reviewers remain read-only. There is no unrestricted runtime command executor.
+Git-tracked `docs/requirements` files and regression tests replace Scrum feedback
+triage, Architect advice and Product Owner disposition ledgers. Accepted scope
+changes require a committed requirements edit plus a regression test within
+existing user authority; declined proposals never enter the ledger. Historical
+audits remain readable, not authoritative. No runtime dispositions or governance
+are carried forward.
+
+Every role's mandatory correction needs an original user requirement or explicitly
+approved amendment citation and a falsifiable failure reason. Demonstrated defects
+also need evidence showing how they prevent the requirement. Everything else is
+optional, including Architect, Product Owner and Scrum Master suggestions.
+Findings use `type:"blocking"|"observation"`, `summary` and `action`; blockers add
+`basis:"original-requirement"|"approved-amendment"|"demonstrated-defect"`,
+`requirement:{path,line}` and `reason`. Defects also need `evidence`; optional
+`failingCheck` must name an emitted failed check with matching evidence.
+Cite the original request/approval directly in existing repository-local files;
+the positive nonempty line must match committed HEAD without traversal or symlink
+escapes. Git verifies integrity, not user authorship or semantic truth.
+On retry the owner returns confirmed/refuted/unresolved `correctionAssessments`;
+existing reviewers verify that reasoning without adding a new approval stage.
+Network/Infrastructure Security reviews affected networking, exposure, private
+connectivity, identity/access configuration and relevant application-library
+CVEs (identify CVE/library/version), not broad red-team campaigns, with required
+`scope:"infrastructure-config"|"dependency-cve"`. See LAB-CONTRACT.md for examples.
+Owners emit required
+`checks:[{id,kind,command,requirement,environment,exitCode,evidence}]`, where kind
+is `test`, `schema` or `deployed-probe` and environment is `local` or `deployed`.
+Each check's `evidence` is a nonempty repository-relative path to its log/result
+file, not arbitrary prose.
+The runtime checks readability and repository confinement; reviewers verify
+actual execution and credibility.
+Complete means nonempty passing checks; assigned work must pass a deployed
+check. Reviewers return `checksValid`, `findings`, `feedback` and `workCard`,
+not `agree`, to assess suitability and verification. `checksValid:false` alone
+cannot block any role. Actual failing/missing execution checks remain binding.
+
+Sprint 1 begins with a dependency-free DevOps `walkingSkeleton:true` assignment
+using `azd`; all other assignments depend on it transitively and their `doneWhen`
+includes deployed checks. DevOps uses the same graph as other tasks. Existing
+DevOps runs after every assignment, then E2E tests that latest deployment before
+releasing dependents, not only late in the sprint. Construction owners do not
+mutate the shared environment; they provide actual checks and exact committed
+revisions or immutable artifacts. DevOps-then-E2E verifies each candidate under
+one `workflow:deployed-environment` lock before assignment acceptance.
+Local construction alone never releases dependents.
+Prepare authorized tools and deployment access;
+missing credentials or user-only permissions requires `needs-input`.
 The default writing profile is `workflow-owner`, retaining the concrete YAML
 role. `agents.owner` overrides it; legacy `agents.doer` still works.
 No limits are invented; optionally supply positive `maxSprints` and
 `attempts.planning` / `attempts.implementation` as hard caps on all rounds/sprints.
 For unlimited productive work, omit those caps and supply
 `"maxNoProgressRounds": 10` instead: stop only after ten consecutive rounds
-without new progress verified by every original reviewer, or on confirmed
+without new progress verified by every original check-adequacy reviewer, or on confirmed
 human-input needs, for that invocation. Independent approved release construction
-continues across partial sprints. Existing Architect/Scrum Master loops audit
-feasible splits and approved backlog before an incomplete waiting checkpoint.
+continues across partial sprints. Existing planning roles replan material changes
+only; no mandatory continuation/exhaustion review is added.
 An explicit sprint cap counts entered partial sprints too. See
 [DELIVERY-PRINCIPLES.md](DELIVERY-PRINCIPLES.md) and the README for evidence reporting and the safeguard's
 round-boundary limitations. Do not replace an installed runtime during an
@@ -87,3 +127,9 @@ behavioral copy paths; `install.mjs` is the complete distribution manifest.
 For existing installations, deliberately review/replace the old runtime and
 instructions instead of rerunning the non-overwriting installer. Old native
 journals are history, not resumable through the new engine. See [README.md](README.md).
+
+The current engine is `yaml-loops-v2` with correction contract
+`requirement-grounded-v1` and delivery contract `work-conserving-v1`.
+A run marker rejects older or missing contracts and unversioned
+history. Preserve old journals as history; they cannot bypass the new correction
+rules. Start a fresh run after adoption.

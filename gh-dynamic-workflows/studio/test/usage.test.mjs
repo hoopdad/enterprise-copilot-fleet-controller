@@ -211,6 +211,101 @@ test("correlates review with the exact owner's round without importing other tas
     assert.equal(agentWork(state, "different-run", agents[1], agents).workResult, null);
 });
 
+test("projects check suitability and submitted findings without accepting raw evidence or exposing artifacts", async (t) => {
+    const file = await logFixture(t);
+    await writeFile(file, lines([
+        started("reviewer", "review-call"),
+        workEvent("review", "reviewer", {
+            checksValid: true, feedback: "Checks cover the scoped requirement.", agree: true, taskComplete: true,
+            findings: [
+                { type: "observation", summary: "No live deployment evidence.", action: "Retain the limitation.", scope: "Bounded handoff" },
+                { type: "blocking", summary: "Null input fails.", action: "Handle null.",
+                    requirement: { path: "docs/spec.md", line: 12, secret: "PRIVATE-REQUIREMENT" },
+                    failingCheck: "null-input", validated: true, secret: "PRIVATE-FINDING" },
+            ],
+            workCard: workCard({ role: "Critic" }), verifiedProgress: { secret: "PRIVATE-PROGRESS" },
+            artifact: { secret: "PRIVATE-ARTIFACT", SprintPlan: { tasks: [{ id: "private", title: "PRIVATE-TITLE" }] } },
+        }),
+    ]));
+    const state = await new UsageReader().read(file);
+    const agent = { id: "review-call", label: "yaml:DeveloperLoop:reviewer:Critic:1" };
+    const projected = agentWork(state, "run", agent);
+    assert.equal(projected.workOutcomeState, undefined);
+    assert.equal(projected.taskCard.role, "Critic");
+    assert.equal(projected.workResult.kind, "review");
+    assert.equal(projected.workResult.checksValid, true);
+    assert.equal(projected.workResult.agree, undefined);
+    assert.equal(projected.workResult.taskComplete, undefined);
+    assert.deepEqual(projected.workResult.findings, [
+        { type: "observation", summary: "No live deployment evidence.", action: "Retain the limitation.", scope: "Bounded handoff" },
+        { type: "blocking", summary: "Null input fails.", action: "Handle null.",
+            requirement: { path: "docs/spec.md", line: 12 }, failingCheck: "null-input" },
+    ]);
+    assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-|validated/);
+    assert.equal(agentWork(state, "other-run", agent).workResult, null);
+});
+
+test("bounds check review fields and rejects unsupported finding shapes", async (t) => {
+    const file = await logFixture(t);
+    const long = "x".repeat(13_000);
+    const finding = { type: "blocking", summary: long, action: long, scope: long,
+        requirement: { path: long, line: 1 }, failingCheck: long };
+    const valid = { checksValid: false, feedback: long, findings: Array(101).fill(finding) };
+    await writeFile(file, lines([
+        workEvent("bounded", "bounded", valid),
+        ...[
+            { ...valid, checksValid: "false" },
+            { ...valid, findings: {} },
+            { ...valid, findings: [null] },
+            { ...valid, findings: [{ ...finding, type: "validated" }] },
+            { ...valid, findings: [{ ...finding, action: {} }] },
+        ].map((result, i) => workEvent(`bad-${i}`, `bad-${i}`, result)),
+        workEvent("empty", "empty", { checksValid: true, feedback: "", findings: [] }),
+        workEvent("optional", "optional", { checksValid: true, feedback: "No valid reference supplied.", findings: [
+            { type: "observation", summary: "Missing reference.", action: "", requirement: { path: "spec.md", line: -1 },
+                scope: { secret: "PRIVATE-SCOPE" }, failingCheck: { secret: "PRIVATE-CHECK" } },
+        ] }),
+    ]));
+    const state = await new UsageReader().read(file);
+    const result = agentWork(state, "run", { id: "bounded" }).workResult;
+    assert.equal(result.checksValid, false);
+    assert.equal(result.summary.length, 12_000);
+    assert.equal(result.findings.length, 100);
+    assert.deepEqual(Object.fromEntries(Object.entries(result.findings[0]).filter(([, value]) => typeof value === "string")
+        .map(([key, value]) => [key, value.length])), { type: 8, summary: 4000, action: 4000, failingCheck: 1000, scope: 1000 });
+    assert.equal(result.findings[0].requirement.path.length, 1000);
+    for (let i = 0; i < 5; i++) {
+        assert.equal(agentWork(state, "run", { id: `bad-${i}` }).workOutcomeState, "unsupported");
+    }
+    assert.deepEqual(agentWork(state, "run", { id: "empty" }).workResult.findings, []);
+    assert.deepEqual(agentWork(state, "run", { id: "optional" }).workResult.findings,
+        [{ type: "observation", summary: "Missing reference.", action: "" }]);
+    assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-/);
+});
+
+test("projects grounded correction reasons and owner judgments without importing arbitrary metadata", async (t) => {
+    const file = await logFixture(t);
+    const assessment = { correctionId: "Architect:1", verdict: "refuted",
+        reason: "The existing endpoint and probe meet the original request.", evidence: "checks.log" };
+    const finding = { type: "blocking", summary: "Health response missing.", action: "Add the response.",
+        basis: "demonstrated-defect", reason: "A missing response prevents the user's health check.",
+        requirement: { path: "prompts/original-request.md", line: 1 }, evidence: "health.log" };
+    await writeFile(file, lines([
+        workEvent("claim", "reviewer", { checksValid: false, feedback: "Claim submitted.",
+            findings: [{ ...finding, secret: "PRIVATE-CLAIM" }] }),
+        workEvent("judgment", "owner", { status: "complete", summary: "The claim is refuted.",
+            correctionAssessments: [{ ...assessment, secret: "PRIVATE-ASSESSMENT" }] }),
+        workEvent("bad-judgment", "bad-owner", { status: "rework", summary: "Unknown.",
+            correctionAssessments: [{ ...assessment, verdict: "opinion" }] }),
+    ]));
+    const state = await new UsageReader().read(file);
+    assert.deepEqual(agentWork(state, "run", { id: "reviewer" }).workResult.findings, [finding]);
+    assert.deepEqual(agentWork(state, "run", { id: "owner" }).workResult.correctionAssessments, [assessment]);
+    assert.equal(agentWork(state, "run", { id: "bad-owner" }).workResult.correctionAssessments, undefined);
+    assert.match([...state.warnings].join(), /Malformed correction assessments/);
+    assert.doesNotMatch(JSON.stringify([...state.results]), /PRIVATE-/);
+});
+
 test("projects all governance formats without artifacts, acceptance votes or cross-run attribution", async (t) => {
     const file = await logFixture(t);
     const cases = [
