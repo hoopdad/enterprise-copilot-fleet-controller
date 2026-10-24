@@ -35,7 +35,7 @@ export const definition = loadWorkflow();
 export function workflowMetadata(name) {
     return {
         name,
-        description: "Execute original YAML owner/reviewer loops with reconciled Scrum Master feedback and Architect-advised Product Owner scope decisions.",
+        description: "Execute original YAML owner/reviewer loops with work-conserving release continuation, Scrum Master feedback and Architect-advised Product Owner scope decisions.",
         phases: flattenLoops(definition.workflows.ReleaseLoop.steps).map((node) => ({
             title: node.name,
             detail: `${node.completeWhen ?? node.description}${["AssignedWorkUIDeveloperLoop", "AssignedWorkDeveloperLoop"].includes(node.id)
@@ -45,7 +45,8 @@ export function workflowMetadata(name) {
             projectRoot: { type: "string" }, workflowPath: { type: "string" },
             specification: { type: ["string", "object"] }, input: { type: "object" },
             acceptance: { type: "array" }, repositories: { type: "array" },
-            attempts: { type: "object" }, maxSprints: { type: "integer" },
+            attempts: { type: "object" }, maxSprints: { type: "integer", minimum: 1,
+                description: "Explicit cap on entered sprints, including partial sprints; omitted means no local cap." },
             maxNoProgressRounds: { type: "integer", minimum: 1 },
             concurrency: { type: "object", additionalProperties: false, properties: {
                 doers: { type: "integer", minimum: 1 }, reviewers: { type: "integer", minimum: 1 },

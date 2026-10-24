@@ -34,6 +34,8 @@ other original loops use planning. Each round includes its original reviewers.
 There are no separate repair/recovery stages or their former budgets.
 These attempt limits count every round, not just failures. Omit both `attempts`
 and `maxSprints` to allow unlimited rounds and sprints.
+`maxSprints` counts entered sprints, including incomplete/partial ones; it cannot
+be evaded by pulling a not-entered sprint's work into a continuation amendment.
 
 Optional `maxNoProgressRounds` is a positive integer with no default. It stops
 each original loop invocation/assignment after that many consecutive rounds
@@ -41,6 +43,118 @@ without new progress independently verified by all of its original reviewers.
 Verified progress resets the counter even when completion is not yet agreed.
 The existing completion/human-input conditions take precedence. Legacy total
 round/sprint caps, if also supplied, remain independent limits.
+
+## Work conservation and continuation amendments
+
+[DELIVERY-PRINCIPLES.md](DELIVERY-PRINCIPLES.md) records the accepted decision.
+A task/stage `needs-input`, `needs-replan` or no-progress outcome remains
+incomplete while independent authorized release work continues. It is not an
+automatic terminal release result. Accepted tasks/stages and their original
+reviews are retained; partial sprints are never counted as completed.
+
+`ReleasePlan.sprints[].dependsOn`, when supplied, contains unique existing
+sprint IDs and must be acyclic. It means full prerequisite sprint acceptance.
+Prefer smaller reviewed handoffs when the whole sprint is not needed. Absence
+of a whole-sprint edge does not waive actual source/contract/authority needs;
+later original planning/reviews receive `delivery` with unresolved blockers.
+
+After planned ready work settles, the existing SprintArchitectureLoop and
+SprintPlanLoop receive `context.continuation` with exact blocked outcome keys,
+audit references, scheduled task IDs and permitted source sprint IDs. Architect
+assesses component/flow/source blast radius and feasible construction; Scrum
+audits ready work, splits, independent approved backlog and bounded unlocking
+investigation. No new standing role or YAML acceptance stage is inserted.
+
+Continuation SprintPlan `complete` reports also supply:
+
+```json
+{
+  "artifact": {
+    "SprintPlan": {
+      "tasks": [{
+        "id": "adapter-source",
+        "title": "Build the approved adapter against its accepted contract",
+        "kind": "developer",
+        "owner": "Developer",
+        "dependsOn": [],
+        "sourceSprintId": "s1",
+        "sourceCriterion": "Original approved adapter construction criterion"
+      }]
+    },
+    "Continuation": {
+      "disposition": "continue",
+      "summary": "Live registration does not block adapter source construction",
+      "evidence": ["Inspected the approved contract and missing source module"],
+      "resumes": []
+    }
+  }
+}
+```
+
+Normal work-card, taskCards and task-boundary requirements still apply (omitted
+in this abbreviated example). Each new task ID must be unused in that partial
+sprint; sourceSprintId names an allowed approved release sprint and
+sourceCriterion cites its actual criterion. Amendment dependencies stay inside
+the amendment. Prior handoffs retain exact audit references and limitations.
+Save amendments separately; do not overwrite the original SprintPlan or
+ReleasePlan. Actual `devops` tasks are not permitted in this source-work graph.
+Authorized script/adapter construction may be developer work, not live PASS.
+
+Optional `resumes:[{key,after:[newTaskId],evidence}]` requests reassessment of an
+exact supplied blocker when its conditions materially change. Only its named
+new handoffs must be accepted; unrelated incomplete amendment tasks do not
+prevent reassessment. Empty `after` requires concrete newly obtained authoritative
+evidence, verified by the original planning reviewers and then the original
+task/stage owner/reviewers. Unknown keys/handoffs, duplicate references and
+reassessment of capped/error invocations fail validation. No implicit permission,
+blind replay, acceptance waiver or new-key limit reset is allowed.
+
+For blocked DevOps, optional `resumes[].e2eSubject` selects an exact accepted
+same-sprint Developer source outcome from `continuation.sourceSubjects`.
+The subject must retain a full commit ID, `DeveloperWork.taskComplete:true`,
+and the original Architect/Critic acceptance. It must differ from the agreed
+original E2E's tested revision. A single changed accepted source in `after`
+also qualifies older plans; ambiguous candidates require explicit selection.
+The original E2E runs before DevOps with the retained source document/dependency,
+not a newer workflow-repair commit. Its single `PASS` or `FAIL with feedback`
+artifact must report `taskComplete:true` and the exact `testedRevision`; all
+three original reviewers independently supply `taskComplete`/`unmetCriteria`.
+Failed/capped/error/no-progress qualification is never reset this way.
+
+Qualified outcomes retain the canonical original E2E key. Durable execution
+uses `requalification/<continuationRound>` and, when an accepted exact-stage
+resume exists, `/resume/<revision>` before `/EndToEndTestLoop`. A document-only
+`after:[]` reassessment with no `e2eSubject` retains the qualification/source
+but gets fresh owner/reviewer steps for its genuine resume revision. It does
+not renew a limit or authorize effects. Audit references bind each historical
+outcome object, not merely its shared semantic key; old bytes remain immutable.
+Unchanged replay reuses execution identities without new agent calls.
+
+`disposition:"exhausted"` requires empty tasks/resumes and inspectable findings
+showing no ready/executing work, feasible split, independent approved backlog
+or bounded unlocking investigation remains. `continue` requires tasks or
+reassessment; report agreement alone is not progress. New accepted construction/
+execution or successful reassessment can trigger another audit; unchanged
+blockers/exhaustion do not poll. Explicit continuation-planning caps are retained.
+Scoped replacement graphs retain their own accepted tasks and blocked planning
+stages. Reassessment targets the exact child/stage; it does not rerun the
+superseded parent or reacquire its edit resources while awaiting children.
+
+Final non-success application results include `delivery:{state:"waiting",
+waitReason,completedSprints,partialSprints,pendingSprints,acceptedWork,remainingWork,blockedWork,
+continuationAudits}`. `waitReason` distinguishes `work-exhausted`, `explicit-limit`,
+`prerequisite-planning`, blocked `continuation-review` and final `release-closeout`.
+Top-level prerequisite/closeout blockers also remain explicit in `blockedWork`.
+An incomplete or capped
+continuation assessment is not an accepted exhaustion audit. Original summary/status and all raw outcomes
+remain available. Branch-local execution errors are raised explicitly after
+independent release work settles; cancellation is not downgraded to a blocker.
+Failure checkpoints are also archived additively and their path is logged and
+included in the aggregate error. Prompt packets contain accepted-work scope/
+audit indices and only the latest continuation assessment per sprint, not
+historical accepted reports or repeated raw continuation evidence.
+SDK journals/context files persist the checkpoint, not a live SDK pause or an
+interactive input channel. Studio's cross-session observation remains read-only.
 
 ## Mandatory feedback coordination
 
@@ -183,7 +297,8 @@ The threshold returns `blocked`, `stopCause:"no-progress"`, total `rounds`,
 `progress:{noProgressRounds,limit,credited:[{id,evidence,round}]}`, unresolved
 `feedback` and an actionable `nextAction`. The launcher preserves this evidence
 and exits 2, even if the SDK envelope says completed. Dispatched work is joined
-before stopping. Stagnation detection relies on reviewer judgment, not a source
+before the affected branch settles. Other authorized release work continues.
+Stagnation detection relies on reviewer judgment, not a source
 freeze/hash or proof of semantic improvement. It only runs between rounds and
 does not bound a single agent's tool calls, time or spend.
 
@@ -262,8 +377,11 @@ failures instead of claiming completion. Reviewers inspect actual commits.
 When available, record observed model name, input/cached/output counts and elapsed
 time with units/scope in commit messages. Omit unavailable values; a follow-up
 metadata commit can reference the code commit without amending reviewed history.
-Their execute tool is restricted by instructions to read-only Git inspection,
-not writable commands or an OS-enforced sandbox.
+Their execute tool is restricted by instructions to read-only Git inspection
+and task-authorized byte hashing/structured-data parsing of explicitly supplied
+evidence with built-in or standard-library tools. It does not authorize
+repository script/test execution, code imports, credential access or writable
+commands, and is not an OS-enforced sandbox.
 
 The Scrum Master is the existing `SprintPlanLoop` do-er role, normally played
 by `workflow-owner`, and an existing read-only sprint review/retro reviewer.

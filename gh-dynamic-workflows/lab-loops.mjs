@@ -1,6 +1,7 @@
 import { dispositionContext, promptFeedback, priorDispositionInstructions, reconcileFeedback } from "./scope-governance.mjs";
 import { contextInstructions } from "./task-context.mjs";
 import { workCardSchema, taskCardsSchema, validateWorkCard, validateTaskCards, workCardInstructions, architectureCardInstructions, planningCardInstructions } from "./work-cards.mjs";
+import { continuationSchema, deliveryInstructions, continuationInstructions } from "./continuation.mjs";
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 export const ownerSchema = {
@@ -43,8 +44,14 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
     ].includes(loop.id);
     const doerSchema = { ...ownerSchema, required: [...ownerSchema.required,
         ...(guarded ? ["progress"] : []), ...(loop.id === "SprintPlanLoop" ? ["taskCards"] : [])] };
+    if (context.continuation && loop.id === "SprintPlanLoop") {
+        doerSchema.properties = { ...ownerSchema.properties, artifact: {
+            type: "object", required: ["SprintPlan", "Continuation"],
+            properties: { SprintPlan: { type: "object" }, Continuation: continuationSchema },
+        } };
+    }
     const reviewSchema = { ...reviewerSchema, required: [...reviewerSchema.required,
-        ...(guarded ? ["verifiedProgress"] : []), ...(context.assignment ? ["taskComplete", "unmetCriteria"] : [])] };
+        ...(guarded ? ["verifiedProgress"] : []), ...(context.assignment || context.e2eQualification ? ["taskComplete", "unmetCriteria"] : [])] };
     return ctx.step(key, async () => {
         let feedback = null;
         const governanceHistory = [];
@@ -62,6 +69,11 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                 ...(guarded ? { progressState: progressState() } : {}),
                 instructions: [
                     ...contextInstructions,
+                    ...deliveryInstructions,
+                    ...(context.e2eQualification ? [
+                        "Execute this existing original E2E for e2eQualification.testedRevision and its exact accepted subject/dependency, not the newer workflow repair or a generic latest DeveloperWork. Return the real PASS or FAIL with feedback artifact with taskComplete and testedRevision. Preserve historical reports; this is not installed acceptance.",
+                    ] : []),
+                    ...(context.continuation ? continuationInstructions : []),
                     ...workCardInstructions,
                     ...(["ArchitectureLoop", "SprintArchitectureLoop"].includes(loop.id) ? architectureCardInstructions : []),
                     ...(loop.id === "SprintPlanLoop" ? planningCardInstructions : []),
@@ -86,6 +98,12 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     "Use request.git.featureBranch when supplied, otherwise the project's intended feature branch. Establish that branch before parallel writing begins; do not switch a checkout underneath active agents. If working on a separate task branch, keep its commits available for integration and never delete unmerged work.",
                     "Inspect Git status first and preserve other agents' and the user's changes. Stage and commit explicit owned paths only; in a shared checkout use path-scoped git commit --only rather than committing the whole index. Do not switch a shared checkout's branch during concurrent work, force-push, discard work or remove another process's Git lock. Retry ordinary transient index contention rather than losing changes.",
                     "For needs-input, state the exact missing decision or authority in summary and an actionable nextAction. Do not request new approval for already-authorized ordinary work.",
+                    ...(context.resume ? [
+                        "This is evidence-backed reassessment of the exact previous blocked task/stage in resume, not permission to repeat uncertain effects. Independently inspect the cited new handoffs/evidence, actual user/tool authority and original acceptance. Preserve the previous blocker if the condition is unchanged. Do not relabel old work as new progress or replay a denied/uncertain operation.",
+                        ...(context.resume.kind === "prerequisite-recheck" ? [
+                            "This original E2E prerequisite was previously accepted but is stale for the changed source join. Inspect resume.previous and resume.blocked plus the reviewed handoffs. Re-run the original integration checks for the exact changed sources; retain original reviews and criteria. This is not a replacement assigned-work test or authorization to deploy.",
+                        ] : []),
+                    ] : []),
                     ...(guarded ? [
                         "Return progress: [{id,evidence}] for concrete advances made this round toward completeWhen; return [] if none. Use stable milestone/check/feedback IDs and exact inspectable file, test, or outcome evidence.",
                         "Previously existing work, changed prose, file churn, repeated tests/results, new labels for the same advance, and activity alone are not new progress. Do not reclaim anything in progressState.credited under another ID. Independent reviewers must verify advances against prior evidence.",
@@ -139,6 +157,8 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     ...(guarded ? { progressState: progressState() } : {}),
                     instructions: [
                         ...contextInstructions,
+                        ...deliveryInstructions,
+                        ...(context.continuation ? continuationInstructions : []),
                         ...workCardInstructions,
                         "Independently check the owner's workCard against the actual assignment, Architect-established names and evidence. Your card describes your review action and findings, not invented implementation work; mustAct names the actual next responsible role. A missing legacy card alone does not change substantive acceptance.",
                         "Independently review the actual work and the YAML completeWhen condition. Read the relevant files, not just the do-er's summary.",
@@ -146,10 +166,16 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                         "Return agree:true when you agree with the reported outcome. Feedback may include observations even when you agree; there is no zero-findings requirement.",
                         "Judge only your own independent vote. The orchestrator collects the other parallel reviewers' votes; their pending responses are not an unmet owner criterion and must not require another round.",
                         "Use the same reconciled feedback.governance.instructions and retained scope decisions as the owner. Deferred/declined enhancements cannot block original acceptance; raw suggestions are audit evidence only. Independently verify required corrections and approved bounded acceptance; never waive actual failures or rewrite requirements. Flag suspected expansion, but Scrum Master triage also checks independently.",
-                        "Separately judge report accuracy and assignment completion. For assigned work return taskComplete:boolean and unmetCriteria:[specific assigned criteria still unmet]. Agreement with an accurate incomplete report is not task acceptance. Do not demand full product/live readiness from a bounded contract or research handoff.",
+                        "Separately judge report accuracy and assignment completion. For assigned work or e2eQualification return taskComplete:boolean and unmetCriteria:[specific criteria still unmet]. For e2eQualification independently check the exact retained testedRevision and original subject. Agreement with an accurate incomplete report is not task acceptance. Do not demand full product/live readiness from a bounded contract or research handoff.",
                         "If continued rework is justified, identify a specific unmet doneWhen criterion and a closing next action. If the assigned deliverable is already satisfied, ask the owner to report complete rather than endorsing indefinite investigation. Material scope changes should be reported as needs-replan for existing Architect/Scrum Master coordination, not invented human permission.",
                         "Disagree with concrete feedback when more work is needed. Judge risk and evidence in context using the project's instructions, not an invented global policy.",
                         "A role named Stakeholder is a reviewer role, not a substitute for an actual required human authorization.",
+                        ...(context.resume ? [
+                            "Independently verify that resume's cited changed evidence/handoffs actually remove this task/stage's blocker before accepting the original criteria. New local construction or an accurate report does not establish permission, real-service success or deployed tests. Do not endorse an unchanged retry or reset an explicit limit.",
+                            ...(context.resume.kind === "prerequisite-recheck" ? [
+                                "This is the original E2E review for the changed source join, not acceptance of the stale previous test result or a substitute task. Verify exact source applicability and accurate actionable outcomes before downstream DevOps reassessment.",
+                            ] : []),
+                        ] : []),
                         "For any changed files, inspect the do-er's actual Git commits as well as the code. Uncommitted intended changes or an unsuccessful commit need concrete rework feedback, not a new proof protocol. Do not demand a commit for a turn that changed no files; never ask to commit secrets, generated junk or another person's work.",
                         ...(guarded ? [
                             "Return verifiedProgress: [id,...] containing only owner.progress IDs whose underlying evidence you independently inspected and verified as a substantive NEW advance this round toward completeWhen. Return [] if none, even if the summary claims progress.",
@@ -177,7 +203,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
                     throw new Error(`Invalid ${role} reviewer response in ${loop.id}`);
                 }
                 validateWorkCard(review.workCard, `${loop.id} ${role} reviewer`);
-                if (context.assignment && (typeof review.taskComplete !== "boolean" ||
+                if ((context.assignment || context.e2eQualification) && (typeof review.taskComplete !== "boolean" ||
                     !Array.isArray(review.unmetCriteria) || review.unmetCriteria.some((item) => typeof item !== "string"))) {
                     throw new Error(`Invalid ${role} assignment completion assessment in ${loop.id}`);
                 }
@@ -197,7 +223,7 @@ export async function runLoop({ ctx, loop, key, context, attempts, maxNoProgress
             }
             const agreed = reviews.every((review) => review.agree);
             if (agreed && owner.status === "complete" && !transportIssue &&
-                (!context.assignment || reviews.every((review) => review.taskComplete))) {
+                (!(context.assignment || context.e2eQualification) || reviews.every((review) => review.taskComplete))) {
                 return {
                     status: "agreed", artifact: owner.artifact, summary: owner.summary, reviews, rounds: attempt,
                     ...(owner.workCard ? { workCard: owner.workCard } : {}),

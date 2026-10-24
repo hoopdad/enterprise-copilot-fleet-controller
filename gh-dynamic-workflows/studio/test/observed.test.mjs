@@ -53,6 +53,28 @@ const run = (agents = [], extra = {}) => ({
     phases: [{ id: "future", entries: 0, title: "Unobserved plan" }], ...extra,
 });
 
+test("waiting checkpoints distinguish retained construction from accepted delivery and live runtime pauses", () => {
+    const record = run([], { status: "completed", terminal: true, result: {
+        status: "needs-input", summary: "Classifier permission remains missing.",
+        delivery: { state: "waiting", waitReason: "work-exhausted", acceptedWork: [{}, {}],
+            partialSprints: [{}], pendingSprints: [{}], blockedWork: [{}] },
+    } });
+    assert.equal(outcome(record).tone, "waiting");
+    assert.match(stopReason(record), /Classifier permission remains missing/);
+    assert.match(stopReason(record), /Reviewed executable work exhausted: 2 accepted assignments retained; 1 partial sprints/);
+    assert.match(stopReason(record), /1 pending sprints; 1 unresolved blockers/);
+    assert.match(stopReason(record), /remains incomplete.*not a live SDK pause/);
+    record.result.delivery.waitReason = "continuation-review";
+    assert.match(stopReason(record), /Continuation review incomplete/);
+    assert.doesNotMatch(stopReason(record), /Reviewed executable work exhausted/);
+    record.result.delivery.waitReason = "explicit-limit";
+    assert.match(stopReason(record), /Explicit user limit reached/);
+    record.result.delivery.waitReason = "release-closeout";
+    assert.match(stopReason(record), /Release closeout incomplete/);
+    record.result.delivery = { state: "waiting" };
+    assert.equal(stopReason(record), "Classifier permission remains missing.");
+});
+
 test("renders only observed activities and interval-order fan-out/join, not the plan", () => {
     const flow = observedFlow(run([
         agent("plan", 2, 10), agent("ui", 11, 30), agent("api", 12, 40),

@@ -9,6 +9,7 @@ import { labMetadata } from "../lab-workflow.mjs";
 import { metadata } from "../workflow.mjs";
 import { ownerSchema, reviewerSchema } from "../lab-loops.mjs";
 import { triageSchema, architectureSchema, scopeDecisionSchema } from "../scope-governance.mjs";
+import { continuationSchema } from "../continuation.mjs";
 
 test("every declared schema object has an explicit type and no guessed SDK limits", () => {
     function check(schema) {
@@ -24,6 +25,7 @@ test("every declared schema object has an explicit type and no guessed SDK limit
     check(triageSchema);
     check(architectureSchema);
     check(scopeDecisionSchema);
+    check(continuationSchema);
     assert.equal(Object.hasOwn(labMetadata, "limits"), false);
 });
 

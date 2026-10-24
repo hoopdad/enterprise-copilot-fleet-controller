@@ -56,7 +56,7 @@ export function describeOutcome(envelope, result) {
         reviewers: (stop?.feedback?.reviews ?? stop?.reviews ?? []).filter((review) => !review.agree),
         nextAction: result.nextAction ?? stop?.nextAction ?? (result.status === "completed" ? undefined
             : "Continue from the existing work and the reported unresolved feedback in a new run."),
-        completedSprints: result.completedSprints, exitCode: result.status === "completed" ? 0 : 2,
+        completedSprints: result.completedSprints, delivery: result.delivery, exitCode: result.status === "completed" ? 0 : 2,
     };
 }
 
@@ -67,6 +67,7 @@ export function formatOutcome(outcome, files) {
         outcome.stoppedAt && `Stopped at: ${compact(outcome.stoppedAt)}${outcome.rounds ? `, round ${outcome.rounds}` : ""}`,
         outcome.summary && `Summary: ${compact(outcome.summary)}`,
         outcome.reason && `Reason: ${compact(outcome.reason)}`,
+        outcome.delivery && `Delivery: ${outcome.delivery.acceptedWork?.length ?? 0} accepted assignments; ${outcome.delivery.partialSprints?.length ?? 0} partial sprints; ${outcome.delivery.pendingSprints?.length ?? 0} pending sprints; ${outcome.delivery.blockedWork?.length ?? 0} unresolved blockers.${outcome.delivery.state === "waiting" ? ` Waiting: ${compact(outcome.delivery.waitReason)}.` : ""}`,
         ...(outcome.reviewers ?? []).slice(0, 3).map((review) => `Disagreement - ${compact(review.role, 80)}: ${compact(review.feedback, 240)}`),
         outcome.nextAction && `Next: ${compact(outcome.nextAction)}`,
         `Full outcome: ${files.outcome}`,

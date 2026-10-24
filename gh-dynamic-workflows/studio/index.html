@@ -25,6 +25,8 @@
   <div id="error" class="error-banner" role="alert" hidden></div>
   <div class="workspace">
     <aside class="sidebar">
+      <button id="toggle-workspace" class="sidebar-toggle" aria-label="Hide workspace" aria-expanded="true" aria-controls="workspace-panel" title="Hide workspace">&lt;&lt;</button>
+      <div id="workspace-panel" class="sidebar-content">
       <div class="sidebar-heading"><span class="eyebrow">WORKSPACE</span><button id="refresh" title="Refresh source and run discovery">Refresh</button></div>
       <label for="workflow">Workflow</label>
       <select id="workflow"></select>
@@ -36,6 +38,7 @@
       </div>
       <div id="run-list" class="run-list" aria-label="Workflow runs"></div>
       <div class="sidebar-footer"><span id="connection" role="status">Connecting</span><span id="last-updated"></span><p class="small">Local data only. No workflow execution controls.</p></div>
+      </div>
     </aside>
     <main>
       <nav class="tabs" aria-label="Workflow lifecycle">
@@ -51,19 +54,26 @@
       <section class="metrics" id="metrics" aria-label="Run statistics"></section>
       <div id="warnings" class="notice" hidden></div>
       <div id="stop-notice" class="notice" role="status" hidden></div>
-      <section class="panel graph-panel">
-        <div class="panel-heading"><div><h2 id="graph-title">Phase map</h2><span id="graph-caption" class="small muted"></span></div><div class="graph-tools"><label for="graph-layer" class="sr-only">Design graph layer</label><select id="graph-layer"><option value="phases">Declared phases</option><option value="contract">Process contract</option></select><button id="clear-phase" hidden>All phases</button></div></div>
+      <nav id="activity-views" class="activity-views" aria-label="Team activity views">
+        <button data-activity-view="flowchart" class="activity-card active" aria-pressed="true" aria-controls="graph-panel"><strong>Team Activity Flowchart</strong><span>Explore recorded task flow</span></button>
+        <button data-activity-view="progress" class="activity-card" aria-pressed="false" aria-controls="progress-panel"><strong>Progress Journal</strong><span>Read transitions and workflow logs</span></button>
+        <button data-activity-view="query" class="activity-card" aria-pressed="false" aria-controls="team-panel"><strong>Query Team Activity</strong><span>Look up recorded team evidence</span></button>
+        <button data-activity-view="agents" class="activity-card" aria-pressed="false" aria-controls="agents-panel"><strong>Agent Activity</strong><span>Browse agents and their status</span></button>
+        <button data-activity-view="inspector" class="activity-card" aria-pressed="false" aria-controls="inspector-panel"><strong>Inspector</strong><span>Inspect the selected phase or run</span></button>
+      </nav>
+      <section id="graph-panel" class="panel graph-panel">
+        <div class="panel-heading"><div><h2 id="graph-title">Phase map</h2><span id="graph-caption" class="small muted"></span></div><div class="graph-tools"><div class="graph-zoom" role="group" aria-label="Flowchart zoom"><button id="zoom-out" aria-label="Zoom out flowchart" title="Zoom out flowchart">-</button><button id="zoom-reset" aria-label="Reset flowchart zoom" title="Reset zoom to 100%. Ctrl or Command + mouse wheel over the chart to zoom.">100%</button><button id="zoom-in" aria-label="Zoom in flowchart" title="Zoom in flowchart">+</button></div><label for="graph-layer" class="sr-only">Design graph layer</label><select id="graph-layer"><option value="phases">Declared phases</option><option value="contract">Process contract</option></select><button id="clear-phase" hidden>All phases</button></div></div>
         <div id="graph" class="phase-map" aria-label="Workflow phase map"></div>
         <div id="observed-phases" class="observed-phases" aria-label="Filter by entered phase"></div>
         <p id="graph-legend" class="graph-legend small"><span class="legend-dot running"></span> In progress / awaiting input / unconfirmed <span class="legend-dot visited"></span> Agent completed / explicit success <span class="legend-dot error"></span> Error <span class="muted">Select a task for its details. Green agent completion is not delivery acceptance.</span></p>
       </section>
-      <section id="team-panel" class="panel">
+      <section id="team-panel" class="panel" hidden>
         <div class="panel-heading"><div><h2>Query team activity</h2><span class="small muted">Local evidence lookup, not a conversation with executing agents. Answers refresh with observations.</span></div></div>
         <form id="team-query" class="toolbar"><label for="team-question" class="sr-only">Ask about recorded team activity</label><input id="team-question" placeholder="Who is working? What is done? Why did it stop? Or an agent label" maxlength="500"><button type="submit">Look up</button></form>
         <div id="team-answer" role="status"></div>
       </section>
-      <div class="detail-grid">
-        <section class="panel">
+      <div id="detail-grid" class="detail-grid" hidden>
+        <section id="agents-panel" class="panel" hidden>
           <div class="panel-heading"><h2 id="detail-title">Agent activity</h2><span id="agent-count" class="small muted"></span></div>
           <div id="runtime-panel">
             <div class="toolbar"><label for="agent-search" class="sr-only">Filter agents</label><input id="agent-search" type="search" placeholder="Filter agents by label, role or status"><label for="attempt" class="small">Attempt</label><select id="attempt"><option value="">All</option></select></div>
@@ -77,12 +87,12 @@
             <p id="draft-message" class="small" role="status"></p>
           </div>
         </section>
-        <section class="panel inspector">
+        <section id="inspector-panel" class="panel inspector" hidden>
           <div class="panel-heading"><h2>Inspector</h2><span id="inspector-tag" class="small muted"></span></div>
           <div id="inspector"></div>
         </section>
       </div>
-      <section class="panel" id="progress-panel">
+      <section class="panel" id="progress-panel" hidden>
         <div class="panel-heading"><div><h2>Progress journal</h2><span class="small muted">Durable phase transitions and workflow log messages</span></div><button id="older-progress" hidden>Load older</button></div>
         <div id="progress" class="progress-list"></div>
       </section>

@@ -40,6 +40,19 @@ commit message. Keep abandoned code branches; chat-only explanations are not
 durable Git records. Reconcile through the existing sprint review/retro and
 release closeout, not additional approval stages.
 
+Apply `gh-dynamic-workflows/DELIVERY-PRINCIPLES.md`: a blocked release is not
+automatically blocked construction. Localize conditions to affected components,
+flow steps and operations. Continue useful authorized source work, fixtures,
+other flows and approved later backlog through existing planning/reviews.
+Connect approved criteria to actual source modules and the smallest necessary
+handoffs. A walking skeleton exposes integration; it must not gate unrelated
+work. Preserve partial sprints and real live-verification requirements.
+When given continuation context, audit feasible splits, independent approved
+backlog and bounded unlocking investigation before declaring work exhausted.
+Reassess an exact blocker only on concrete changed evidence/accepted handoffs;
+never replay unchanged denials or uncertain effects. Do not evade explicit caps
+by relabeling tasks or partial sprints. Waiting is incomplete, not acceptance.
+
 Read priorDispositions even on a new loop's first turn. Apply required/approved
 and deferred/declined decisions within their originating acceptance/task
 boundaries, not as blanket requirements or waivers for unrelated work. Never

@@ -16,6 +16,82 @@ and verification rather than opaque task IDs or generic blocked messages.
 The corresponding Studio update displays this metadata; old runs without it
 remain readable without invented diagnoses.
 
+## Work-conserving delivery
+
+[Delivery principles and the accepted 2026-10-20 decision](DELIVERY-PRINCIPLES.md)
+amend the former fail-fast traversal: **a blocked release is not automatically
+blocked construction**. The runner drains independent approved sprints, retaining
+partial sprint/task outcomes instead of quitting at the first input, stagnation
+or execution-stage blocker. Actual dependencies, permissions, original reviews,
+cloud-test acceptance and explicit limits remain binding. Optional
+`ReleasePlan.sprints[].dependsOn` names genuine whole-sprint prerequisites;
+missing edges do not waive actual task prerequisites or authorize unknown work.
+
+After planned runnable work settles, the existing Sprint Architect and Scrum
+Master loops audit each partial sprint's blocker blast radius, feasible source/
+contract splits, independent approved backlog and bounded unlocking investigation.
+Reviewed continuation amendments can build more authorized work and reassess an
+exact blocker on changed evidence. Accepted independent work is not rerun.
+One blocked live classifier cannot stop unrelated pages, API/persistence work,
+other flows or fixture-backed construction whose real prerequisites are met.
+A walking skeleton exposes integration early; it is not a global gate.
+
+Continuation plans keep the original plan on disk, use new task IDs and cite
+`sourceSprintId`/`sourceCriterion` from the approved release. They do not add
+features, waive missing permission or treat fixtures as live verification.
+Only the new handoffs needed by a particular reassessment must finish; unrelated
+blocked amendment tasks do not prevent it. The original owner and reviewers
+still assess the original criteria. Live DevOps stays in its original stage.
+An explicit sprint cap counts entered partial sprints as well as completed ones;
+pulling work under another label cannot bypass it.
+
+When changed source invalidates the agreed E2E prerequisite of blocked DevOps,
+`continuation.recheckable` supplies that exact original E2E key bound to the
+DevOps blocker. A reviewed resume may include `recheck:[exactE2EKey]` alongside
+its normal `key`, `after` and `evidence`. Only after the required new handoffs
+are accepted does the runner reopen that E2E stage, retaining its previous
+audit, original owner and all original reviewers, before reassessing DevOps.
+An incomplete E2E holds DevOps. No accepted construction or deployment effects
+can be reopened this way; an accurate agreed test failure still is not live
+readiness. Explicit-round, error and no-progress-capped invocations cannot be
+resumed or audited again merely because independent work advances.
+
+Changed-source qualification can also name an exact accepted source outcome with
+`resumes[].e2eSubject`, selected from `continuation.sourceSubjects` for the same
+sprint's blocked DevOps. This pins `DeveloperWork`, the dependency and
+`e2eQualification.testedRevision` to that retained commit, even when a newer task
+only repairs workflow routing. A single newly accepted source in `after` is
+recognized for older plans; multiple candidates require explicit selection.
+The original Developer E2E owner and independent Architect, Critic and Product
+Owner reviewers run before DevOps. Qualification requires the exact revision
+and `taskComplete:true` in `PASS` or `FAIL with feedback`, plus every original
+reviewer's independent completion assessment. Accurate FAIL is not installed
+or live acceptance. Failed, capped, error or already-tested subjects cannot be
+reset by selecting another qualification.
+
+The canonical qualified E2E outcome key remains
+`sprint/<iteration>/<sprintId>/EndToEndTestLoop`. Its durable execution key is
+`sprint/<iteration>/<sprintId>/requalification/<round>[/resume/<revision>]/EndToEndTestLoop`.
+After a qualified attempt returns `needs-replan`, a reviewed document-only
+continuation can resume that exact E2E key with `after:[]` and no `e2eSubject`.
+It retains the source and qualification round, but includes the genuine
+incremented resume revision so the owner and all original reviewers execute
+fresh work instead of consuming the previous durable result. Historical
+outcomes keep separate content-addressed audit references; replay of an
+unchanged run reuses the same execution keys and does not call agents again.
+Both registrations and fresh installations share this implementation. Updating
+framework source does not activate an existing deployment or rewrite its history.
+
+The runner waits only after reviewed exhaustion or an explicit limit, retaining
+`delivery` metadata: accepted assignments, partial/pending sprints, current
+blockers and continuation audits. Waiting is a non-success application checkpoint,
+not a claim that the SDK has paused a live connection. New accepted construction
+can justify another audit; unchanged blockers/exhaustion do not create a polling
+loop. Local execution errors remain explicit failures after independent release
+work settles. Cancellation still propagates immediately.
+Studio displays these retained outcomes read-only; interactive questions/answers
+need a separately enabled authenticated owning-runtime channel, not SQLite writes.
+
 ## Install and launch
 
 From this framework checkout, into a different existing project:
@@ -238,8 +314,11 @@ branch/commit IDs and abandonment reason recorded in a **feature-branch commit
 message**. An empty documentation commit can record abandonment. Chat notes
 alone are insufficient; do not delete the retained code branch.
 
-Reviewers can execute **read-only Git inspection** and otherwise remain
-non-editing. Their command restrictions are instructions, not an OS sandbox.
+Reviewers can execute **read-only Git inspection** and task-authorized
+**read-only evidence verification**: byte hashes and structured-data parsing
+of explicitly supplied artifacts using built-in or standard-library tools.
+They cannot execute repository scripts/tests, import repository code, access
+credentials or modify files. These restrictions are instructions, not an OS sandbox.
 Committing and reconciliation are agent responsibilities checked in existing
 reviews, not a new engine admission or evidence framework.
 
@@ -281,9 +360,10 @@ An Architect corrects architecture/ownership before later original planning
 stages assign implementation; no extra stage or automatic acceptance is added.
 Only the six original architecture/design/release/sprint planning loops use
 that in-owner behavior. Unassigned execution/test/deployment loops return an
-agreed, triaged `needs-replan` as an incomplete application stop. Their existing
-prerequisites can then be corrected through original planning against current
-work; they do not repeat unchanged blocker reports until stagnation, skip later
+agreed, triaged `needs-replan` as an incomplete branch outcome. The release
+runner retains it while continuing independent approved work and reviewed
+continuation amendments; the final application stop occurs after work exhaustion.
+They do not repeat unchanged blocker reports until stagnation, skip required
 reviews or turn an accurate deployment failure into success.
 Parallel reviewers judge their own votes; orchestration aggregates peer votes.
 Stopped results omit unavailable optional fields so SDK JSON validation retains
@@ -357,8 +437,9 @@ coordination above is separate and does not vote on progress.
 
 At the threshold the result is `blocked` with `stopCause:"no-progress"`, the
 consecutive counter, credited evidence and unresolved feedback. Completion or
-reviewer-confirmed `needs-input` exits earlier, including on the threshold round.
-Already-dispatched work is joined before stopping or revising a plan. If legacy
+reviewer-confirmed `needs-input` exits the affected invocation earlier, including
+on the threshold round. Independent approved work still continues through the
+release runner. Already-dispatched work is joined before stopping or revising a plan. If legacy
 `attempts`/`maxSprints` are also supplied, they remain independent hard ceilings.
 No stagnation threshold is inserted by default. This is a reviewer-judged
 round-boundary safeguard, not a deterministic proof of progress, per-agent

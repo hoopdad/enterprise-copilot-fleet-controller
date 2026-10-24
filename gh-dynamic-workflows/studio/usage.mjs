@@ -276,7 +276,7 @@ export function agentWork(state, runId, agent, agents = []) {
     const taskId = agent.label?.match(/\/task\/([^/:]+)/)?.[1];
     const sprintId = agent.label?.match(/sprint\/\d+\/([^/:]+)/)?.[1];
     const taskTitle = known.find(([id]) => id === (taskId ?? sprintId))?.[1] ?? null;
-    const assignment = agent.label?.match(/^(.*)\/task\/([^/:]+)(?:\/plan-round\/(\d+))?\/[^:]+:/);
+    const assignment = agent.label?.match(/^(.*)\/task\/([^/:]+)(?:\/plan-round\/(\d+))?(?:\/resume\/\d+)?\/[^:]+:/);
     const planner = assignment ? agents.find((candidate) =>
         candidate.label === `${assignment[1]}/SprintPlanLoop:doer:${assignment[3] ?? 1}`) : null;
     const plannedCard = planner ? resultFor(planner)?.assignments?.find(([id]) => id === taskId)?.[1] : null;

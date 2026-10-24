@@ -1,5 +1,9 @@
 # HUMAN-EDITED SOURCE: Edit this file directly, then run: ./compact.sh docs/runbooks/loops.yml docs/runbooks/compact-loop.yml
 # Optional local guard automation: ./install-git-hooks.sh
+# Accepted runtime amendment: DELIVERY-PRINCIPLES.md. Retain partial sprints,
+# continue independent approved release construction, and reuse existing
+# Architect/Scrum Master loops for evidence-backed continuation before waiting.
+# Original owners, reviewer sets and substantive completion conditions remain.
 version: "1.0"
 entities:
   - name: Architecture

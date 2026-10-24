@@ -76,6 +76,39 @@ test("pending assignment cards use only their exact sprint, replacement scope an
         "Investigate database-write permission failure");
 });
 
+test("resumed and continuation assignments retain only their exact planner card and owner round", async (t) => {
+    const file = await logFixture(t);
+    const prefix = "yaml-loops-v1:sprint/1/S1";
+    const original = workCard({ action: "Original API handoff" });
+    const additional = workCard({ action: "Offline adapter handoff" });
+    const revised = workCard({ action: "Revised plan handoff" });
+    await writeFile(file, lines([
+        ...["original", "additional", "revised", "owner", "review"].map((id) => started(id, id)),
+        ...[["original", original], ["additional", additional], ["revised", revised]].map(([id, card]) =>
+            workEvent(`${id}-result`, id, { status: "complete", summary: "Recorded plan.",
+                taskCards: [{ id: "api", workCard: card }], artifact: { SprintPlan: { path: "plan.json" } } })),
+        workEvent("owner-result", "owner", { status: "needs-input", summary: "Actual authority remains missing." }),
+        workEvent("review-result", "review", { agree: true, taskComplete: false, feedback: "Still incomplete." }),
+    ]));
+    const agents = [
+        { id: "original", label: `${prefix}/SprintPlanLoop:doer:2` },
+        { id: "additional", label: `${prefix}/continuation/1/SprintPlanLoop:doer:1` },
+        { id: "revised", label: `${prefix}/resume/1/SprintPlanLoop:doer:1` },
+        { id: "owner", label: `${prefix}/task/api/plan-round/2/resume/1/AssignedWorkDeveloperLoop:doer:3` },
+        { id: "review", label: `${prefix}/task/api/plan-round/2/resume/1/AssignedWorkDeveloperLoop:reviewer:Critic:3` },
+    ];
+    const state = await new UsageReader().read(file);
+    const pending = (scope) => ({ id: "pending", label: `${prefix}${scope}/task/api/resume/1/AssignedWorkDeveloperLoop:doer:1` });
+    assert.deepEqual(agentWork(state, "run", agents[3], agents).taskCard, original);
+    assert.deepEqual(agentWork(state, "run", pending("/continuation/1"), agents).taskCard, additional);
+    assert.deepEqual(agentWork(state, "run", pending("/resume/1"), agents).taskCard, revised);
+    assert.equal(agentWork(state, "run", pending("/continuation/2"), agents).taskCard, null);
+    assert.equal(agentWork(state, "other-run", agents[3], agents).taskCard, null);
+    assert.equal(agentWork(state, "run", agents[4], agents).workResult.ownerStatus, "needs-input");
+    assert.equal(agentWork(state, "run", { ...agents[4], label: agents[4].label.replace(":3", ":4") }, agents)
+        .workResult.ownerStatus, null);
+});
+
 test("attributes exact agent usage, excludes parents/nested/other runs, preserves zero and deduplicates event IDs", async (t) => {
     const file = await logFixture(t);
     const first = usageEvent("one", "alias", 100, 0, 20, "model-a");

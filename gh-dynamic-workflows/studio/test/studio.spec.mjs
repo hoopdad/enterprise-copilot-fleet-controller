@@ -79,6 +79,30 @@ test("renders completed governance outcomes rather than missing-result warnings"
     }
 });
 
+test("shows a work-conserving waiting checkpoint without claiming delivery or a live pause", async ({ page }) => {
+    const local = await fixture();
+    let instance;
+    try {
+        local.mutate((db) => db.prepare("UPDATE workflow_runs SET status='completed',result_json=?,completed_at_ms=? WHERE run_id='live-run'")
+            .run(JSON.stringify({ status: "needs-input", summary: "Classifier permission remains missing.",
+                delivery: { state: "waiting", waitReason: "work-exhausted", acceptedWork: [{}, {}, {}],
+                    partialSprints: [{}], pendingSprints: [], blockedWork: [{}] } }), Date.now()));
+        instance = await startStudio(local.project, { sessionsRoot: local.sessionsRoot });
+        await page.goto(instance.url);
+        await expect(page.locator("#stop-notice")).toContainText("Classifier permission remains missing.");
+        await expect(page.locator("#stop-notice")).toContainText("3 accepted assignments retained");
+        await expect(page.locator("#stop-notice")).toContainText("Delivery remains incomplete");
+        await expect(page.locator("#stop-notice")).toContainText("not a live SDK pause");
+        await expect(page.locator("#run-status")).toContainText("NEEDS-INPUT");
+        await expect(page.locator('[data-task="end"]')).toBeVisible();
+        await expect(page.locator("#error")).toBeHidden();
+    } finally {
+        await page.close();
+        await instance?.close();
+        await local.cleanup();
+    }
+});
+
 test.beforeAll(async () => {
     f = await fixture();
     yamlSource = await readFile(new URL("../../loops.yml", import.meta.url), "utf8");
@@ -88,6 +112,130 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
     await studio?.close();
     await f?.cleanup();
+});
+
+test("activity cards select one view, default to flowchart and retain state across refreshes", async ({ page }) => {
+    await page.goto(studio.url);
+    await expect(page.locator("#connection")).toContainText("Connected");
+    const selectors = page.locator("[data-activity-view]");
+    await expect(selectors).toHaveCount(5);
+    await expect(page.locator('[data-activity-view="flowchart"]')).toHaveAttribute("aria-pressed", "true");
+    for (const view of ["flowchart", "progress", "query", "agents", "inspector"]) {
+        const card = page.locator(`[data-activity-view="${view}"]`);
+        await card.focus();
+        await page.keyboard.press("Enter");
+        await expect(card).toBeFocused();
+        await expect(card).toHaveAttribute("aria-pressed", "true");
+        await expect(page.locator('[data-activity-view][aria-pressed="true"]')).toHaveCount(1);
+        for (const other of await selectors.all()) {
+            const panel = page.locator(`#${await other.getAttribute("aria-controls")}`);
+            if (await other.getAttribute("data-activity-view") === view) await expect(panel).toBeVisible();
+            else await expect(panel).toBeHidden();
+        }
+    }
+    await page.locator('[data-activity-view="query"]').click();
+    await page.locator("#team-question").fill("Who is working?");
+    await page.locator("#team-query button").click();
+    await page.waitForTimeout(2200);
+    await expect(page.locator("#team-panel")).toBeVisible();
+    await page.locator('[data-view="history"]').click();
+    await page.getByRole("button", { name: "example completed past-run" }).click();
+    await expect(page.locator("#team-panel")).toBeVisible();
+    await page.locator('[data-view="design"]').click();
+    await expect(page.locator("#activity-views")).toBeHidden();
+    for (const panel of ["graph-panel", "agents-panel", "inspector-panel"]) {
+        await expect(page.locator(`#${panel}`)).toBeVisible();
+    }
+    await page.locator('[data-view="live"]').click();
+    await expect(page.locator("#team-panel")).toBeVisible();
+    await expect(page.locator("#team-question")).toHaveValue("Who is working?");
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.locator("#toggle-workspace").click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await expect(page.locator("#error")).toBeHidden();
+});
+
+test("collapses the workspace without losing selection, filters or keyboard access", async ({ page }) => {
+    await page.goto(studio.url);
+    await expect(page.locator("#connection")).toContainText("Connected");
+    await page.getByRole("button", { name: "example completed past-run" }).click();
+    await page.locator("#run-search").fill("past-run");
+    await page.locator('[data-filter="finished"]').click();
+    const width = (await page.locator("#graph").boundingBox()).width;
+    const toggle = page.locator("#toggle-workspace");
+    await expect(toggle).toHaveText("<<");
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+    await expect(toggle).toHaveText(">>");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
+    await expect(page.locator("#workspace-panel")).toBeHidden();
+    expect((await page.locator("#graph").boundingBox()).width - width).toBeGreaterThan(200);
+    await page.waitForTimeout(2200);
+    await expect(page.locator("#workspace-panel")).toBeHidden();
+    await expect(page.locator("#view-subtitle")).toContainText("past-run");
+    await page.locator('[data-view="design"]').click();
+    await expect(page.locator("#workspace-panel")).toBeHidden();
+    await page.setViewportSize({ width: 390, height: 800 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await toggle.focus();
+    await page.keyboard.press("Space");
+    await expect(toggle).toHaveText("<<");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#run-search")).toHaveValue("past-run");
+    await expect(page.locator('[data-filter="finished"]')).toHaveClass(/active/);
+    await expect(page.locator("#run-list .active")).toContainText("past-run".slice(0, 8));
+    await expect(page.locator("#workspace-panel")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("zooms flowchart text, cards and connectors without hijacking ordinary scrolling", async ({ page }) => {
+    await page.goto(studio.url);
+    const task = page.locator('[data-task="agent:a1"]');
+    await expect(task).toBeVisible();
+    const originalWidth = (await task.boundingBox()).width;
+    const titleHeight = (await task.locator("strong").boundingBox()).height;
+    const svgWidth = (await page.locator("#graph svg").boundingBox()).width;
+    await page.locator("#zoom-in").click();
+    await expect(page.locator("#zoom-reset")).toHaveText("110%");
+    expect((await task.boundingBox()).width).toBeCloseTo(originalWidth * 1.1, 0);
+    expect((await task.locator("strong").boundingBox()).height).toBeGreaterThan(titleHeight);
+    expect((await page.locator("#graph svg").boundingBox()).width).toBeCloseTo(svgWidth * 1.1, 0);
+    const wheel = (modifiers, deltaY) => page.locator("#graph").evaluate((graph, args) => {
+        const bounds = graph.getBoundingClientRect();
+        return graph.dispatchEvent(new WheelEvent("wheel", { ...args.modifiers, deltaY: args.deltaY,
+            clientX: bounds.left + 150, clientY: bounds.top + 150, bubbles: true, cancelable: true }));
+    }, { modifiers, deltaY });
+    expect(await wheel({}, -100)).toBe(true);
+    await expect(page.locator("#zoom-reset")).toHaveText("110%");
+    expect(await wheel({ ctrlKey: true }, -100)).toBe(false);
+    await expect(page.locator("#zoom-reset")).toHaveText("120%");
+    expect(await wheel({ metaKey: true }, 100)).toBe(false);
+    await expect(page.locator("#zoom-reset")).toHaveText("110%");
+    await page.waitForTimeout(2200);
+    expect((await task.boundingBox()).width).toBeCloseTo(originalWidth * 1.1, 0);
+    await task.click();
+    await expect(page.locator("#task-drawer")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(task).toBeFocused();
+    await page.locator('[data-view="design"]').click();
+    await expect(page.locator("#graph .phase-map")).toHaveCSS("zoom", "1.1");
+    for (let i = 0; i < 20; i++) await wheel({ ctrlKey: true }, -100);
+    await expect(page.locator("#zoom-reset")).toHaveText("200%");
+    await expect(page.locator("#zoom-in")).toBeDisabled();
+    await page.locator("#zoom-reset").click();
+    await expect(page.locator("#graph .phase-map")).toHaveCSS("zoom", "1");
+    for (let i = 0; i < 20; i++) await wheel({ ctrlKey: true }, 100);
+    await expect(page.locator("#zoom-reset")).toHaveText("50%");
+    await expect(page.locator("#zoom-out")).toBeDisabled();
+    await page.locator("#zoom-reset").click();
+    await page.locator('[data-view="live"]').click();
+    await expect(page.locator("#graph .flow-surface")).toHaveCSS("zoom", "1");
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.locator("#toggle-workspace").click();
+    await wheel({ ctrlKey: true }, -100);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await expect(page.locator("#error")).toBeHidden();
 });
 
 test("agreed rework remains visibly incomplete rather than a green assignment PASS", async ({ page }) => {
@@ -148,6 +296,7 @@ test("shows unfinished task context, opens unstarted pending tasks, and refreshe
                 .run(status, pending ? null : Date.now() - 1000));
             await expect(page.locator("#agents .status > span")).toHaveText(status, { timeout: 6000 });
             await expect(page.locator("#graph .flow-node.task")).toHaveCount(pending ? 0 : 1);
+            await page.locator(`[data-activity-view="${pending ? "agents" : "flowchart"}"]`).click();
             const task = pending ? page.locator("#agents .agent-open") : page.locator("#graph .flow-node.task");
             await task.click();
             await expect(page.locator("#task-drawer")).toBeVisible();
@@ -208,14 +357,17 @@ test("unifies live phase/agent activity, historical outcomes and export-only des
     await page.locator('[data-phase="p1"]').click();
     await expect(page.locator("#inspector")).toContainText("Build");
     await expect(page.locator("#progress .progress-row")).toHaveCount(200);
+    await page.locator('[data-activity-view="progress"]').click();
     await page.locator("#older-progress").click();
     await expect(page.locator("#progress .progress-row")).toHaveCount(400);
     await page.locator("#older-progress").click();
     await expect(page.locator("#progress .progress-row")).toHaveCount(405);
     await expect(page.locator("#older-progress")).toBeHidden();
+    await page.locator('[data-activity-view="agents"]').click();
     await page.locator("#attempt").selectOption("1");
     await expect(page.locator("#progress .progress-row")).toHaveCount(199);
     await page.locator("#attempt").selectOption("");
+    await page.locator('[data-activity-view="flowchart"]').click();
     await page.locator("#clear-phase").click();
 
     await page.locator('[data-view="history"]').click();
@@ -405,10 +557,12 @@ test("grows an observed-only parallel flow, keeps task cards live, queries evide
         await expect(page.locator("#task-details")).toContainText("workflow-doer");
         await expect(page.locator("#task-drawer")).toBeInViewport();
         await page.locator("#close-task").click();
+        await page.locator('[data-activity-view="query"]').click();
         await page.locator("#team-question").fill("Who is working?");
         await page.locator("#team-query button").click();
         await expect(page.locator("#team-answer")).toContainText("Implement API contract");
         await expect(page.locator("#team-answer")).toContainText("NOT AN AGENT REPLY");
+        await page.locator('[data-activity-view="flowchart"]').click();
         await ui.click();
         local.mutate((db) => {
             db.prepare("UPDATE workflow_agents SET status = 'completed', completed_at_ms = ? WHERE run_id = 'live-run' AND agent_id IN ('ui','api')").run(start + 2000);
@@ -429,9 +583,11 @@ test("grows an observed-only parallel flow, keeps task cards live, queries evide
         await page.locator("#graph .end").click();
         await expect(page.locator("#task-details")).toContainText("Choose a release target");
         await page.keyboard.press("Escape");
+        await page.locator('[data-activity-view="query"]').click();
         await page.locator("#team-question").fill("Why did it stop?");
         await page.locator("#team-query button").click();
         await expect(page.locator("#team-answer")).toContainText("Choose a release target");
+        await page.locator('[data-activity-view="flowchart"]').click();
         local.mutate((db) => db.exec(`UPDATE workflow_runs SET result_json = '{"status":"success"}' WHERE run_id = 'live-run'`));
         await expect(page.locator("#graph .end.success")).toHaveCount(1, { timeout: 6000 });
         local.mutate((db) => db.exec(`UPDATE workflow_runs SET status = 'error', result_json = NULL, error = 'Validation failed' WHERE run_id = 'live-run';

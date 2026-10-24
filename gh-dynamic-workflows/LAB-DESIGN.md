@@ -40,6 +40,36 @@ concrete YAML roles, stable doer kinds/labels and historical Studio remain intac
 Read-only coordination uses the ordinary reviewer profile/tools.
 `scheduling.mjs` owns the dependency-ready queue, longest-downstream estimates,
 named assignment resources and separate do-er/reviewer agent capacity.
+`continuation.mjs` owns continuation transport validation and the shared
+work-conserving instructions. The accepted decision and guiding principles are
+in [DELIVERY-PRINCIPLES.md](DELIVERY-PRINCIPLES.md).
+
+The 2026-10-20 amendment replaces fail-fast release traversal with retained
+per-sprint stage/task state. Independent approved sprints continue after one
+branch blocks; explicit whole-sprint dependencies still wait. Partial sprints
+are not marked completed and count against an explicit entered-sprint cap.
+After runnable planned work settles, the existing SprintArchitectureLoop and
+SprintPlanLoop audit blocker blast radius and feasible construction/splits,
+approved release backlog and bounded evidence discovery. New scoped amendment
+graphs cite approved source sprints/criteria and share existing resources and
+agent capacities. They cannot introduce live DevOps before its original stage.
+
+Continuation may request exact blocker reassessment on changed authoritative
+evidence or necessary newly accepted handoffs. Only those handoffs gate that
+reassessment; accepted independent tasks/stages are reused. A blocked consumer's
+descendants are reconsidered after its real prerequisite is accepted. Each
+reassessment has a deterministic durable-step suffix and original owner/reviews;
+it never automatically promotes an incomplete task or resets a capped/error
+invocation. Per-sprint document/audit bindings survive intervening sprints.
+
+Only substantive accepted construction, execution or successful reassessment
+causes another exhaustion audit. Planning/audit agreement alone does not
+manufacture progress. Unchanged exhaustion does not poll. Local execution
+errors remain explicitly retained and are raised after independent release
+work drains; cancellation propagates without converting it into a local block.
+Final non-success results expose accepted work, partial/pending sprints,
+blockers and audit references in `delivery`. This is an application waiting
+checkpoint, not SDK pause/resume transport or exactly-once effects.
 
 The 13 leaf loops are Architecture, User Experience, Release Plan, Sprint
 Design, Sprint Architecture, Sprint Plan, UI Developer Work, Developer Work,
@@ -137,8 +167,9 @@ and a `blocked`/`no-progress` result retains the counter and unresolved feedback
 Omit total round and sprint limits to allow unlimited productive work. This
 opt-in safeguard does not change YAML agreement, introduce a review stage or
 preempt an individual agent call; semantic progress remains reviewer-judged.
-An agreed human-input blocker, stagnation stop or reached user limit ends with an explicit
-non-success result. Real project permissions, credentials, actual user approvals,
+An agreed human-input blocker or stagnation stops its affected invocation, not
+independent release construction. Exhaustion or reached explicit user limits
+ends with a non-success application checkpoint. Real project permissions, credentials, actual user approvals,
 scientific data provenance and product acceptance requirements are not removed.
 The shared `run.mjs` launcher keeps full CLI logs/results in unique ignored
 directories and prints a short application outcome, stopped loop, reason and

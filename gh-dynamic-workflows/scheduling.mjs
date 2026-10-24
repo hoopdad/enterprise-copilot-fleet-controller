@@ -80,8 +80,10 @@ export function createResourceScheduler(signal) {
 }
 
 export function scheduleTasks(tasks, execute, { priorities = criticalPathPriorities(tasks), signal,
-    resources = createResourceScheduler(signal), replan } = {}) {
-    const pending = new Set(tasks.map((task) => task.id)), results = new Map(), failures = new Map();
+    resources = createResourceScheduler(signal), replan, retainedResults = new Map(), settleErrors = false } = {}) {
+    const results = new Map(tasks.filter((task) => retainedResults.has(task.id) &&
+        retainedResults.get(task.id).status !== "not-run").map((task) => [task.id, retainedResults.get(task.id)]));
+    const pending = new Set(tasks.filter((task) => !results.has(task.id)).map((task) => task.id)), failures = new Map();
     const order = tasks.map((task, index) => ({ task, index }))
         .sort((a, b) => priorities.get(b.task.id) - priorities.get(a.task.id) || a.index - b.index);
     let active = 0;
@@ -123,7 +125,7 @@ export function scheduleTasks(tasks, execute, { priorities = criticalPathPriorit
                 }
             } while (changed && pending.size);
             if (!active) {
-                if (failures.size) reject(new AggregateError([...failures.values()],
+                if (failures.size && !settleErrors) reject(new AggregateError([...failures.values()],
                     `Assigned work execution failed for ${[...failures.keys()].join(", ")}; no completion was recorded. ` +
                     `Causes: ${[...failures].map(([id, error]) => `${id}: ${String(error?.message ?? error)}`).join("; ")}`));
                 else if (pending.size) reject(new Error(`No ready assignments: ${[...pending].join(", ")}`));

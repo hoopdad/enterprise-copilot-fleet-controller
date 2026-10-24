@@ -79,6 +79,17 @@ test("stagnation stop evidence survives concise reporting without treating SDK c
     assert.match(text, /Still blocked on the same failing test/);
 });
 
+test("waiting reports retained construction and partial sprints without disguising incomplete delivery", () => {
+    const delivery = { state: "waiting", waitReason: "work-exhausted", acceptedWork: [{ taskId: "api" }, { taskId: "ui" }],
+        partialSprints: [{ id: "s1" }], pendingSprints: [{ id: "s2" }], blockedWork: [{ key: "classifier" }],
+        continuationAudits: [{ key: "audit" }] };
+    const outcome = describeOutcome(envelope(), { status: "needs-input", delivery });
+    assert.equal(outcome.exitCode, 2);
+    assert.deepEqual(outcome.delivery, delivery);
+    assert.match(formatOutcome(outcome, {}), /2 accepted assignments; 1 partial sprints; 1 pending sprints; 1 unresolved blockers/);
+    assert.match(formatOutcome(outcome, {}), /Waiting: work-exhausted/);
+});
+
 async function fixture(t) {
     const cwd = await mkdtemp(path.join(os.tmpdir(), "workflow-report-"));
     t.after(() => rm(cwd, { recursive: true, force: true }));

@@ -155,6 +155,14 @@ adds no YAML stages and does not change the generated fleet's separate governanc
 or deployment policy. The shared writing profile is `workflow-owner`; the
 concrete loop roles remain unchanged.
 
+The accepted [work-conserving delivery principles](gh-dynamic-workflows/DELIVERY-PRINCIPLES.md)
+require the optional workflows to continue independent approved construction
+across partial sprints instead of stopping the release at its first blocked
+stream. Existing Architect/Scrum Master loops audit feasible source/component/
+flow work and exact evidence-backed reassessments before an incomplete waiting
+checkpoint. Original acceptance, permissions, cloud tests and explicit limits
+remain binding; this does not change the generated fleet.
+
 The optional [Workflow Studio canvas](gh-dynamic-workflows/studio/README.md)
 combines design drafts, live observation and historical workflow results.
 It can observe an already-running local project without changing that project.

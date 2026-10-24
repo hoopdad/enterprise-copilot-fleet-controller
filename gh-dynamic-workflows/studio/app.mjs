@@ -4,7 +4,8 @@ const $ = (id) => document.getElementById(id);
 const state = {
     design: null, snapshot: null, workflow: null, view: "live", filter: "all",
     selection: null, phase: null, follow: true, drafts: new Map(), sourceFile: null,
-    progress: [], progressKey: null, oldestSeq: null, hasOlder: false, polling: false, task: null,
+    progress: [], progressKey: null, oldestSeq: null, hasOlder: false, polling: false, task: null, graphZoom: 100,
+    activityView: "flowchart",
 };
 
 function element(tag, text, className) {
@@ -130,8 +131,7 @@ function renderHeading() {
     $("graph-layer").hidden = !design;
     $("graph-layer").querySelector('[value="contract"]').disabled = !state.design?.contract;
     $("results-panel").hidden = state.view !== "history";
-    $("progress-panel").hidden = design;
-    $("team-panel").hidden = design;
+    renderActivityView();
     $("stop-notice").hidden = design || !current;
     $("graph-legend").hidden = design;
     $("clear-phase").textContent = design ? "All phases" : "Clear selection";
@@ -170,9 +170,44 @@ function renderHeading() {
         `${current?.notice ?? "No workflow data available."} Cross-session adapter: experimental local storage schema v1, not a supported cross-session SDK connection.`;
 }
 
+function renderActivityView() {
+    const design = state.view === "design";
+    $("activity-views").hidden = design;
+    for (const button of document.querySelectorAll("[data-activity-view]")) {
+        const selected = button.dataset.activityView === state.activityView;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-pressed", String(selected));
+        const visible = design
+            ? ["flowchart", "agents", "inspector"].includes(button.dataset.activityView)
+            : selected;
+        $(button.getAttribute("aria-controls")).hidden = !visible;
+    }
+    $("detail-grid").hidden = !design && !["agents", "inspector"].includes(state.activityView);
+    $("detail-grid").classList.toggle("single-view", !design);
+}
+
+function setGraphZoom(value, pointer) {
+    const graph = $("graph");
+    const surface = graph.querySelector(".flow-surface, .phase-map");
+    const previous = state.graphZoom;
+    state.graphZoom = Math.max(50, Math.min(200, value));
+    $("zoom-reset").textContent = `${state.graphZoom}%`;
+    $("zoom-out").disabled = state.graphZoom === 50;
+    $("zoom-in").disabled = state.graphZoom === 200;
+    if (!surface) return;
+    const before = surface.getBoundingClientRect();
+    const viewport = graph.getBoundingClientRect();
+    const anchor = pointer ?? { x: viewport.left + graph.clientWidth / 2, y: viewport.top + graph.clientHeight / 2 };
+    surface.style.zoom = state.graphZoom / 100;
+    const after = surface.getBoundingClientRect();
+    const ratio = state.graphZoom / previous;
+    graph.scrollLeft += after.left - before.left + (anchor.x - before.left) * (ratio - 1);
+    graph.scrollTop += after.top - before.top + (anchor.y - before.top) * (ratio - 1);
+}
+
 function renderGraph() {
     const design = state.view === "design";
-    $("graph").className = design ? "phase-map" : "execution-map";
+    $("graph").className = design ? "design-map" : "execution-map";
     $("observed-phases").hidden = design;
     if (!design) { renderObservedGraph(); return; }
     $("graph").setAttribute("aria-label", "Declared workflow phase outline");
@@ -186,6 +221,9 @@ function renderGraph() {
             : "Retained run phases, not today's source. Visited does not mean accepted.";
     const graph = $("graph");
     graph.replaceChildren();
+    const surface = element("div", null, "phase-map");
+    surface.style.zoom = state.graphZoom / 100;
+    graph.append(surface);
     for (const [index, node] of nodes.entries()) {
         const status = node.status ?? "not_started";
         const button = element("button", null, `phase-node ${status}${state.phase === node.id ? " selected" : ""}`);
@@ -204,9 +242,9 @@ function renderGraph() {
             state.phase = state.phase === node.id ? null : node.id;
             renderGraph(); renderAgents(); renderInspector(); renderProgress();
         });
-        graph.append(button);
+        surface.append(button);
     }
-    if (!nodes.length) empty(graph, design ? "No statically resolvable phases. Use the source workbench; dynamic metadata is not guessed." : "No observed phases for this run.");
+    if (!nodes.length) empty(surface, design ? "No statically resolvable phases. Use the source workbench; dynamic metadata is not guessed." : "No observed phases for this run.");
     $("clear-phase").hidden = !state.phase;
 }
 
@@ -236,6 +274,7 @@ function renderObservedGraph() {
     $("clear-phase").hidden = !state.phase && !state.task;
     if (!current) { empty(graph, "No recorded run selected."); return; }
     const surface = element("div", null, "flow-surface");
+    surface.style.zoom = state.graphZoom / 100;
     surface.style.width = `${flow.width}px`;
     surface.style.height = `${flow.height}px`;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -646,8 +685,9 @@ function closeTaskDetails() {
     state.task = null;
     if ($("task-drawer").open) $("task-drawer").close();
     renderGraph(); renderInspector();
-    const button = [...$("graph").querySelectorAll("[data-task]")].find((item) => item.dataset.task === selected)
-        ?? [...$("agents").querySelectorAll("[data-agent-task]")].find((item) => item.dataset.agentTask === selected);
+    const button = state.activityView === "agents"
+        ? [...$("agents").querySelectorAll("[data-agent-task]")].find((item) => item.dataset.agentTask === selected)
+        : [...$("graph").querySelectorAll("[data-task]")].find((item) => item.dataset.task === selected);
     button?.focus({ preventScroll: true });
 }
 $("close-task").addEventListener("click", closeTaskDetails);
@@ -682,12 +722,33 @@ document.querySelectorAll("[data-view]").forEach((button) => button.addEventList
     state.task = null;
     render();
 }));
+document.querySelectorAll("[data-activity-view]").forEach((button) => button.addEventListener("click", () => {
+    state.activityView = button.dataset.activityView;
+    renderActivityView();
+}));
 document.querySelectorAll("[data-filter]").forEach((button) => button.addEventListener("click", () => {
     state.filter = button.dataset.filter;
     renderRunList();
 }));
 $("run-search").addEventListener("input", renderRunList);
 $("agent-search").addEventListener("input", renderAgents);
+$("toggle-workspace").addEventListener("click", () => {
+    const collapsed = document.querySelector(".workspace").classList.toggle("workspace-collapsed");
+    $("workspace-panel").hidden = collapsed;
+    const button = $("toggle-workspace");
+    button.textContent = collapsed ? ">>" : "<<";
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.setAttribute("aria-label", collapsed ? "Show workspace" : "Hide workspace");
+    button.title = collapsed ? "Show workspace" : "Hide workspace";
+});
+$("zoom-in").addEventListener("click", () => setGraphZoom(state.graphZoom + 10));
+$("zoom-out").addEventListener("click", () => setGraphZoom(state.graphZoom - 10));
+$("zoom-reset").addEventListener("click", () => setGraphZoom(100));
+$("graph").addEventListener("wheel", (event) => {
+    if ((!event.ctrlKey && !event.metaKey) || event.deltaY === 0) return;
+    event.preventDefault();
+    setGraphZoom(state.graphZoom + (event.deltaY < 0 ? 10 : -10), { x: event.clientX, y: event.clientY });
+}, { passive: false });
 $("attempt").addEventListener("change", renderProgress);
 $("graph-layer").addEventListener("change", () => { state.phase = null; renderGraph(); renderInspector(); });
 $("clear-phase").addEventListener("click", () => { state.phase = null; state.task = null; render(); });

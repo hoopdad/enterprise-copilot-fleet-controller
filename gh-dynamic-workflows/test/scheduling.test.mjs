@@ -89,6 +89,38 @@ test("only dependency-ready tasks execute, and a blocked branch does not stop un
     assert.equal(results[1].status, "agreed");
 });
 
+test("retained task outcomes preserve accepted and blocked work but recalculate previously unready descendants", async () => {
+    const accepted = { status: "agreed", taskId: "accepted" }, blocked = { status: "needs-input", taskId: "blocked" };
+    const retainedResults = new Map([["accepted", accepted], ["blocked", blocked],
+        ["descendant", { status: "not-run" }], ["irrelevant", { status: "agreed" }]]);
+    const ran = [];
+    const tasks = [task("accepted"), task("blocked"), task("descendant", ["accepted"])];
+    const result = await scheduleTasks(tasks, async (assignment) => {
+        ran.push(assignment.id);
+        return { status: "agreed", taskId: assignment.id };
+    }, { retainedResults });
+    assert.deepEqual(ran, ["descendant"]);
+    assert.equal(result[0], accepted);
+    assert.equal(result[1], blocked);
+    assert.equal(result[2].status, "agreed");
+    assert.equal(retainedResults.get("descendant").status, "not-run");
+});
+
+test("settled error mode retains real failures while draining independent work and leaving blocked descendants unrun", async () => {
+    const ran = [];
+    const result = await scheduleTasks([task("failed"), task("after-failed", ["failed"]), task("independent")],
+        async (assignment) => {
+            ran.push(assignment.id);
+            if (assignment.id === "failed") throw new Error("Exact original execution failure.");
+            return { status: "agreed" };
+        }, { settleErrors: true });
+    assert.deepEqual(ran, ["failed", "independent"]);
+    assert.equal(result[0].status, "error");
+    assert.match(result[0].reason, /Exact original execution failure/);
+    assert.equal(result[1].status, "not-run");
+    assert.equal(result[2].status, "agreed");
+});
+
 test("exclusive resources serialize conflicting assignments, but not unrelated work", async () => {
     const held = deferred(), started = [];
     const tasks = [

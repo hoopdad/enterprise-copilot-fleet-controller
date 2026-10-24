@@ -61,7 +61,11 @@ No limits are invented; optionally supply positive `maxSprints` and
 For unlimited productive work, omit those caps and supply
 `"maxNoProgressRounds": 10` instead: stop only after ten consecutive rounds
 without new progress verified by every original reviewer, or on confirmed
-human-input needs. See the README for evidence reporting and the safeguard's
+human-input needs, for that invocation. Independent approved release construction
+continues across partial sprints. Existing Architect/Scrum Master loops audit
+feasible splits and approved backlog before an incomplete waiting checkpoint.
+An explicit sprint cap counts entered partial sprints too. See
+[DELIVERY-PRINCIPLES.md](DELIVERY-PRINCIPLES.md) and the README for evidence reporting and the safeguard's
 round-boundary limitations. Do not replace an installed runtime during an
 active run.
 

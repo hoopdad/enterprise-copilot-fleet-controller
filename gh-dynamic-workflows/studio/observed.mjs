@@ -172,8 +172,20 @@ export function outcome(record, { agent = false } = {}) {
 export function stopReason(run) {
     const result = run.result;
     const reason = run.error || run.failure?.message || run.failure?.reason ||
-        (typeof result === "object" && result ? result.reason ?? result.message ?? result.stopReason : null) || run.reason;
-    if (reason) return typeof reason === "string" ? reason : JSON.stringify(reason);
+        (typeof result === "object" && result ? result.reason ?? result.message ?? result.stopReason ?? result.summary : null) || run.reason;
+    if (reason) {
+        const text = typeof reason === "string" ? reason : JSON.stringify(reason);
+        const delivery = result?.delivery;
+        if (delivery?.state === "waiting" && [delivery.acceptedWork, delivery.partialSprints, delivery.pendingSprints, delivery.blockedWork]
+            .every((items) => Array.isArray(items))) {
+            const state = delivery.waitReason === "work-exhausted" ? "Reviewed executable work exhausted"
+                : delivery.waitReason === "explicit-limit" ? "Explicit user limit reached"
+                    : delivery.waitReason === "continuation-review" ? "Continuation review incomplete"
+                        : delivery.waitReason === "release-closeout" ? "Release closeout incomplete" : "Prerequisite planning incomplete";
+            return `${text}\n${state}: ${delivery.acceptedWork.length} accepted assignments retained; ${delivery.partialSprints.length} partial sprints; ${delivery.pendingSprints.length} pending sprints; ${delivery.blockedWork.length} unresolved blockers. Delivery remains incomplete; this checkpoint is not a live SDK pause.`;
+        }
+        return text;
+    }
     if (run.stale) return "Execution lease expired; current activity cannot be confirmed.";
     if (run.status === "running") return "No stop recorded; showing the latest durable observations.";
     return outcome(run).label === "Completed; delivery unconfirmed"

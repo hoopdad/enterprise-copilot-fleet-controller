@@ -42,6 +42,14 @@ explicit exception to earlier no-added-gate prose, not a new YAML stage or
 permission expansion. Actual defects remain blockers; deferred/declined
 enhancements do not. See LAB-CONTRACT.md for structured decision validation.
 
+On 2026-10-20 the user also authorized work-conserving release traversal:
+localize blockers, retain partial sprints and continue all feasible approved
+construction before waiting. Existing Architect/Scrum Master loops assess
+source/component/flow readiness, splits and later backlog; exact evidence-backed
+reassessments preserve original acceptance. This explicitly supersedes the old
+runtime's first-incomplete-sprint/stage return, not YAML roles, real prerequisites,
+DevOps cloud-test requirements or permissions. See DELIVERY-PRINCIPLES.md.
+
 ## Platform versus project policy
 
 The installed CLI `1.0.100-1` SDK `docs/workflows.md` documents `defineWorkflow`,

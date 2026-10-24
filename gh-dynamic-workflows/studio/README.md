@@ -60,6 +60,18 @@ In design mode, literal phase titles can also be edited from the node inspector;
 this changes only the declaration in the source draft, not matching `phase()`
 calls or other references. Preview pending source edits before node edits.
 Select a run to pin it; **Follow latest live run** returns to automatic selection.
+In live and history modes, the five activity cards select one view at a time:
+**Team Activity Flowchart** (the default), **Progress Journal**, **Query Team
+Activity**, **Agent Activity**, or **Inspector**. The selection survives refreshes
+and lifecycle/run changes; filters and query text are retained when switching.
+Design mode keeps the phase outline, source workbench and inspector together.
+Use **<<** to collapse the Workspace/run selector into a narrow rail and **>>**
+to restore it without changing the selected run, view or filters. Flowchart
+controls zoom text, cards and connectors together from **50% to 200%**; select
+the percentage to reset to 100%. **Ctrl + mouse wheel** (or **Command + wheel**)
+over the chart zooms around the pointer; an unmodified wheel still scrolls.
+Zoom and collapse remain in effect during live refresh and view changes within
+the open pane. They do not change workflow execution or saved source.
 Feedback-governance labels identify read-only Scrum Master triage, Architect
 scope advice and Product Owner scope decisions, not extra acceptance reviewers.
 The `workflow-owner` profile retains stable doer labels; historical
@@ -91,10 +103,15 @@ appears only with an explicit action and supporting evidence. Report agreement
 does not change a card's unverified flow into a working one.
 
 Pending assignments can reuse their exact retained SprintPlan task card,
-including replacement scope and planning round. Reviewer/feedback-coordinator
+including replacement/continuation scope, resumed assignments and planning round. Reviewer/feedback-coordinator
 context describes review/coordination rather than pretending to implement the
 planned change. Actual final cards supersede planned context; historical tasks
 without semantic fields keep their supported legacy details, not guessed causes.
+Work-conserving waiting checkpoints show accepted assignment, partial/pending
+sprint and unresolved-blocker counts alongside the actual stop reason. These
+are retained construction, not waived acceptance or a live SDK pause. Studio
+remains read-only: collecting answers and resuming work in another session
+requires an authenticated connection to its owning runtime, not SQLite writes.
 
 Verbose context and
 outcomes use a local extractive summary: a few-word heading, a two-sentence
